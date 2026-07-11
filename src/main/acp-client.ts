@@ -47,7 +47,7 @@ export function normalizeModelState(value: unknown): ModelState | undefined {
       if (typeof effort.id !== 'string' || typeof effort.value !== 'string' || typeof effort.label !== 'string') return []
       return [{ id: effort.id, value: effort.value, label: effort.label, ...(typeof effort.description === 'string' ? { description: effort.description } : {}), ...(typeof effort.default === 'boolean' ? { default: effort.default } : {}) }]
     }) : []
-    return [{ modelId: model.modelId, name: model.name, ...(typeof model.description === 'string' ? { description: model.description } : {}), ...(typeof meta.reasoningEffort === 'string' ? { currentReasoningEffort: meta.reasoningEffort } : {}), reasoningEfforts }]
+    return [{ modelId: model.modelId, name: model.name, ...(typeof model.description === 'string' ? { description: model.description } : {}), ...(typeof meta.reasoningEffort === 'string' ? { currentReasoningEffort: meta.reasoningEffort } : {}), ...(typeof meta.totalContextTokens === 'number' ? { totalContextTokens: meta.totalContextTokens } : {}), reasoningEfforts }]
   })
   return { currentModelId: source.currentModelId, availableModels }
 }
@@ -101,9 +101,20 @@ export class GrokAcpClient {
     const initialized = await this.context.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, plan: {} },
-      clientInfo: { name: 'Grok Build GUI', version: '0.1.1' }
+      clientInfo: { name: 'Grok Build GUI', version: '0.2.0' }
     })
     this.capabilities = normalizeCapabilities(initialized.agentCapabilities as RawCapabilities | undefined)
+    const meta = initialized._meta && typeof initialized._meta === 'object' ? initialized._meta as Record<string, unknown> : {}
+    const modelState = normalizeModelState(meta.modelState)
+    if (modelState) this.capabilities.modelState = modelState
+    if (Array.isArray(meta.availableCommands)) {
+      this.capabilities.commands = meta.availableCommands.flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const command = item as Record<string, unknown>
+        if (typeof command.name !== 'string') return []
+        return [{ name: command.name, ...(typeof command.description === 'string' ? { description: command.description } : {}) }]
+      })
+    }
     return this.capabilities
   }
 
@@ -150,6 +161,10 @@ export class GrokAcpClient {
   async setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<SetSessionConfigOptionResponse> {
     const request = typeof value === 'boolean' ? { sessionId, configId, value, type: 'boolean' as const } : { sessionId, configId, value }
     return this.requireContext().request(acp.methods.agent.session.setConfigOption, request)
+  }
+
+  async getBilling(): Promise<unknown> {
+    return this.requireContext().request('_x.ai/billing', {})
   }
 
   respondPermission(requestId: string, optionId: string): void {

@@ -4,6 +4,8 @@ out/
 dist/
 coverage/
 outputs/installer/
+outputs/ui-smoke/
+outputs/release/
 work/*-result.json
 work/live-session-export-*.md
 *.log

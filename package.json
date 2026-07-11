@@ -1,8 +1,10 @@
 {
   "name": "grok-build-gui",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "private": true,
-  "description": "A function-first Windows desktop client for Grok Build CLI",
+  "description": "Unofficial Windows-first control center for Grok Build CLI",
+  "author": "Grok Build Control Center contributors",
+  "license": "MIT",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
@@ -12,13 +14,16 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "build": "npm run typecheck && electron-vite build",
     "package": "npm run test && npm run build && electron-builder --win nsis",
-    "lint": "eslint . --max-warnings=0"
+    "lint": "eslint . --max-warnings=0",
+    "verify": "npm test && npm run lint && npm run typecheck && npm run build",
+    "smoke:ui": "npm run build && node work/ui_feature_smoke.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.2.1",
     "@fontsource-variable/ibm-plex-sans": "^5.2.7",
     "@fontsource-variable/newsreader": "^5.2.8",
     "electron-store": "^10.1.0",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -39,6 +44,7 @@
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "axe-core": "^4.12.1",
     "electron": "^43.1.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^3.0.0",
@@ -53,7 +59,8 @@
   },
   "build": {
     "appId": "tw.jackie.grokbuildgui",
-    "productName": "Grok Build GUI",
+    "productName": "Grok Build Control Center",
+    "artifactName": "Grok-Build-Control-Center-Setup-${version}.${ext}",
     "asar": true,
     "files": [
       "out/**/*",
@@ -63,6 +70,8 @@
       "output": "outputs/installer"
     },
     "win": {
+      "icon": "build/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
       "target": [
         {
           "target": "nsis",
@@ -75,7 +84,11 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Grok Build Control Center"
     }
   }
 }

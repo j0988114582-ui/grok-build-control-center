@@ -1,0 +1,50 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-package:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify source
+        run: npm run verify
+
+      - name: Build unsigned NSIS installer
+        run: npm run package
+
+      - name: Create SBOM and checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force outputs/release | Out-Null
+          npm sbom --sbom-format cyclonedx | Out-File -Encoding utf8 outputs/release/sbom.cdx.json
+          $installer = Get-Item outputs/installer/Grok-Build-Control-Center-Setup-0.3.0.exe
+          $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
+          "$($hash.Hash.ToLower())  $($installer.Name)" | Out-File -Encoding ascii outputs/release/SHA256SUMS.txt
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: grok-build-control-center-windows-x64
+          if-no-files-found: error
+          path: |
+            outputs/installer/Grok-Build-Control-Center-Setup-0.3.0.exe
+            outputs/release/SHA256SUMS.txt
+            outputs/release/sbom.cdx.json

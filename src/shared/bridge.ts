@@ -1,5 +1,5 @@
 import type {
-  AgentCapabilities, AppSettings, CliStatus, ModelState, PermissionRequest, PromptBlock, SessionSummary, UiSessionEvent
+  AgentCapabilities, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock, SessionSummary, SessionUsage, UiSessionEvent
 } from './types'
 
 export type SelectedFile = { path: string; name: string; mimeType?: string; data?: string }
@@ -13,6 +13,9 @@ export interface GrokBridgeApi {
   saveSettings(settings: AppSettings): Promise<AppSettings>
   createSession(cwd: string): Promise<SessionFeatures>
   loadSession(sessionId: string, cwd: string): Promise<SessionFeatures>
+  deleteSession(sessionId: string): Promise<boolean>
+  getUsage(sessionId: string): Promise<SessionUsage | null>
+  getBilling(): Promise<BillingInfo | null>
   sendPrompt(sessionId: string, blocks: PromptBlock[]): Promise<void>
   cancel(sessionId: string): Promise<void>
   setMode(sessionId: string, modeId: string): Promise<void>

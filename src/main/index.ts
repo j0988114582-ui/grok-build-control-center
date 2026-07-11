@@ -6,9 +6,11 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import Store from 'electron-store'
 import { GrokAcpClient } from './acp-client'
+import { BillingCache } from './billing-cache'
 import { parseGrokVersion } from './grok-cli'
-import { listLocalSessions } from './session-index'
+import { listLocalSessions, readSessionUsage } from './session-index'
 import { createDefaultSettings, normalizeSettings } from '../shared/settings'
+import { normalizeBilling } from '../shared/billing'
 import type { AppSettings, CliStatus, PromptBlock } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
@@ -17,8 +19,10 @@ const settingsStore = new Store<AppSettings>({ name: 'settings', defaults })
 let mainWindow: BrowserWindow | null = null
 let acpClient: GrokAcpClient | null = null
 let connectedExecutable = ''
+const billingCache = new BillingCache<unknown>()
 
 const settings = (): AppSettings => normalizeSettings(settingsStore.store, homedir())
+const grokHome = (): string => process.env.GROK_HOME?.trim() || path.join(homedir(), '.grok')
 const send = (channel: string, payload: unknown): void => { mainWindow?.webContents.send(channel, payload) }
 
 async function cliStatus(): Promise<CliStatus> {
@@ -57,12 +61,25 @@ const mimeFor = (file: string): string | undefined => ({
 function registerIpc(): void {
   ipcMain.handle('grok:status', cliStatus)
   ipcMain.handle('grok:connect', async () => (await connectAcp()).start())
-  ipcMain.handle('grok:sessions', () => listLocalSessions(path.join(homedir(), '.grok')))
+  ipcMain.handle('grok:sessions', () => listLocalSessions(grokHome()))
+  ipcMain.handle('grok:usage', (_event, sessionId: string) => readSessionUsage(grokHome(), sessionId))
+  ipcMain.handle('grok:billing', async () => {
+    try {
+      return normalizeBilling(await billingCache.get(async () => (await connectAcp()).getBilling()))
+    } catch {
+      return null
+    }
+  })
+  ipcMain.handle('grok:session:delete', async (_event, sessionId: string) => {
+    if (typeof sessionId !== 'string' || !/^[0-9a-f-]{8,64}$/i.test(sessionId)) throw new Error('Invalid session id')
+    await execFileAsync(settings().grokExecutable, ['sessions', 'delete', sessionId], { windowsHide: true, timeout: 30_000 })
+    return true
+  })
   ipcMain.handle('settings:get', () => settings())
   ipcMain.handle('settings:save', (_event, value: AppSettings) => {
     const next = normalizeSettings(value, homedir())
     settingsStore.store = next
-    if (connectedExecutable && connectedExecutable !== next.grokExecutable) { acpClient?.stop(); acpClient = null }
+    if (connectedExecutable && connectedExecutable !== next.grokExecutable) { acpClient?.stop(); acpClient = null; billingCache.clear() }
     return next
   })
   ipcMain.handle('grok:session:create', async (_event, cwd: string) => (await connectAcp()).createSession(cwd))

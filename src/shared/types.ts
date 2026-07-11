@@ -55,6 +55,7 @@ export type AgentCapabilities = {
   modes: Array<{ id: string; name: string }>
   commands: Array<{ name: string; description?: string }>
   currentModeId?: string
+  modelState?: ModelState
 }
 
 export type ReasoningEffortOption = { id: string; value: string; label: string; description?: string; default?: boolean }
@@ -64,8 +65,37 @@ export type ModelInfo = {
   description?: string
   currentReasoningEffort?: string
   reasoningEfforts: ReasoningEffortOption[]
+  totalContextTokens?: number
 }
 export type ModelState = { currentModelId: string; availableModels: ModelInfo[] }
+
+export type SessionUsage = {
+  sessionId: string
+  contextTokensUsed?: number
+  contextWindowTokens?: number
+  contextWindowUsage?: number
+  turnCount?: number
+  toolCallCount?: number
+}
+
+export type BillingProductUsage = {
+  product: string
+  usagePercent: number
+}
+
+export type BillingInfo = {
+  creditUsagePercent: number
+  currentPeriod?: {
+    type: string
+    start?: string
+    end?: string
+  }
+  billingPeriodStart?: string
+  billingPeriodEnd?: string
+  productUsage: BillingProductUsage[]
+  isUnifiedBillingUser?: boolean
+  prepaidBalance?: number
+}
 
 export type PermissionOption = { optionId: string; name: string; kind: string }
 export type PermissionRequest = { requestId: string; sessionId: string; title: string; options: PermissionOption[] }
@@ -73,6 +103,16 @@ export type PermissionRequest = { requestId: string; sessionId: string; title: s
 export type AppSettings = {
   grokExecutable: string
   theme: 'dark' | 'light'
+  immersion: 'focus' | 'deep'
+  effects: {
+    galaxy: boolean
+    cursor: boolean
+    density: 'low' | 'medium' | 'high'
+    reducedMotion: boolean
+  }
+  sessionTitles: Record<string, string>
+  drafts: Record<string, string>
+  recentCommands: string[]
   fontSize: number
   lineHeight: number
   contentWidth: number

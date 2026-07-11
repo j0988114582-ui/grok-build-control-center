@@ -20,6 +20,15 @@ describe('sessionReducer', () => {
     expect(state.running).toBe(false)
   })
 
+  it('collapses duplicate turn markers with the same status', () => {
+    let state = createSessionState('s1')
+    state = sessionReducer(state, { type: 'event', event: { id: '1', sessionId: 's1', kind: 'turn', status: 'running' } })
+    state = sessionReducer(state, { type: 'event', event: { id: '2', sessionId: 's1', kind: 'turn', status: 'completed', stopReason: 'end_turn' } })
+    state = sessionReducer(state, { type: 'event', event: { id: '3', sessionId: 's1', kind: 'turn', status: 'completed', stopReason: 'end_turn' } })
+    expect(state.events).toHaveLength(2)
+    expect(state.events[1]).toMatchObject({ kind: 'turn', status: 'completed' })
+  })
+
   it('updates an existing tool card instead of appending duplicate progress cards', () => {
     let state = createSessionState('s1')
     state = sessionReducer(state, { type: 'event', event: { id: '1', sessionId: 's1', kind: 'tool', toolCallId: 't1', title: 'Read', status: 'pending' } })

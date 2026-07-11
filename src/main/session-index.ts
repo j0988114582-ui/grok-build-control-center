@@ -1,6 +1,6 @@
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
-import type { SessionSummary } from '../shared/types'
+import type { SessionSummary, SessionUsage } from '../shared/types'
 
 const record = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' ? value as Record<string, unknown> : null
 const text = (value: unknown): string | undefined => typeof value === 'string' && value.trim() ? value : undefined
@@ -52,4 +52,46 @@ export async function listLocalSessions(grokHome: string): Promise<SessionSummar
   }))
   return summaries.filter((item): item is SessionSummary => item !== null)
     .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
+}
+
+export function parseSessionUsage(sessionId: string, value: unknown): SessionUsage {
+  const source = record(value) ?? {}
+  return {
+    sessionId,
+    ...(number(source.contextTokensUsed) !== undefined ? { contextTokensUsed: number(source.contextTokensUsed) } : {}),
+    ...(number(source.contextWindowTokens) !== undefined ? { contextWindowTokens: number(source.contextWindowTokens) } : {}),
+    ...(number(source.contextWindowUsage) !== undefined ? { contextWindowUsage: number(source.contextWindowUsage) } : {}),
+    ...(number(source.turnCount) !== undefined ? { turnCount: number(source.turnCount) } : {}),
+    ...(number(source.toolCallCount) !== undefined ? { toolCallCount: number(source.toolCallCount) } : {})
+  }
+}
+
+async function findSessionDir(grokHome: string, sessionId: string): Promise<string | null> {
+  const sessionsRoot = path.join(grokHome, 'sessions')
+  let groups
+  try {
+    groups = await readdir(sessionsRoot, { withFileTypes: true })
+  } catch {
+    return null
+  }
+  for (const group of groups) {
+    if (!group.isDirectory()) continue
+    const candidate = path.join(sessionsRoot, group.name, sessionId)
+    try {
+      if ((await stat(candidate)).isDirectory()) return candidate
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+export async function readSessionUsage(grokHome: string, sessionId: string): Promise<SessionUsage | null> {
+  const directory = await findSessionDir(grokHome, sessionId)
+  if (!directory) return null
+  try {
+    return parseSessionUsage(sessionId, JSON.parse(await readFile(path.join(directory, 'signals.json'), 'utf8')))
+  } catch {
+    return { sessionId }
+  }
 }

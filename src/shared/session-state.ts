@@ -42,6 +42,8 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
   } else if (event.kind === 'subagent') {
     const index = state.events.findIndex((item) => item.kind === 'subagent' && item.subagentId === event.subagentId)
     events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'subagent' ? { ...item, ...event } : item) : [...state.events, event]
+  } else if (event.kind === 'turn' && last?.kind === 'turn' && last.status === event.status) {
+    events = [...state.events.slice(0, -1), event]
   } else if (event.kind === 'message' && last?.kind === 'message' && last.role === event.role) {
     events = [...state.events.slice(0, -1), { ...last, text: last.text + event.text }]
   } else if (event.kind === 'thought' && last?.kind === 'thought') {

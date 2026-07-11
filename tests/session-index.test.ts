@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseSessionSummary } from '../src/main/session-index'
+import { parseSessionSummary, parseSessionUsage } from '../src/main/session-index'
 
 describe('parseSessionSummary', () => {
   it('normalizes Grok summary.json metadata', () => {
@@ -20,5 +20,26 @@ describe('parseSessionSummary', () => {
 
   it('rejects malformed summaries without an id or cwd', () => {
     expect(parseSessionSummary({ info: { id: 's1' } })).toBeNull()
+  })
+})
+
+describe('parseSessionUsage', () => {
+  it('extracts context quota fields from signals.json', () => {
+    expect(parseSessionUsage('s1', {
+      contextTokensUsed: 186783,
+      contextWindowTokens: 500000,
+      contextWindowUsage: 37,
+      turnCount: 7,
+      toolCallCount: 79,
+      toolsUsed: ['grep']
+    })).toEqual({
+      sessionId: 's1', contextTokensUsed: 186783, contextWindowTokens: 500000,
+      contextWindowUsage: 37, turnCount: 7, toolCallCount: 79
+    })
+  })
+
+  it('tolerates missing or malformed signals payloads', () => {
+    expect(parseSessionUsage('s1', null)).toEqual({ sessionId: 's1' })
+    expect(parseSessionUsage('s1', { contextTokensUsed: 'nope' })).toEqual({ sessionId: 's1' })
   })
 })
