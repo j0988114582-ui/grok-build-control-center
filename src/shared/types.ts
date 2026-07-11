@@ -57,6 +57,16 @@ export type AgentCapabilities = {
   currentModeId?: string
 }
 
+export type ReasoningEffortOption = { id: string; value: string; label: string; description?: string; default?: boolean }
+export type ModelInfo = {
+  modelId: string
+  name: string
+  description?: string
+  currentReasoningEffort?: string
+  reasoningEfforts: ReasoningEffortOption[]
+}
+export type ModelState = { currentModelId: string; availableModels: ModelInfo[] }
+
 export type PermissionOption = { optionId: string; name: string; kind: string }
 export type PermissionRequest = { requestId: string; sessionId: string; title: string; options: PermissionOption[] }
 

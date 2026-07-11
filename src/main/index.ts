@@ -70,6 +70,7 @@ function registerIpc(): void {
   ipcMain.handle('grok:prompt', async (_event, sessionId: string, blocks: PromptBlock[]) => (await connectAcp()).prompt(sessionId, blocks))
   ipcMain.handle('grok:cancel', async (_event, sessionId: string) => (await connectAcp()).cancel(sessionId))
   ipcMain.handle('grok:mode', async (_event, sessionId: string, modeId: string) => (await connectAcp()).setMode(sessionId, modeId))
+  ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort))
   ipcMain.handle('grok:config', async (_event, sessionId: string, configId: string, value: string | boolean) => (await connectAcp()).setConfigOption(sessionId, configId, value))
   ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => acpClient?.respondPermission(requestId, optionId))
   ipcMain.handle('dialog:directory', async () => {

@@ -2,7 +2,7 @@
 
 ## 安裝與啟動
 
-1. 執行 `installer/Grok Build GUI Setup 0.1.0.exe`。
+1. 執行 `installer/Grok Build GUI Setup 0.1.1.exe`。
 2. 從開始選單開啟 **Grok Build GUI**。
 3. 右上角按 **Connect**，連接本機 `C:\Users\111\.grok\bin\grok.exe`。
 
@@ -15,6 +15,7 @@
 - `Ctrl+F` 搜尋目前對話，`Ctrl+K` 搜尋 session，`Ctrl+Shift+P` 開啟命令面板。
 - 向上閱讀時不會被串流強制拉回底部；按「跳到最新」恢復跟隨。
 - 工具、reasoning、plan、subagent 和背景 task 都能獨立展開。
+- 標題列可切換 GROK 提供的模型；支援 reasoning 的模型會顯示 High／Medium／Low effort。
 - 權限請求只顯示 GROK ACP 當次實際提供的合法選項。
 
 ## 附件
@@ -24,6 +25,8 @@
 ## TUI 出口
 
 Compact、Rewind、Plugins、MCP、Memory 等尚無穩定結構化 ACP 介面的功能，請按 session 標題列的終端圖示，在 Windows Terminal 中開啟真正的 GROK TUI。GUI 不模擬終端按鍵。
+
+Session rename、Worktree 與 Fork 在 GROK 0.2.93 ACP 也沒有可用的結構化 method，因此同樣走 TUI 出口。
 
 ## 設定與資料
 

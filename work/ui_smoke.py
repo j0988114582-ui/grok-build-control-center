@@ -14,8 +14,8 @@ window.grokApi = {
   getSettings: async () => ({ grokExecutable: 'C:\\Users\\111\\.grok\\bin\\grok.exe', theme: 'dark', fontSize: 15, lineHeight: 1.65, contentWidth: 920, shortcuts: [] }),
   saveSettings: async (x) => x,
   createSession: async () => ({ sessionId: 'new' }),
-  loadSession: async () => ({}),
-  sendPrompt: async () => {}, cancel: async () => {}, setMode: async () => {}, setConfigOption: async () => {}, respondPermission: async () => {},
+  loadSession: async () => ({ models: { currentModelId: 'grok-4.5', availableModels: [{ modelId: 'grok-4.5', name: 'Grok 4.5', currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'high', value: 'high', label: 'High Effort', default: true },{ id: 'low', value: 'low', label: 'Low Effort' }] }] } }),
+  sendPrompt: async () => {}, cancel: async () => {}, setMode: async () => {}, setModel: async () => {}, setConfigOption: async () => {}, respondPermission: async () => {},
   chooseDirectory: async () => null, chooseFiles: async () => [], exportSession: async () => null, openTui: async () => {}, openExternal: async () => {},
   onEvent: (cb) => { window.__emitEvent = cb; return () => {}; },
   onPermission: (cb) => { window.__emitPermission = cb; return () => {}; },
@@ -36,6 +36,8 @@ with sync_playwright() as p:
     expect(page.get_by_text("Grok 0.2.93", exact=False)).to_be_visible()
     page.get_by_text("Fix tests").click()
     page.wait_for_timeout(150)
+    expect(page.get_by_label("Model")).to_have_value("grok-4.5")
+    expect(page.get_by_label("Reasoning effort")).to_have_value("high")
     page.evaluate("""() => {
       window.__emitEvent({ id:'u', sessionId:'s1', kind:'message', role:'user', text:'請檢查目前的實作與測試狀態。' });
       window.__emitEvent({ id:'a', sessionId:'s1', kind:'message', role:'assistant', text:'## 檢查結果\\n\\n核心測試已執行，以下是目前的結構化事件摘要。' });
@@ -47,6 +49,11 @@ with sync_playwright() as p:
     page.keyboard.press("Control+f")
     expect(page.get_by_placeholder("搜尋目前對話…")).to_be_visible()
     page.get_by_placeholder("搜尋目前對話…").fill("測試")
+    page.evaluate("""() => window.__emitPermission({ requestId:'permission-1', sessionId:'s1', title:'Run harmless smoke command', options:[{ optionId:'once', name:'Allow once', kind:'allow_once' },{ optionId:'reject', name:'Reject', kind:'reject_once' }] })""")
+    expect(page.get_by_text("ACTION REQUIRES APPROVAL")).to_be_visible()
+    expect(page.get_by_text("Allow once")).to_be_visible()
+    page.get_by_text("Allow once").click()
+    expect(page.get_by_text("ACTION REQUIRES APPROVAL")).not_to_be_visible()
     page.screenshot(path=str(OUTPUT), full_page=True)
     print(json.dumps({"screenshot": str(OUTPUT), "console_errors": errors, "title": page.title()}, ensure_ascii=False))
     browser.close()

@@ -4,7 +4,12 @@ let sequence = 0
 const id = (sessionId: string, type: string): string => `${sessionId}:${type}:${++sequence}`
 const textOf = (value: unknown): string => {
   if (typeof value === 'string') return value
-  if (value && typeof value === 'object' && 'text' in value && typeof value.text === 'string') return value.text
+  if (Array.isArray(value)) return value.map(textOf).filter(Boolean).join('\n')
+  if (value && typeof value === 'object') {
+    if ('text' in value && typeof value.text === 'string') return value.text
+    if ('content' in value) return textOf(value.content)
+    if ('output' in value) return textOf(value.output)
+  }
   return ''
 }
 const stringOf = (value: unknown, fallback = ''): string => typeof value === 'string' ? value : fallback
@@ -30,8 +35,8 @@ export function normalizeAcpUpdate(sessionId: string, update: Record<string, unk
         toolCallId: stringOf(update.toolCallId),
         title: stringOf(update.title, 'Tool call'),
         status: stringOf(update.status, updateType === 'tool_call' ? 'pending' : 'running'),
-        rawInput: update.rawInput,
-        output: textOf(update.content)
+        ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+        ...(textOf(update.content) ? { output: textOf(update.content) } : {})
       }
     case 'plan':
       return { id: eventId, sessionId, kind: 'plan', entries: Array.isArray(update.entries) ? update.entries as PlanEntry[] : [] }

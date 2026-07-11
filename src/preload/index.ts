@@ -13,6 +13,7 @@ const api: GrokBridgeApi = {
   sendPrompt: (sessionId, blocks) => ipcRenderer.invoke('grok:prompt', sessionId, blocks),
   cancel: (sessionId) => ipcRenderer.invoke('grok:cancel', sessionId),
   setMode: (sessionId, modeId) => ipcRenderer.invoke('grok:mode', sessionId, modeId),
+  setModel: (sessionId, modelId, reasoningEffort) => ipcRenderer.invoke('grok:model', sessionId, modelId, reasoningEffort),
   setConfigOption: (sessionId, configId, value) => ipcRenderer.invoke('grok:config', sessionId, configId, value),
   respondPermission: (requestId, optionId) => ipcRenderer.invoke('grok:permission', requestId, optionId),
   chooseDirectory: () => ipcRenderer.invoke('dialog:directory'),

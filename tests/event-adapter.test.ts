@@ -22,6 +22,12 @@ describe('normalizeAcpUpdate', () => {
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'turn_completed', stop_reason: 'end_turn' })).toMatchObject({ kind: 'turn', status: 'completed', stopReason: 'end_turn' })
   })
 
+  it('extracts nested ACP text content from tool progress updates', () => {
+    expect(normalizeAcpUpdate('s', { sessionUpdate: 'tool_call_update', toolCallId: 't', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'command output' } }] })).toMatchObject({
+      kind: 'tool', toolCallId: 't', status: 'completed', output: 'command output'
+    })
+  })
+
   it('maps commands, mode, usage and compaction updates for desktop controls', () => {
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'Compact context' }] })).toMatchObject({ kind: 'commands', commands: [{ name: 'compact', description: 'Compact context' }] })
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'current_mode_update', currentModeId: 'plan' })).toMatchObject({ kind: 'mode', modeId: 'plan' })

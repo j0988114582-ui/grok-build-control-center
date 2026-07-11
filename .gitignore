@@ -3,6 +3,8 @@ out/
 dist/
 coverage/
 outputs/installer/
+work/*-result.json
+work/live-session-export-*.md
 *.log
 *.tsbuildinfo
 .DS_Store

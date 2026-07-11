@@ -11,7 +11,7 @@ import type {
   SessionModeState,
   SetSessionConfigOptionResponse
 } from '@agentclientprotocol/sdk'
-import type { AgentCapabilities, PermissionOption, PermissionRequest, PromptBlock, UiSessionEvent } from '../shared/types'
+import type { AgentCapabilities, ModelState, PermissionOption, PermissionRequest, PromptBlock, UiSessionEvent } from '../shared/types'
 import { normalizeAcpUpdate } from '../shared/event-adapter'
 import { buildAgentArgs } from './grok-cli'
 import { selectPermissionOutcome } from './permissions'
@@ -30,6 +30,26 @@ export function normalizeCapabilities(value: RawCapabilities | undefined): Agent
     modes: [],
     commands: []
   }
+}
+
+export function normalizeModelState(value: unknown): ModelState | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as Record<string, unknown>
+  if (typeof source.currentModelId !== 'string' || !Array.isArray(source.availableModels)) return undefined
+  const availableModels = source.availableModels.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const model = item as Record<string, unknown>
+    if (typeof model.modelId !== 'string' || typeof model.name !== 'string') return []
+    const meta = model._meta && typeof model._meta === 'object' ? model._meta as Record<string, unknown> : {}
+    const reasoningEfforts = Array.isArray(meta.reasoningEfforts) ? meta.reasoningEfforts.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return []
+      const effort = entry as Record<string, unknown>
+      if (typeof effort.id !== 'string' || typeof effort.value !== 'string' || typeof effort.label !== 'string') return []
+      return [{ id: effort.id, value: effort.value, label: effort.label, ...(typeof effort.description === 'string' ? { description: effort.description } : {}), ...(typeof effort.default === 'boolean' ? { default: effort.default } : {}) }]
+    }) : []
+    return [{ modelId: model.modelId, name: model.name, ...(typeof model.description === 'string' ? { description: model.description } : {}), ...(typeof meta.reasoningEffort === 'string' ? { currentReasoningEffort: meta.reasoningEffort } : {}), reasoningEfforts }]
+  })
+  return { currentModelId: source.currentModelId, availableModels }
 }
 
 type PendingPermission = {
@@ -81,22 +101,22 @@ export class GrokAcpClient {
     const initialized = await this.context.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, plan: {} },
-      clientInfo: { name: 'Grok Build GUI', version: '0.1.0' }
+      clientInfo: { name: 'Grok Build GUI', version: '0.1.1' }
     })
     this.capabilities = normalizeCapabilities(initialized.agentCapabilities as RawCapabilities | undefined)
     return this.capabilities
   }
 
-  async createSession(cwd: string): Promise<NewSessionResponse> {
-    const response = await this.requireContext().request(acp.methods.agent.session.new, { cwd, mcpServers: [] })
+  async createSession(cwd: string): Promise<NewSessionResponse & { models?: ModelState }> {
+    const response = await this.requireContext().request(acp.methods.agent.session.new, { cwd, mcpServers: [] }) as NewSessionResponse & { models?: unknown }
     this.updateSessionFeatures(response)
-    return response
+    return { ...response, models: normalizeModelState(response.models) }
   }
 
-  async loadSession(sessionId: string, cwd: string): Promise<LoadSessionResponse> {
-    const response = await this.requireContext().request(acp.methods.agent.session.load, { sessionId, cwd, mcpServers: [] })
+  async loadSession(sessionId: string, cwd: string): Promise<LoadSessionResponse & { models?: ModelState }> {
+    const response = await this.requireContext().request(acp.methods.agent.session.load, { sessionId, cwd, mcpServers: [] }) as LoadSessionResponse & { models?: unknown }
     this.updateSessionFeatures(response)
-    return response
+    return { ...response, models: normalizeModelState(response.models) }
   }
 
   async prompt(sessionId: string, blocks: PromptBlock[]): Promise<void> {
@@ -121,6 +141,10 @@ export class GrokAcpClient {
 
   async setMode(sessionId: string, modeId: string): Promise<void> {
     await this.requireContext().request(acp.methods.agent.session.setMode, { sessionId, modeId })
+  }
+
+  async setModel(sessionId: string, modelId: string, reasoningEffort?: string): Promise<void> {
+    await this.requireContext().request('session/set_model', { sessionId, modelId, ...(reasoningEffort ? { reasoningEffort } : {}) })
   }
 
   async setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<SetSessionConfigOptionResponse> {

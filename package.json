@@ -1,6 +1,6 @@
 {
   "name": "grok-build-gui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "A function-first Windows desktop client for Grok Build CLI",
   "main": "out/main/index.js",

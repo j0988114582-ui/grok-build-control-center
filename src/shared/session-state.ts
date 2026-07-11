@@ -32,7 +32,13 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
   let events = state.events
   if (event.kind === 'tool') {
     const index = state.events.findIndex((item) => item.kind === 'tool' && item.toolCallId === event.toolCallId)
-    events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'tool' ? { ...item, ...event } : item) : [...state.events, event]
+    events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'tool' ? {
+      ...item,
+      ...event,
+      title: event.title === 'Tool call' ? item.title : event.title,
+      rawInput: event.rawInput ?? item.rawInput,
+      output: event.output ?? item.output
+    } : item) : [...state.events, event]
   } else if (event.kind === 'subagent') {
     const index = state.events.findIndex((item) => item.kind === 'subagent' && item.subagentId === event.subagentId)
     events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'subagent' ? { ...item, ...event } : item) : [...state.events, event]
