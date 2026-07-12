@@ -19,6 +19,7 @@
   3. `settings:save` 換執行檔時改走 `disconnectAcp()`（原內聯版漏掉 `acpConnecting = null`），並補發 connected:false 通知讓 UI 立即反映。
   4. a11y：`.event-head em`/`.event-content li small` 亮色主題 contrast 3.0→4.7（#89867d→#6b6759），deep 模式補上原本缺的淺色覆寫——此違規在 axe 是間歇出現（取決於稽核時卡片是否渲染），別當 flaky 忽略。
 - **發布動作**：重打 0.3.2 installer（NotSigned 不變）、SHA256SUMS/SBOM/VERIFICATION/SHARE-MESSAGE 同步新雜湊；GitHub repo + Release 上傳 exe＋SHA256SUMS＋SBOM。雜湊以 `outputs/release/SHA256SUMS.txt` 為準，文件不寫死舊值。
+- **公開位址**：repo https://github.com/j0988114582-ui/grok-build-control-center ；Release https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.3.2 。push 需要 gh token 有 `workflow` scope（repo 含 CI workflow；已於 2026-07-12 用 device flow 補上）。
 - **給 GPT**：宣傳影片若拍到雜湊或 0.3.1 畫面需更新；Release 連結見 README 安裝節。SDK 封閉 union 限制（下一節）仍未動，排功能輪。
 
 ## 實測驗證過的 grok CLI (0.2.93) ACP 事實（別重新猜）

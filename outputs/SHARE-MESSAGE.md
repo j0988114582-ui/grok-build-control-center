@@ -1,6 +1,6 @@
 # 給測試使用者的轉傳訊息
 
-下面這段可以直接貼到 LINE、Messenger 或 Discord；發布 GitHub Release 後，把下載連結與 SHA-256 換成該 Release 的實際內容。
+下面這段可以直接貼到 LINE、Messenger 或 Discord；連結與 SHA-256 已對應 v0.3.2 Release 的實際內容。
 
 ---
 
@@ -8,7 +8,7 @@
 
 它把原本要在黑色終端機裡操作的 Grok Build，變成一般聊天視窗。你不需要會寫程式：選一個資料夾，用中文說「幫我整理這些檔案」或「幫我找出這個程式哪裡壞掉」，Grok 就會一步一步處理；要修改檔案或執行工具時，畫面也會先讓你確認。
 
-下載：`【貼上 GitHub Release 連結】`
+下載：https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.3.2
 
 安裝方式：
 
