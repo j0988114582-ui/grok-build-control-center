@@ -147,11 +147,13 @@ const seededRandom = (seed: number): (() => number) => () => {
   return ((value ^ value >>> 14) >>> 0) / 4294967296
 }
 
+const TIME_WRAP_MS = 36_000_000
+
 class GalaxyEngine implements StarfieldEngine {
   readonly renderer: 'webgl' | 'canvas2d' | 'none'
   private readonly gl: WebGLRenderingContext | null
   private readonly context2d: CanvasRenderingContext2D | null
-  private readonly programs: Programs | null
+  private programs: Programs | null
   private readonly canvasStars: CanvasStar[]
   private frame = 0
   private activity: Exclude<StarfieldActivity, 'error' | 'connect'> = 'idle'
@@ -177,13 +179,17 @@ class GalaxyEngine implements StarfieldEngine {
     this.canvasStars = this.createCanvasStars(densityToStarCount(options.density))
     this.resize = this.resize.bind(this)
     this.onVisibility = this.onVisibility.bind(this)
+    this.onContextLost = this.onContextLost.bind(this)
+    this.onContextRestored = this.onContextRestored.bind(this)
     this.resize()
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(this.resize)
       this.resizeObserver.observe(canvas)
     } else window.addEventListener('resize', this.resize)
     document.addEventListener('visibilitychange', this.onVisibility)
-    this.render(performance.now())
+    canvas.addEventListener('webglcontextlost', this.onContextLost)
+    canvas.addEventListener('webglcontextrestored', this.onContextRestored)
+    if (this.renderer !== 'none') this.render(performance.now())
   }
 
   setActivity(activity: Exclude<StarfieldActivity, 'error' | 'connect'>): void {
@@ -193,7 +199,7 @@ class GalaxyEngine implements StarfieldEngine {
   pulse(activity: 'error' | 'connect'): void {
     this.pulseActivity = activity
     this.pulseUntil = performance.now() + (activity === 'error' ? 760 : 900)
-    if (!this.options.static && !this.frame && !document.hidden) this.frame = requestAnimationFrame((time) => this.render(time))
+    if (!this.options.static && !this.frame && !document.hidden && this.renderer !== 'none') this.frame = requestAnimationFrame((time) => this.render(time))
   }
 
   destroy(): void {
@@ -202,6 +208,8 @@ class GalaxyEngine implements StarfieldEngine {
     this.resizeObserver?.disconnect()
     window.removeEventListener('resize', this.resize)
     document.removeEventListener('visibilitychange', this.onVisibility)
+    this.canvas.removeEventListener('webglcontextlost', this.onContextLost)
+    this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored)
     if (this.gl && this.programs) {
       this.gl.deleteProgram(this.programs.fog)
       this.gl.deleteProgram(this.programs.stars)
@@ -209,18 +217,36 @@ class GalaxyEngine implements StarfieldEngine {
       this.gl.deleteBuffer(this.programs.positions)
       this.gl.deleteBuffer(this.programs.layers)
     }
+    this.gl?.getExtension('WEBGL_lose_context')?.loseContext()
+  }
+
+  private onContextLost(event: Event): void {
+    event.preventDefault()
+    if (this.frame) { cancelAnimationFrame(this.frame); this.frame = 0 }
+  }
+
+  private onContextRestored(): void {
+    if (this.destroyed || !this.gl) return
+    this.programs = this.initializeWebGl(this.gl)
+    this.resize()
+    if (this.options.static) this.render(performance.now())
+    else if (!document.hidden && !this.frame) this.frame = requestAnimationFrame((time) => this.render(time))
   }
 
   private onVisibility(): void {
     if (document.hidden && this.frame) { cancelAnimationFrame(this.frame); this.frame = 0 }
-    else if (!document.hidden && !this.options.static && !this.destroyed && !this.frame) this.frame = requestAnimationFrame((time) => this.render(time))
+    else if (!document.hidden && !this.options.static && !this.destroyed && this.renderer !== 'none' && !this.frame) this.frame = requestAnimationFrame((time) => this.render(time))
   }
 
   private resize(): void {
     const ratio = Math.min(1.5, window.devicePixelRatio || 1)
     const width = Math.max(1, Math.floor((this.canvas.clientWidth || window.innerWidth || 1) * ratio))
     const height = Math.max(1, Math.floor((this.canvas.clientHeight || window.innerHeight || 1) * ratio))
-    if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height }
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas.width = width
+      this.canvas.height = height
+      if (this.options.static && !this.destroyed && this.renderer !== 'none') this.render(performance.now())
+    }
   }
 
   private initializeWebGl(gl: WebGLRenderingContext): Programs | null {
@@ -268,7 +294,7 @@ class GalaxyEngine implements StarfieldEngine {
 
   private render(time: number): void {
     this.frame = 0
-    if (this.destroyed || document.hidden) return
+    if (this.destroyed || document.hidden || this.renderer === 'none') return
     const pulse = this.pulseActivity && time < this.pulseUntil ? this.pulseActivity : null
     if (!pulse) this.pulseActivity = null
     const target = motionProfile(pulse ?? this.activity)
@@ -279,8 +305,9 @@ class GalaxyEngine implements StarfieldEngine {
       flash: this.current.flash + (target.flash - this.current.flash) * follow,
       redshift: this.current.redshift + (target.redshift - this.current.redshift) * follow
     }
-    if (this.gl && this.programs) this.renderWebGl(time)
-    else if (this.context2d) this.renderCanvas2d(time)
+    const wrapped = time % TIME_WRAP_MS
+    if (this.gl && this.programs) this.renderWebGl(wrapped)
+    else if (this.context2d) this.renderCanvas2d(wrapped)
     if (!this.options.static) this.frame = requestAnimationFrame((next) => this.render(next))
   }
 
@@ -333,7 +360,7 @@ class GalaxyEngine implements StarfieldEngine {
     context.fillRect(0, 0, width, height)
     context.globalCompositeOperation = 'lighter'
     for (const star of this.canvasStars) {
-      const z = Math.max(.035, (star.z - time * .00000032 * this.current.speed * (1 + star.layer * .5) + 10) % 1)
+      const z = Math.max(.035, ((star.z - time * .00000032 * this.current.speed * (1 + star.layer * .5)) % 1 + 1) % 1)
       const x = centerX + star.x * width * .52 / z
       const y = centerY + star.y * height * .52 / z
       if (x < -30 || x > width + 30 || y < -30 || y > height + 30) continue

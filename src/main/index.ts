@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { execFile, spawn } from 'node:child_process'
-import { access, readFile } from 'node:fs/promises'
+import { access, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -16,7 +16,7 @@ import type { AppSettings, CliStatus, PromptBlock } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
 const defaults = createDefaultSettings(homedir())
-const settingsStore = new Store<AppSettings>({ name: 'settings', defaults })
+const settingsStore = new Store<AppSettings>({ name: 'settings', defaults, clearInvalidConfig: true })
 let mainWindow: BrowserWindow | null = null
 const acpConnection = new AcpConnectionState<GrokAcpClient>()
 let connectedExecutable = ''
@@ -24,7 +24,12 @@ const billingCache = new BillingCache<unknown>()
 
 const settings = (): AppSettings => normalizeSettings(settingsStore.store, homedir())
 const grokHome = (): string => process.env.GROK_HOME?.trim() || path.join(homedir(), '.grok')
-const send = (channel: string, payload: unknown): void => { mainWindow?.webContents.send(channel, payload) }
+const send = (channel: string, payload: unknown): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send(channel, payload)
+}
+
+const SESSION_ID_PATTERN = /^[0-9a-f-]{8,64}$/i
 
 async function cliStatus(): Promise<CliStatus> {
   const executable = settings().grokExecutable
@@ -84,7 +89,10 @@ function registerIpc(): void {
   ipcMain.handle('grok:status', cliStatus)
   ipcMain.handle('grok:connect', async () => (await connectAcp()).start())
   ipcMain.handle('grok:sessions', () => listLocalSessions(grokHome()))
-  ipcMain.handle('grok:usage', (_event, sessionId: string) => readSessionUsage(grokHome(), sessionId))
+  ipcMain.handle('grok:usage', (_event, sessionId: string) => {
+    if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) return null
+    return readSessionUsage(grokHome(), sessionId)
+  })
   ipcMain.handle('grok:billing', async () => {
     try {
       return normalizeBilling(await billingCache.get(async () => (await connectAcp()).getBilling()))
@@ -93,7 +101,7 @@ function registerIpc(): void {
     }
   })
   ipcMain.handle('grok:session:delete', async (_event, sessionId: string) => {
-    if (typeof sessionId !== 'string' || !/^[0-9a-f-]{8,64}$/i.test(sessionId)) throw new Error('Invalid session id')
+    if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) throw new Error('Invalid session id')
     await execFileAsync(settings().grokExecutable, ['sessions', 'delete', sessionId], { windowsHide: true, timeout: 30_000 })
     return true
   })
@@ -128,11 +136,16 @@ function registerIpc(): void {
     if (result.canceled) return []
     return Promise.all(result.filePaths.map(async (file) => {
       const mimeType = mimeFor(file)
-      const data = mimeType ? (await readFile(file)).toString('base64') : undefined
-      return { path: file, name: path.basename(file), mimeType, data }
+      let data: string | undefined
+      if (mimeType) {
+        const info = await stat(file)
+        if (info.size <= 20 * 1024 * 1024) data = (await readFile(file)).toString('base64')
+      }
+      return { path: file, name: path.basename(file), mimeType: data ? mimeType : undefined, data }
     }))
   })
   ipcMain.handle('grok:export', async (_event, sessionId: string) => {
+    if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) throw new Error('Invalid session id')
     const chosen = await dialog.showSaveDialog(mainWindow!, { defaultPath: `grok-${sessionId}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] })
     if (chosen.canceled || !chosen.filePath) return null
     await execFileAsync(settings().grokExecutable, ['export', sessionId, chosen.filePath], { windowsHide: true, timeout: 30_000 })
@@ -166,9 +179,10 @@ function createWindow(): void {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url !== mainWindow?.webContents.getURL()) event.preventDefault()
   })
-  if (process.env.ELECTRON_RENDERER_URL) mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+  mainWindow.on('closed', () => { mainWindow = null })
+  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   else mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
 }
 
 app.whenReady().then(() => { registerIpc(); createWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() }) })
-app.on('window-all-closed', () => { acpConnection.current?.stop(); if (process.platform !== 'darwin') app.quit() })
+app.on('window-all-closed', () => { acpConnecting?.client.stop(); acpConnection.current?.stop(); if (process.platform !== 'darwin') app.quit() })

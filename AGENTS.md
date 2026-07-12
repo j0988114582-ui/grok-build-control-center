@@ -4,6 +4,12 @@
 
 狀態補充（2026-07-12）：啟動／連線競態、快捷鍵、Esc 優先序、prompt 失敗復原、額度提醒、task 合併與視窗導覽已完成審查加固。
 
+## 發布前第二輪複審（2026-07-12，Claude 雙 agent 對抗式審查）
+
+- 修正 24 項:IME isComposing 防護（composer/改名/命令面板/全域鍵盤）、send() 對已銷毀視窗防護＋closed 清 null、electron-store clearInvalidConfig（settings.json 損壞不再變磚）、loadSession 重入鎖＋過期回應防護、formatDate 壞日期防白屏、Virtuoso computeItemKey=event.id（reducer 合併保留原 id）、回合結束/斷線清 pending 權限 modal、切 session 重置 followTail/unread、connect() caps 合併不再清空 commands/mode、load/create 回應的 modes 套用、EventCard memo＋搜尋計數 useMemo、靜態星空 resize 重繪、WebGL context lost/restored 處理、星空時間精度 wrap、respondPermission 先驗證再刪、export/usage sessionId 驗證、打包版忽略 ELECTRON_RENDERER_URL、asar 排除 node_modules（-49MB）、退出時停掉連線中 client、附件圖 20MB 上限、刪除運行中 session 先取消、ModelPicker 空清單防護、setMode/export/setModel 失敗回饋、SettingsPanel 儲存合併 live drafts。測試 83→85。
+- **已知限制（未修，勿當 bug 重查）**:ACP SDK 1.2.1 的 zSessionUpdate 是封閉 union,`subagent_spawned`/`task_backgrounded`/`session_recap`/`retry_state`/`auto_compact_completed`/`turn_completed` 等自訂 update 會在 SDK 層被 parse-fail 丟棄,event-adapter 對應 case 實際收不到（已用 memory-stream 實驗證實）。turn 完成不受影響（走 prompt response 的 stopReason）。要修得攔原始 notification 或換 SDK 版本——排入下一功能輪。
+- grok CLI 在 stdin EOF 後是否自行退出未驗證;quit 中斷連線可能短暫留孤兒程序（已在 window-all-closed 停掉 connecting client 降低機率）。
+
 ## 實測驗證過的 grok CLI (0.2.93) ACP 事實（別重新猜）
 
 - **模型清單**：`session/new` 回應的 `models` 會給完整清單（grok-4.5 含 high/medium/low effort、grok-composer-2.5-fast 無 effort）；2026-07-11 live smoke 中 `initialize._meta.modelState` 只回單一 `grok-build`，`session/load` 也不保證帶 models。UI 優先使用 session 回應，connect modelState 只當 fallback。

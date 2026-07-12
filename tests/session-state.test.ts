@@ -34,7 +34,7 @@ describe('sessionReducer', () => {
     state = sessionReducer(state, { type: 'event', event: { id: '1', sessionId: 's1', kind: 'tool', toolCallId: 't1', title: 'Read', status: 'pending' } })
     state = sessionReducer(state, { type: 'event', event: { id: '2', sessionId: 's1', kind: 'tool', toolCallId: 't1', title: 'Read file', status: 'completed', output: 'ok' } })
     expect(state.events).toHaveLength(1)
-    expect(state.events[0]).toMatchObject({ status: 'completed', output: 'ok' })
+    expect(state.events[0]).toMatchObject({ id: '1', status: 'completed', output: 'ok' })
   })
 
   it('merges background task updates into one card and keeps the original description', () => {

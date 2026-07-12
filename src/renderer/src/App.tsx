@@ -38,7 +38,12 @@ const readQuotaReminders = (storageKey: string): Set<number> => {
   }
 }
 
-const formatDate = (value?: string): string => value ? new Intl.DateTimeFormat('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : ''
+const formatDate = (value?: string): string => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  return new Intl.DateTimeFormat('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
+}
 const formatTokens = (value?: number): string => value === undefined ? '—' : value >= 1000 ? `${(value / 1000).toFixed(value >= 100_000 ? 0 : 1)}k` : String(value)
 const eventText = (event: UiSessionEvent): string => event.kind === 'message' || event.kind === 'thought' ? event.text : event.kind === 'tool' ? `${event.title} ${event.output ?? ''}` : event.kind === 'recap' ? event.summary : event.kind === 'error' ? event.message : event.kind === 'unknown' ? event.summary : JSON.stringify(event)
 const eventTitle = (event: Exclude<UiSessionEvent, { kind: 'message' } | { kind: 'turn' }>): string => {
@@ -95,6 +100,9 @@ function EventCard({ event, query }: { event: UiSessionEvent; query: string }): 
     </div>}
   </article>
 }
+
+const MemoEventCard = React.memo(EventCard)
+const TranscriptFooter = (): React.JSX.Element => <div className="transcript-end">END OF CURRENT CONTEXT</div>
 
 function SettingsPanel({ settings, onSave, onClose }: { settings: AppSettings; onSave: (settings: AppSettings) => void; onClose: () => void }): React.JSX.Element {
   const [draft, setDraft] = useState(settings)
@@ -165,6 +173,7 @@ export function App(): React.JSX.Element {
   const followTailRef = useRef(true)
   const activeIdRef = useRef<string | null>(null)
   const billingRef = useRef<BillingInfo | null>(null)
+  const loadingSessionsRef = useRef<Set<string>>(new Set())
   followTailRef.current = followTail
   activeIdRef.current = active?.id ?? null
 
@@ -234,6 +243,7 @@ export function App(): React.JSX.Element {
       if (event.kind === 'turn') {
         setRunningMap((current) => ({ ...current, [event.sessionId]: event.status === 'running' }))
         if (event.status !== 'running') {
+          setPermissions((current) => current.filter((item) => item.sessionId !== event.sessionId))
           void refreshUsageRef.current(event.sessionId)
           void refreshSessionsRef.current()
           window.setTimeout(() => { void refreshBillingRef.current() }, 800)
@@ -244,6 +254,7 @@ export function App(): React.JSX.Element {
     const offPermission = window.grokApi.onPermission((request) => setPermissions((current) => [...current, request]))
     const offStatus = window.grokApi.onStatus((next) => {
       if (next.connected !== undefined) setStatus((current) => ({ ...current, connected: next.connected === true }))
+      if (next.connected === false) setPermissions([])
       if (next.stderr) console.warn('[grok stderr]', next.stderr)
       if (next.message) setNotice(next.message)
     })
@@ -272,12 +283,13 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
+      if (event.isComposing) return
       const target = event.target as HTMLElement | null
       const editing = Boolean(target?.matches('input, textarea, select') || target?.isContentEditable)
-      const command = commandForEvent(settings.shortcuts, event)
+      const command = commandForEvent(settings.shortcuts, event, editing ? ['global'] : ['global', 'transcript'])
       if (command === 'searchTranscript') { event.preventDefault(); setSearchOpen(true); setTimeout(() => transcriptSearchRef.current?.focus(), 0); return }
       if (command === 'commandPalette') { event.preventDefault(); setPanel('commands'); return }
-      if (command === 'searchSessions') { event.preventDefault(); sessionSearchRef.current?.focus(); return }
+      if (command === 'searchSessions') { event.preventDefault(); if (!sidebarOpen) setSidebarOpen(true); setTimeout(() => sessionSearchRef.current?.focus(), 0); return }
       if (command === 'newSession') { event.preventDefault(); createSessionRef.current(); return }
       if (command === 'jumpToLatest') { event.preventDefault(); jumpToLatestRef.current(); return }
       if (command === 'cancelTurn' || event.key === 'Escape') {
@@ -295,14 +307,48 @@ export function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [running, active, panel, deleteTarget, renameTarget, searchOpen, settings.shortcuts])
+  }, [running, active, panel, deleteTarget, renameTarget, searchOpen, sidebarOpen, settings.shortcuts])
 
-  const activeEvents = active ? events[active.id] ?? [] : []
+  const activeEvents = useMemo(() => active ? events[active.id] ?? [] : [], [active, events])
+  const searchHits = useMemo(() => transcriptQuery ? activeEvents.filter((event) => eventText(event).toLocaleLowerCase().includes(transcriptQuery.toLocaleLowerCase())).length : 0, [activeEvents, transcriptQuery])
   const shortcutFor = (command: string): string => settings.shortcuts.find((binding) => binding.command === command)?.accelerator ?? ''
   const shortcutLabel = (command: string): string => shortcutFor(command).replaceAll('+', ' + ')
   const filteredSessions = useMemo(() => sessions.filter((session) => `${sessionDisplayTitle(session, settings.sessionTitles)} ${session.cwd}`.toLocaleLowerCase().includes(sessionQuery.toLocaleLowerCase())), [sessions, sessionQuery, settings.sessionTitles])
   const sessionGroups = useMemo(() => groupSessionsByProject(filteredSessions), [filteredSessions])
-  const connect = async (): Promise<AgentCapabilities | null> => { setNotice('正在連接 Grok ACP…'); try { const value = await window.grokApi.connect(); setCaps(value); if (value.modelState) setModels((current) => current ?? value.modelState); setStatus((current) => ({ ...current, connected: true })); setNotice('ACP 已連線'); void refreshBillingRef.current(); return value } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); return null } }
+  const connect = async (): Promise<AgentCapabilities | null> => {
+    setNotice('正在連接 Grok ACP…')
+    try {
+      const value = await window.grokApi.connect()
+      setCaps((current) => ({
+        ...value,
+        commands: current.commands.length ? current.commands : value.commands,
+        modes: current.modes.length ? current.modes : value.modes,
+        ...(current.currentModeId ? { currentModeId: current.currentModeId } : {})
+      }))
+      if (value.modelState) setModels((current) => current ?? value.modelState)
+      setStatus((current) => ({ ...current, connected: true }))
+      setNotice('ACP 已連線')
+      void refreshBillingRef.current()
+      return value
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+      return null
+    }
+  }
+  const applySessionModes = (modes: unknown): void => {
+    if (!modes || typeof modes !== 'object') return
+    const source = modes as { currentModeId?: unknown; availableModes?: unknown }
+    const availableModes = Array.isArray(source.availableModes) ? source.availableModes.flatMap((mode) => {
+      if (!mode || typeof mode !== 'object') return []
+      const entry = mode as Record<string, unknown>
+      return typeof entry.id === 'string' && typeof entry.name === 'string' ? [{ id: entry.id, name: entry.name }] : []
+    }) : []
+    setCaps((current) => ({
+      ...current,
+      ...(availableModes.length ? { modes: availableModes } : {}),
+      ...(typeof source.currentModeId === 'string' ? { currentModeId: source.currentModeId } : {})
+    }))
+  }
   const createSession = async (): Promise<void> => {
     try {
       const cwd = await window.grokApi.chooseDirectory()
@@ -312,6 +358,7 @@ export function App(): React.JSX.Element {
       const response = await window.grokApi.createSession(cwd)
       if (!response.sessionId) return
       setModels(response.models ?? capsValue.modelState)
+      applySessionModes(response.modes)
       const summary = { id: response.sessionId, cwd, title: 'New session', updatedAt: new Date().toISOString() }
       setSessions((current) => [summary, ...current])
       setActive(summary)
@@ -322,28 +369,39 @@ export function App(): React.JSX.Element {
     }
   }
   const loadSession = async (session: SessionSummary): Promise<void> => {
-    const capsValue = await connect()
-    if (!capsValue) return
-    const previousActive = active
-    const previousUsage = usage
-    const previousEvents = events[session.id]
-    setActive(session)
-    setUsage(null)
-    setEvents((current) => ({ ...current, [session.id]: [] }))
+    if (loadingSessionsRef.current.has(session.id)) return
+    loadingSessionsRef.current.add(session.id)
     try {
-      const response = await window.grokApi.loadSession(session.id, session.cwd)
-      setModels((current) => response.models ?? current ?? capsValue.modelState)
-      window.setTimeout(() => { void refreshUsageRef.current(session.id) }, 0)
-    } catch (error) {
-      setActive((current) => current?.id === session.id ? previousActive : current)
-      setUsage(previousUsage)
-      setEvents((current) => {
-        const next = { ...current }
-        if (previousEvents) next[session.id] = previousEvents
-        else delete next[session.id]
-        return next
-      })
-      setNotice(error instanceof Error ? error.message : String(error))
+      const capsValue = await connect()
+      if (!capsValue) return
+      const previousActive = active
+      const previousUsage = usage
+      const previousEvents = events[session.id]
+      setActive(session)
+      setUsage(null)
+      setFollowTail(true)
+      setUnread(0)
+      setEvents((current) => ({ ...current, [session.id]: [] }))
+      try {
+        const response = await window.grokApi.loadSession(session.id, session.cwd)
+        if (activeIdRef.current === session.id) {
+          setModels((current) => response.models ?? current ?? capsValue.modelState)
+          applySessionModes(response.modes)
+        }
+        window.setTimeout(() => { void refreshUsageRef.current(session.id) }, 0)
+      } catch (error) {
+        setActive((current) => current?.id === session.id ? previousActive : current)
+        if (activeIdRef.current === session.id || activeIdRef.current === previousActive?.id) setUsage(previousUsage)
+        setEvents((current) => {
+          const next = { ...current }
+          if (previousEvents) next[session.id] = previousEvents
+          else delete next[session.id]
+          return next
+        })
+        setNotice(error instanceof Error ? error.message : String(error))
+      }
+    } finally {
+      loadingSessionsRef.current.delete(session.id)
     }
   }
   const deleteSession = async (): Promise<void> => {
@@ -351,7 +409,11 @@ export function App(): React.JSX.Element {
     const target = deleteTarget
     setDeleteTarget(null)
     try {
+      if (runningMap[target.id]) {
+        try { await window.grokApi.cancel(target.id) } catch { /* 取消失敗仍繼續刪除 */ }
+      }
       await window.grokApi.deleteSession(target.id)
+      setRunningMap((current) => { const next = { ...current }; delete next[target.id]; return next })
       setCollapsingSessionId(target.id)
       await new Promise((resolve) => window.setTimeout(resolve, 260))
       setSessions((current) => current.filter((item) => item.id !== target.id))
@@ -391,6 +453,7 @@ export function App(): React.JSX.Element {
   createSessionRef.current = () => { void createSession() }
   jumpToLatestRef.current = jumpToLatest
   const composerKey = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing) return
     const command = commandForEvent(settings.shortcuts, event, ['composer'])
     if (command === 'sendPrompt') { event.preventDefault(); void sendPrompt(); return }
     if (command === 'newline' && active) {
@@ -407,8 +470,27 @@ export function App(): React.JSX.Element {
     }
   }
   const openTui = (cwd: string): void => { void window.grokApi.openTui(cwd).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }
-  const changeModel = async (modelId: string): Promise<void> => { if (!active || !models) return; const model = models.availableModels.find((item) => item.modelId === modelId); await window.grokApi.setModel(active.id, modelId, model?.currentReasoningEffort); setModels({ ...models, currentModelId: modelId }) }
-  const changeEffort = async (effort: string): Promise<void> => { if (!active || !models) return; await window.grokApi.setModel(active.id, models.currentModelId, effort); setModels({ ...models, availableModels: models.availableModels.map((model) => model.modelId === models.currentModelId ? { ...model, currentReasoningEffort: effort } : model) }) }
+  const changeModel = async (modelId: string): Promise<void> => {
+    if (!active || !models) return
+    try {
+      const model = models.availableModels.find((item) => item.modelId === modelId)
+      await window.grokApi.setModel(active.id, modelId, model?.currentReasoningEffort)
+      setModels({ ...models, currentModelId: modelId })
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+      setModels((current) => current ? { ...current } : current)
+    }
+  }
+  const changeEffort = async (effort: string): Promise<void> => {
+    if (!active || !models) return
+    try {
+      await window.grokApi.setModel(active.id, models.currentModelId, effort)
+      setModels({ ...models, availableModels: models.availableModels.map((model) => model.modelId === models.currentModelId ? { ...model, currentReasoningEffort: effort } : model) })
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+      setModels((current) => current ? { ...current } : current)
+    }
+  }
   const saveSessionTitle = async (): Promise<void> => {
     if (!renameTarget) return
     const title = renameDraft.trim()
@@ -425,7 +507,7 @@ export function App(): React.JSX.Element {
     setSettings(next)
     void window.grokApi.saveSettings(next).then(setSettings)
   }
-  const paste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => { const files = [...event.clipboardData.files]; if (!files.length || !active) return; const sessionId = active.id; event.preventDefault(); if (caps.promptCapabilities.image !== true) { setNotice('目前 GROK ACP 未宣告圖片支援；請先把圖片存檔，再用迴紋針加入絕對路徑。'); return } void Promise.all(files.map((file) => new Promise<PromptBlock>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve({ type: 'image', data: String(reader.result).split(',')[1], mimeType: file.type || 'image/png', name: file.name }); reader.readAsDataURL(file) }))).then((blocks) => setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), ...blocks] }))) }
+  const paste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => { const files = [...event.clipboardData.files]; if (!files.length || !active) return; const sessionId = active.id; event.preventDefault(); if (caps.promptCapabilities.image !== true) { setNotice('目前 GROK ACP 未宣告圖片支援；請先把圖片存檔，再用迴紋針加入絕對路徑。'); return } void Promise.all(files.map((file) => new Promise<PromptBlock | null>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve({ type: 'image', data: String(reader.result).split(',')[1], mimeType: file.type || 'image/png', name: file.name }); reader.onerror = () => resolve(null); reader.onabort = () => resolve(null); reader.readAsDataURL(file) }))).then((blocks) => { const usable = blocks.filter((block): block is PromptBlock => block !== null); if (usable.length < blocks.length) setNotice('部分圖片讀取失敗，未加入附件'); if (usable.length) setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), ...usable] })) }) }
 
   const activeModel = models?.availableModels.find((model) => model.modelId === models.currentModelId)
   const usageTotal = usage?.contextWindowTokens ?? activeModel?.totalContextTokens
@@ -460,22 +542,22 @@ export function App(): React.JSX.Element {
       </aside>
       <main className="main">
         {!active ? <section className="empty-state"><div className="empty-orbit"><Cpu /><span /></div><span className="eyebrow">WINDOWS GROK BUILD CONTROL CENTER</span><h1>選一個專案資料夾，<br/><em>就可以開始。</em></h1><p>不用輸入終端指令。這裡會替你連接本機 Grok、保留未送出的文字，並在執行前顯示權限確認。</p><div className="onboarding-steps"><span><b>1</b>按「選擇專案開始」</span><span><b>2</b>選擇你的工作資料夾</span><span><b>3</b>用白話交代任務</span></div><div><button className="primary large" data-magnetic data-nova-tone="primary" onClick={() => void createSession()}><FolderOpen />選擇專案開始</button><button className="secondary large" onClick={() => void connect()}><Play />{status.found ? '連接本機 Grok' : '重新檢查 Grok 安裝'}</button></div><div className="empty-stats"><span><b>{sessions.length}</b>個本機對話</span><span><b>{status.version ?? '—'}</b>Grok CLI 版本</span><span><b>ACP</b>不模擬終端</span></div></section> : <>
-          <header className="session-header">{!sidebarOpen && <button className="icon-button" aria-label="展開側欄" onClick={() => setSidebarOpen(true)}><Archive /></button>}<div><span className="eyebrow">ACTIVE SESSION</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{caps.modes.length > 0 && <select aria-label="Mode" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value) }}><option value="" disabled>Mode</option>{caps.modes.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}</select>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id)}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
-          {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{activeEvents.filter((event) => transcriptQuery && eventText(event).toLocaleLowerCase().includes(transcriptQuery.toLocaleLowerCase())).length} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
-          <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><EventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: () => <div className="transcript-end">END OF CURRENT CONTEXT</div> }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
+          <header className="session-header">{!sidebarOpen && <button className="icon-button" aria-label="展開側欄" onClick={() => setSidebarOpen(true)}><Archive /></button>}<div><span className="eyebrow">ACTIVE SESSION</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{caps.modes.length > 0 && <select aria-label="Mode" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>Mode</option>{caps.modes.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}</select>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) setNotice(`已匯出到 ${path}`) }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
+          {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
+          <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
           <footer className="composer-wrap"><div className="composer-status">{running ? <><LoaderCircle className="spin" />Grok 正在執行工具或生成回覆</> : <><span className="ready-dot" />準備就緒</>}<span>{shortcutLabel('sendPrompt')} 傳送 · {shortcutLabel('newline')} 換行 · {shortcutLabel('cancelTurn')} 取消</span></div>{attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}<div className="composer"><button className="attach-button" aria-label="加入檔案" onClick={() => void chooseFiles()}><Paperclip /></button><textarea value={drafts[active.id] ?? ''} onChange={(event) => setDrafts((current) => ({ ...current, [active.id]: event.target.value }))} onKeyDown={composerKey} onPaste={paste} placeholder="交給 Grok 一個任務，或貼上圖片與檔案路徑…" rows={3} />{running ? <button className="stop-button" data-nova-tone="danger" onClick={() => void window.grokApi.cancel(active.id)}><Square />停止</button> : <button className="send-button" data-magnetic data-nova-tone="primary" onClick={() => void sendPrompt()}><Send />送出</button>}</div></footer>
         </>}
       </main>
-      {panel === 'settings' && <SettingsPanel settings={settings} onClose={() => setPanel('none')} onSave={(next) => void window.grokApi.saveSettings(next).then((saved) => { setSettings(saved); setPanel('none') })} />}
+      {panel === 'settings' && <SettingsPanel settings={settings} onClose={() => setPanel('none')} onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none') })} />}
       {panel === 'features' && <aside className="drawer"><div className="drawer-head"><div><span className="eyebrow">CAPABILITY ROUTER</span><h2>功能矩陣</h2></div><button className="icon-button" onClick={() => setPanel('none')}><X /></button></div><p className="drawer-intro">有結構化 ACP 介面才在 GUI 原生操作；其餘明確回到 TUI，不模擬終端按鍵。</p><div className="feature-list">{FEATURES.map(([name, route, state]) => <div key={name}><span className={state}>{state === 'native' ? <Check /> : state === 'conditional' ? <Cpu /> : <TerminalSquare />}</span><strong>{name}</strong><small>{route}</small></div>)}</div>{active && <button className="secondary wide" onClick={() => openTui(active.cwd)}><TerminalSquare />在 GROK TUI 開啟</button>}</aside>}
     </div>
     {panel === 'commands' && <CommandPalette commands={paletteCommands} recentIds={settings.recentCommands} onUse={rememberCommand} onClose={() => setPanel('none')} />}
     {panel === 'shortcuts' && <div className="modal-backdrop"><section className="shortcut-overlay" role="dialog" aria-modal="true" aria-label="快捷鍵一覽"><header><div><span className="eyebrow">KEYBOARD HELP</span><h2>快捷鍵一覽</h2></div><button className="icon-button" aria-label="關閉快捷鍵" onClick={() => setPanel('none')}><X /></button></header><div>{[
       [shortcutLabel('newSession'), '建立新對話'], [shortcutLabel('searchSessions'), '搜尋本機對話'], [shortcutLabel('searchTranscript'), '搜尋目前內容'], [shortcutLabel('commandPalette'), '開啟命令面板'], [shortcutLabel('jumpToLatest'), '跳到最新訊息'], [shortcutLabel('cancelTurn'), '取消執行（Esc 永遠先關閉視窗）'], ['?', '顯示這張說明']
     ].map(([keys, action]) => <p key={keys}><kbd>{keys}</kbd><span>{action}</span></p>)}</div><footer><Keyboard />在輸入框內按「?」會正常輸入文字，不會打開這張卡片。</footer></section></div>}
-    {permission && <div className="modal-backdrop"><section className="permission-modal"><div className="permission-icon"><Wrench /></div><span className="eyebrow">ACTION REQUIRES APPROVAL{permissions.length > 1 ? ` · 還有 ${permissions.length - 1} 項待決` : ''}</span><h2>{permission.title}</h2><p>Grok 要求執行一項可能修改檔案或呼叫外部工具的操作。只可選擇代理提供的合法選項。</p><div>{permission.options.map((option) => <button key={option.optionId} className={option.kind.includes('reject') ? 'danger-option' : ''} onClick={() => void window.grokApi.respondPermission(permission.requestId, option.optionId).catch((error) => setNotice(error instanceof Error ? error.message : String(error))).then(() => setPermissions((current) => current.filter((item) => item.requestId !== permission.requestId)))}>{option.kind.includes('reject') ? <X /> : <Check />}<span><strong>{option.name}</strong><small>{option.kind}</small></span></button>)}</div></section></div>}
-    {deleteTarget && <div className="modal-backdrop"><section className="permission-modal"><div className="permission-icon danger"><Trash2 /></div><span className="eyebrow">DELETE SESSION</span><h2>刪除這則對話？</h2><p>「{deleteTarget.title}」（{deleteTarget.cwd}）將從本機 session 歷史永久刪除，無法復原。</p><div><button className="danger-option" onClick={() => void deleteSession()}><Trash2 /><span><strong>永久刪除</strong><small>grok sessions delete</small></span></button><button onClick={() => setDeleteTarget(null)}><X /><span><strong>取消</strong><small>保留這則對話</small></span></button></div></section></div>}
-    {renameTarget && <div className="modal-backdrop"><section className="permission-modal rename-modal" role="dialog" aria-modal="true" aria-label="重新命名對話"><div className="permission-icon"><Pencil /></div><span className="eyebrow">LOCAL TITLE</span><h2>替這則對話取一個好找的名稱</h2><p>只改這台電腦上的顯示名稱，不會修改 Grok CLI 的原始紀錄。</p><label>對話名稱<input aria-label="對話名稱" autoFocus value={renameDraft} maxLength={80} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void saveSessionTitle(); if (event.key === 'Escape') { event.stopPropagation(); setRenameTarget(null) } }} /></label><div><button onClick={() => void saveSessionTitle()}><Check /><span><strong>儲存名稱</strong><small>保存在本機設定</small></span></button><button onClick={() => setRenameTarget(null)}><X /><span><strong>取消</strong></span></button></div></section></div>}
-    {notice && <button className="notice" onClick={() => setNotice('')}><Zap />{notice}<X /></button>}
+    {permission && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label={permission.title}><div className="permission-icon"><Wrench /></div><span className="eyebrow">ACTION REQUIRES APPROVAL{permissions.length > 1 ? ` · 還有 ${permissions.length - 1} 項待決` : ''}</span><h2>{permission.title}</h2><p>Grok 要求執行一項可能修改檔案或呼叫外部工具的操作。只可選擇代理提供的合法選項。</p><div>{permission.options.map((option, index) => <button key={option.optionId} autoFocus={index === 0} className={option.kind.includes('reject') ? 'danger-option' : ''} onClick={() => void window.grokApi.respondPermission(permission.requestId, option.optionId).catch((error) => setNotice(error instanceof Error ? error.message : String(error))).then(() => setPermissions((current) => current.filter((item) => item.requestId !== permission.requestId)))}>{option.kind.includes('reject') ? <X /> : <Check />}<span><strong>{option.name}</strong><small>{option.kind}</small></span></button>)}</div></section></div>}
+    {deleteTarget && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="刪除對話確認"><div className="permission-icon danger"><Trash2 /></div><span className="eyebrow">DELETE SESSION</span><h2>刪除這則對話？</h2><p>「{sessionDisplayTitle(deleteTarget, settings.sessionTitles)}」（{deleteTarget.cwd}）將從本機 session 歷史永久刪除，無法復原。</p><div><button className="danger-option" onClick={() => void deleteSession()}><Trash2 /><span><strong>永久刪除</strong><small>grok sessions delete</small></span></button><button autoFocus onClick={() => setDeleteTarget(null)}><X /><span><strong>取消</strong><small>保留這則對話</small></span></button></div></section></div>}
+    {renameTarget && <div className="modal-backdrop"><section className="permission-modal rename-modal" role="dialog" aria-modal="true" aria-label="重新命名對話"><div className="permission-icon"><Pencil /></div><span className="eyebrow">LOCAL TITLE</span><h2>替這則對話取一個好找的名稱</h2><p>只改這台電腦上的顯示名稱，不會修改 Grok CLI 的原始紀錄。</p><label>對話名稱<input aria-label="對話名稱" autoFocus value={renameDraft} maxLength={80} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; if (event.key === 'Enter') void saveSessionTitle(); if (event.key === 'Escape') { event.stopPropagation(); setRenameTarget(null) } }} /></label><div><button onClick={() => void saveSessionTitle()}><Check /><span><strong>儲存名稱</strong><small>保存在本機設定</small></span></button><button onClick={() => setRenameTarget(null)}><X /><span><strong>取消</strong></span></button></div></section></div>}
+    {notice && <button className="notice" aria-live="polite" onClick={() => setNotice('')}><Zap />{notice}<X /></button>}
   </div>
 }

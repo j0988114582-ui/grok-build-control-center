@@ -35,18 +35,20 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'tool' ? {
       ...item,
       ...event,
+      id: item.id,
       title: event.title === 'Tool call' ? item.title : event.title,
       rawInput: event.rawInput ?? item.rawInput,
       output: event.output ?? item.output
     } : item) : [...state.events, event]
   } else if (event.kind === 'subagent') {
     const index = state.events.findIndex((item) => item.kind === 'subagent' && item.subagentId === event.subagentId)
-    events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'subagent' ? { ...item, ...event } : item) : [...state.events, event]
+    events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'subagent' ? { ...item, ...event, id: item.id } : item) : [...state.events, event]
   } else if (event.kind === 'task' && event.taskId) {
     const index = state.events.findIndex((item) => item.kind === 'task' && item.taskId === event.taskId)
     events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'task' ? {
       ...item,
       ...event,
+      id: item.id,
       description: !event.description.trim() || event.description === 'Background task' ? item.description : event.description,
       status: ['completed', 'cancelled', 'error', 'failed'].includes(item.status) && !['completed', 'cancelled', 'error', 'failed'].includes(event.status) ? item.status : event.status
     } : item) : [...state.events, event]

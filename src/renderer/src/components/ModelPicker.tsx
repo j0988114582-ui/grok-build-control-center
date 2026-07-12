@@ -13,6 +13,7 @@ export function ModelPicker({ models, onModelChange, onEffortChange }: {
   const rootRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [selectedId, setSelectedId] = useState(models.currentModelId)
+  const empty = models.availableModels.length === 0
   const selectedIndex = Math.max(0, models.availableModels.findIndex((model) => model.modelId === selectedId))
   const [highlighted, setHighlighted] = useState(selectedIndex)
   const activeModel = models.availableModels[selectedIndex] ?? models.availableModels[0]
@@ -42,6 +43,7 @@ export function ModelPicker({ models, onModelChange, onEffortChange }: {
   }
 
   const keyDown = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    if (empty) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       if (!open) { setOpen(true); setHighlighted(selectedIndex); return }
@@ -59,12 +61,12 @@ export function ModelPicker({ models, onModelChange, onEffortChange }: {
   }
 
   return <div className="model-picker" ref={rootRef}>
-    <button className="model-trigger" aria-label={`模型：${activeModel?.name ?? '未選擇'}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={listboxId} onClick={() => setOpen((value) => !value)} onKeyDown={keyDown}>
+    <button className="model-trigger" aria-label={`模型：${activeModel?.name ?? '未選擇'}`} aria-haspopup="listbox" aria-expanded={open && !empty} aria-controls={listboxId} disabled={empty} onClick={() => { if (!empty) setOpen((value) => !value) }} onKeyDown={keyDown}>
       <Orbit />
       <span><strong>{activeModel?.name ?? '選擇模型'}</strong><small>{activeModel?.description ?? 'No description'}</small><em>{formatContext(activeModel?.totalContextTokens)}</em></span>
       <ChevronDown />
     </button>
-    {open && <div className="model-listbox" id={listboxId} role="listbox" aria-label="可用模型" aria-activedescendant={`${listboxId}-${highlighted}`}>
+    {open && !empty && <div className="model-listbox" id={listboxId} role="listbox" aria-label="可用模型" aria-activedescendant={`${listboxId}-${highlighted}`}>
       {models.availableModels.map((model, index) => <button
         key={model.modelId}
         id={`${listboxId}-${index}`}

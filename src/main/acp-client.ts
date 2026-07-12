@@ -201,8 +201,9 @@ export class GrokAcpClient {
   respondPermission(requestId: string, optionId: string): void {
     const pending = this.permissions.get(requestId)
     if (!pending) throw new Error('Permission request is no longer active')
+    const outcome = selectPermissionOutcome(pending.options, optionId)
     this.permissions.delete(requestId)
-    pending.resolve(selectPermissionOutcome(pending.options, optionId))
+    pending.resolve(outcome)
   }
 
   stop(): void {

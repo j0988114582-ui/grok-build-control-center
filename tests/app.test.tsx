@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/renderer/src/App'
@@ -150,6 +150,48 @@ describe('App', () => {
 
     expect(screen.getByPlaceholderText(/交給 Grok 一個任務/)).toHaveValue('/compact ')
     expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ recentCommands: ['slash:compact'] }))
+  })
+
+  it('keeps rendering when a session summary has a corrupted timestamp', async () => {
+    const api = createApiMock()
+    api.listSessions = vi.fn().mockResolvedValue([{ id: 's1', cwd: 'C:\\repo', title: 'Fix tests', updatedAt: 'not-a-date' }])
+    window.grokApi = api
+    render(<App />)
+    expect(await screen.findByText('Fix tests')).toBeInTheDocument()
+  })
+
+  it('clears the pending permission modal when its turn ends', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    let onPermission: ((request: Parameters<Parameters<GrokBridgeApi['onPermission']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.onPermission = vi.fn((callback) => { onPermission = callback; return () => {} })
+    window.grokApi = api
+    render(<App />)
+    await screen.findByText('Fix tests')
+
+    act(() => { onPermission?.({ requestId: 'p1', sessionId: 's1', title: '需要權限', options: [{ optionId: 'a', name: 'Allow', kind: 'allow_once' }] }) })
+    expect(await screen.findByRole('dialog', { name: '需要權限' })).toBeInTheDocument()
+    act(() => { onEvent?.({ id: 'e1', sessionId: 's1', kind: 'turn', status: 'completed' }) })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '需要權限' })).not.toBeInTheDocument())
+  })
+
+  it('does not send the draft when Enter only confirms an IME composition', async () => {
+    const api = createApiMock()
+    api.sendPrompt = vi.fn().mockResolvedValue(undefined)
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    const composer = screen.getByPlaceholderText(/交給 Grok 一個任務/)
+    await user.type(composer, '注音輸入中')
+    fireEvent.keyDown(composer, { key: 'Enter', isComposing: true })
+    expect(api.sendPrompt).not.toHaveBeenCalled()
+    expect(composer).toHaveValue('注音輸入中')
+
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    expect(api.sendPrompt).toHaveBeenCalledTimes(1)
   })
 
   it('opens shortcut help with ? only outside text fields', async () => {
