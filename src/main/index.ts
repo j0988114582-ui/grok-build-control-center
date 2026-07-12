@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { execFile, spawn } from 'node:child_process'
-import { access, readFile, stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import Store from 'electron-store'
@@ -9,6 +9,15 @@ import { GrokAcpClient } from './acp-client'
 import { BillingCache } from './billing-cache'
 import { AcpConnectionState, reportAsyncError } from './acp-connection-state'
 import { parseGrokVersion } from './grok-cli'
+import {
+  createGrokInstallerEnvironment,
+  installGrokCli,
+  readConnectedCapabilities,
+  reauthenticateGrok,
+  runReauthenticationLifecycle,
+  SingleLifecycleOperation,
+  type ExecuteFile
+} from './grok-lifecycle'
 import { listLocalSessions, readSessionUsage } from './session-index'
 import { createDefaultSettings, normalizeSettings } from '../shared/settings'
 import { normalizeBilling } from '../shared/billing'
@@ -21,6 +30,7 @@ let mainWindow: BrowserWindow | null = null
 const acpConnection = new AcpConnectionState<GrokAcpClient>()
 let connectedExecutable = ''
 const billingCache = new BillingCache<unknown>()
+const lifecycleOperation = new SingleLifecycleOperation()
 
 const settings = (): AppSettings => normalizeSettings(settingsStore.store, homedir())
 const grokHome = (): string => process.env.GROK_HOME?.trim() || path.join(homedir(), '.grok')
@@ -30,6 +40,21 @@ const send = (channel: string, payload: unknown): void => {
 }
 
 const SESSION_ID_PATTERN = /^[0-9a-f-]{8,64}$/i
+
+const executeLifecycleFile: ExecuteFile = async (executable, args, options) => {
+  const { stdout, stderr } = await execFileAsync(executable, args, { ...options, encoding: 'utf8' })
+  return { stdout: String(stdout), stderr: String(stderr) }
+}
+
+function disconnectAcp(): void {
+  const current = acpConnection.current
+  acpConnection.begin()
+  connectedExecutable = ''
+  current?.stop()
+  acpConnecting?.client.stop()
+  acpConnecting = null
+  billingCache.clear()
+}
 
 async function cliStatus(): Promise<CliStatus> {
   const executable = settings().grokExecutable
@@ -87,7 +112,40 @@ const mimeFor = (file: string): string | undefined => ({
 
 function registerIpc(): void {
   ipcMain.handle('grok:status', cliStatus)
-  ipcMain.handle('grok:connect', async () => (await connectAcp()).start())
+  ipcMain.handle('grok:install', async () => lifecycleOperation.run('安裝 Grok CLI', async () => {
+    send('grok:status-update', { connected: false, message: '正在從 x.ai 下載 Grok CLI…' })
+    const installed = await installGrokCli(homedir(), {
+      downloadText: async (url) => {
+        const response = await fetch(url)
+        if (!response.ok) throw new Error(`下載 Grok CLI 失敗（HTTP ${response.status}）`)
+        return response.text()
+      },
+      makeTempDirectory: () => mkdtemp(path.join(tmpdir(), 'grok-build-gui-')),
+      writeTextFile: (file, value) => writeFile(file, value, 'utf8'),
+      removeDirectory: (directory) => rm(directory, { recursive: true, force: true }),
+      assertFileExists: (file) => access(file),
+      executeFile: executeLifecycleFile,
+      environment: createGrokInstallerEnvironment(process.env)
+    })
+    disconnectAcp()
+    settingsStore.store = normalizeSettings({ ...settings(), grokExecutable: installed.executable }, homedir())
+    const next = await cliStatus()
+    send('grok:status-update', { ...next, message: `Grok CLI ${installed.version} 安裝完成` })
+    return next
+  }))
+  ipcMain.handle('grok:account:reauthenticate', async () => lifecycleOperation.run('切換帳號', async () => {
+    const executable = settings().grokExecutable
+    await access(executable)
+    send('grok:status-update', { connected: false, message: '瀏覽器即將開啟，請登入要使用的 Grok 帳號…' })
+    const capabilities = await runReauthenticationLifecycle({
+      disconnect: disconnectAcp,
+      login: () => reauthenticateGrok(executable, executeLifecycleFile),
+      connect: () => readConnectedCapabilities(connectAcp)
+    })
+    send('grok:status-update', { connected: true, message: 'Grok 帳號已重新登入' })
+    return capabilities
+  }))
+  ipcMain.handle('grok:connect', async () => lifecycleOperation.runShared('Grok 連線', async () => (await connectAcp()).start()))
   ipcMain.handle('grok:sessions', () => listLocalSessions(grokHome()))
   ipcMain.handle('grok:usage', (_event, sessionId: string) => {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) return null
@@ -95,15 +153,18 @@ function registerIpc(): void {
   })
   ipcMain.handle('grok:billing', async () => {
     try {
-      return normalizeBilling(await billingCache.get(async () => (await connectAcp()).getBilling()))
+      return await lifecycleOperation.runShared('Grok 額度讀取', async () =>
+        normalizeBilling(await billingCache.get(async () => (await connectAcp()).getBilling())))
     } catch {
       return null
     }
   })
   ipcMain.handle('grok:session:delete', async (_event, sessionId: string) => {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) throw new Error('Invalid session id')
-    await execFileAsync(settings().grokExecutable, ['sessions', 'delete', sessionId], { windowsHide: true, timeout: 30_000 })
-    return true
+    return lifecycleOperation.runShared('Grok 對話操作', async () => {
+      await execFileAsync(settings().grokExecutable, ['sessions', 'delete', sessionId], { windowsHide: true, timeout: 30_000 })
+      return true
+    })
   })
   ipcMain.handle('settings:get', () => settings())
   ipcMain.handle('settings:save', (_event, value: AppSettings) => {
@@ -119,14 +180,14 @@ function registerIpc(): void {
     }
     return next
   })
-  ipcMain.handle('grok:session:create', async (_event, cwd: string) => (await connectAcp()).createSession(cwd))
-  ipcMain.handle('grok:session:load', async (_event, sessionId: string, cwd: string) => (await connectAcp()).loadSession(sessionId, cwd))
-  ipcMain.handle('grok:prompt', async (_event, sessionId: string, blocks: PromptBlock[]) => (await connectAcp()).prompt(sessionId, blocks))
-  ipcMain.handle('grok:cancel', async (_event, sessionId: string) => (await connectAcp()).cancel(sessionId))
-  ipcMain.handle('grok:mode', async (_event, sessionId: string, modeId: string) => (await connectAcp()).setMode(sessionId, modeId))
-  ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort))
-  ipcMain.handle('grok:config', async (_event, sessionId: string, configId: string, value: string | boolean) => (await connectAcp()).setConfigOption(sessionId, configId, value))
-  ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => acpConnection.current?.respondPermission(requestId, optionId))
+  ipcMain.handle('grok:session:create', async (_event, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => (await connectAcp()).createSession(cwd)))
+  ipcMain.handle('grok:session:load', async (_event, sessionId: string, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => (await connectAcp()).loadSession(sessionId, cwd)))
+  ipcMain.handle('grok:prompt', async (_event, sessionId: string, blocks: PromptBlock[]) => lifecycleOperation.runShared('Grok 工作', async () => (await connectAcp()).prompt(sessionId, blocks)))
+  ipcMain.handle('grok:cancel', async (_event, sessionId: string) => lifecycleOperation.runShared('Grok 工作', async () => (await connectAcp()).cancel(sessionId)))
+  ipcMain.handle('grok:mode', async (_event, sessionId: string, modeId: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setMode(sessionId, modeId)))
+  ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort)))
+  ipcMain.handle('grok:config', async (_event, sessionId: string, configId: string, value: string | boolean) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setConfigOption(sessionId, configId, value)))
+  ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => lifecycleOperation.runShared('Grok 權限回覆', async () => acpConnection.current?.respondPermission(requestId, optionId)))
   ipcMain.handle('dialog:directory', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0]
@@ -148,8 +209,10 @@ function registerIpc(): void {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) throw new Error('Invalid session id')
     const chosen = await dialog.showSaveDialog(mainWindow!, { defaultPath: `grok-${sessionId}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] })
     if (chosen.canceled || !chosen.filePath) return null
-    await execFileAsync(settings().grokExecutable, ['export', sessionId, chosen.filePath], { windowsHide: true, timeout: 30_000 })
-    return chosen.filePath
+    return lifecycleOperation.runShared('Grok 對話匯出', async () => {
+      await execFileAsync(settings().grokExecutable, ['export', sessionId, chosen.filePath!], { windowsHide: true, timeout: 30_000 })
+      return chosen.filePath
+    })
   })
   ipcMain.handle('grok:tui', async (_event, cwd: string) => {
     const child = spawn('wt.exe', ['new-tab', '--startingDirectory', cwd, settings().grokExecutable, '--cwd', cwd], { detached: true, stdio: 'ignore', windowsHide: false, shell: false })

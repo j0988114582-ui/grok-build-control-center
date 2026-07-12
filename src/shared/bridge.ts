@@ -9,6 +9,8 @@ export type SessionFeatures = { sessionId?: string; modes?: unknown; configOptio
 
 export interface GrokBridgeApi {
   getStatus(): Promise<CliStatus>
+  installCli(): Promise<CliStatus>
+  reauthenticate(): Promise<AgentCapabilities>
   connect(): Promise<AgentCapabilities>
   listSessions(): Promise<SessionSummary[]>
   getSettings(): Promise<AppSettings>

@@ -12,7 +12,7 @@ const executablePath = process.env.GROK_GUI_EXE?.trim()
 const app = await electron.launch(executablePath
   ? { executablePath: path.resolve(executablePath), args: [`--user-data-dir=${profile}`] }
   : { args: ['.', `--user-data-dir=${profile}`] })
-const result = { beginner: false, focus: false, deep: false, reducedMotion: false, quota: false, cursor: false, modelPicker: false, commandPalette: false, shortcuts: false, sidebarFits: false, renderer: 'none', a11y: [], screenshots: [] }
+const result = { beginner: false, focus: false, deep: false, reducedMotion: false, quota: false, quotaProducts: false, accountSwitch: false, cursor: false, modelPicker: false, commandPalette: false, shortcuts: false, sidebarFits: false, renderer: 'none', a11y: [], screenshots: [] }
 try {
   const page = await app.firstWindow()
   page.setDefaultTimeout(90_000)
@@ -33,7 +33,9 @@ try {
     })
     result.a11y.push({ state, violations: report })
   }
-  result.beginner = await page.getByRole('heading', { name: /選一個專案資料夾/ }).isVisible()
+  const beginnerHeading = page.locator('.empty-state h1')
+  await beginnerHeading.waitFor()
+  result.beginner = /選一個專案資料夾|第一次使用/.test(await beginnerHeading.innerText())
   result.cursor = await page.getByTestId('cursor-fx').isVisible()
   await audit('empty')
   await page.locator('.empty-state h1').click()
@@ -47,6 +49,15 @@ try {
   await page.getByRole('button', { name: /Connect/ }).click()
   await page.locator('[aria-label^="總額度已使用"]').waitFor()
   result.quota = await page.getByText(/重置/).first().isVisible()
+  result.quotaProducts = (await Promise.all(['Build', 'Imagine', 'API'].map(async (label) => page.locator(`[data-testid="quota-summary"] [aria-label^="${label} "]`).isVisible()))).every(Boolean)
+  result.accountSwitch = await page.getByRole('button', { name: '切換 Grok 帳號' }).isVisible()
+  await page.getByRole('button', { name: '切換 Grok 帳號' }).click()
+  await page.getByRole('dialog', { name: '登入 Grok 帳號' }).waitFor()
+  await audit('account-switch-confirmation')
+  const accountPath = path.join(output, 'account-switch-confirmation.png')
+  await page.screenshot({ path: accountPath })
+  result.screenshots.push(accountPath)
+  await page.keyboard.press('Escape')
   const starfield = page.locator('.starfield-canvas')
   result.renderer = await starfield.getAttribute('data-renderer') ?? 'none'
   const clearNotice = async () => {
@@ -114,4 +125,4 @@ try {
 }
 
 const a11yFailures = result.a11y.flatMap((entry) => entry.violations)
-if (!result.beginner || !result.focus || !result.deep || !result.reducedMotion || !result.quota || !result.cursor || !result.modelPicker || !result.commandPalette || !result.shortcuts || !result.sidebarFits || result.renderer === 'none' || a11yFailures.length) process.exitCode = 1
+if (!result.beginner || !result.focus || !result.deep || !result.reducedMotion || !result.quota || !result.quotaProducts || !result.accountSwitch || !result.cursor || !result.modelPicker || !result.commandPalette || !result.shortcuts || !result.sidebarFits || result.renderer === 'none' || a11yFailures.length) process.exitCode = 1

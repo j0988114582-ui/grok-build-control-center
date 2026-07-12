@@ -150,7 +150,7 @@ const seededRandom = (seed: number): (() => number) => () => {
 const TIME_WRAP_MS = 36_000_000
 
 class GalaxyEngine implements StarfieldEngine {
-  readonly renderer: 'webgl' | 'canvas2d' | 'none'
+  renderer: 'webgl' | 'canvas2d' | 'none'
   private readonly gl: WebGLRenderingContext | null
   private readonly context2d: CanvasRenderingContext2D | null
   private programs: Programs | null
@@ -228,6 +228,11 @@ class GalaxyEngine implements StarfieldEngine {
   private onContextRestored(): void {
     if (this.destroyed || !this.gl) return
     this.programs = this.initializeWebGl(this.gl)
+    if (!this.programs) {
+      this.renderer = 'none'
+      return
+    }
+    this.renderer = 'webgl'
     this.resize()
     if (this.options.static) this.render(performance.now())
     else if (!document.hidden && !this.frame) this.frame = requestAnimationFrame((time) => this.render(time))

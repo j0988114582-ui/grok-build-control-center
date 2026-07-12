@@ -1,6 +1,6 @@
 {
   "name": "grok-build-gui",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "Unofficial Windows-first control center for Grok Build CLI",
   "author": "Grok Build Control Center contributors",
@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "build": "npm run typecheck && electron-vite build",
-    "package": "npm run test && npm run build && electron-builder --win nsis",
+    "notices": "node scripts/generate-third-party-notices.mjs",
+    "package": "npm run notices && npm run test && npm run build && electron-builder --win nsis",
     "lint": "eslint . --max-warnings=0",
     "verify": "npm test && npm run lint && npm run typecheck && npm run build",
     "smoke:ui": "npm run build && node work/ui_feature_smoke.mjs"
@@ -65,6 +66,9 @@
     "files": [
       "out/**/*",
       "package.json",
+      "LICENSE",
+      "PRIVACY.md",
+      "THIRD_PARTY_NOTICES.txt",
       "!node_modules/**"
     ],
     "directories": {

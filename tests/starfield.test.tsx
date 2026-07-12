@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { densityToStarCount, motionProfile, shouldRenderStatic } from '../src/renderer/src/fx/starfield'
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createStarfield, densityToStarCount, motionProfile, shouldRenderStatic } from '../src/renderer/src/fx/starfield'
 
 describe('starfield performance contract', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
   it('maps density settings to bounded particle budgets', () => {
     expect(densityToStarCount('low')).toBe(600)
     expect(densityToStarCount('medium')).toBe(1000)
@@ -19,5 +22,68 @@ describe('starfield performance contract', () => {
     expect(shouldRenderStatic(true, false)).toBe(true)
     expect(shouldRenderStatic(false, true)).toBe(true)
     expect(shouldRenderStatic(false, false)).toBe(false)
+  })
+
+  it('stops animation when WebGL initialization fails after context restore', () => {
+    let programCount = 0
+    const gl = {
+      VERTEX_SHADER: 1,
+      FRAGMENT_SHADER: 2,
+      COMPILE_STATUS: 3,
+      LINK_STATUS: 4,
+      ARRAY_BUFFER: 5,
+      STATIC_DRAW: 6,
+      FLOAT: 7,
+      DEPTH_TEST: 8,
+      TRIANGLES: 9,
+      BLEND: 10,
+      SRC_ALPHA: 11,
+      ONE: 12,
+      POINTS: 13,
+      createProgram: vi.fn(() => ++programCount <= 2 ? {} : null),
+      createShader: vi.fn(() => ({})),
+      shaderSource: vi.fn(),
+      compileShader: vi.fn(),
+      getShaderParameter: vi.fn(() => true),
+      getShaderInfoLog: vi.fn(() => ''),
+      attachShader: vi.fn(),
+      linkProgram: vi.fn(),
+      deleteShader: vi.fn(),
+      getProgramParameter: vi.fn(() => true),
+      getProgramInfoLog: vi.fn(() => ''),
+      createBuffer: vi.fn(() => ({})),
+      bindBuffer: vi.fn(),
+      bufferData: vi.fn(),
+      viewport: vi.fn(),
+      disable: vi.fn(),
+      useProgram: vi.fn(),
+      getAttribLocation: vi.fn(() => 0),
+      enableVertexAttribArray: vi.fn(),
+      vertexAttribPointer: vi.fn(),
+      getUniformLocation: vi.fn(() => ({})),
+      uniform1f: vi.fn(),
+      drawArrays: vi.fn(),
+      enable: vi.fn(),
+      blendFunc: vi.fn(),
+      deleteProgram: vi.fn(),
+      deleteBuffer: vi.fn(),
+      getExtension: vi.fn(() => null)
+    } as unknown as WebGLRenderingContext
+    const canvas = document.createElement('canvas')
+    canvas.getContext = vi.fn((type: string) => type === 'webgl' ? gl : null) as typeof canvas.getContext
+    const requestFrame = vi.fn(() => 1)
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const engine = createStarfield(canvas, { density: 'low', static: false })
+    expect(engine.renderer).toBe('webgl')
+    expect(requestFrame).toHaveBeenCalledTimes(1)
+
+    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
+    canvas.dispatchEvent(new Event('webglcontextrestored'))
+
+    expect(engine.renderer).toBe('none')
+    expect(requestFrame).toHaveBeenCalledTimes(1)
+    engine.destroy()
   })
 })

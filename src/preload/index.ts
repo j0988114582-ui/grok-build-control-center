@@ -4,6 +4,8 @@ import type { PermissionRequest, UiSessionEvent } from '../shared/types'
 
 const api: GrokBridgeApi = {
   getStatus: () => ipcRenderer.invoke('grok:status'),
+  installCli: () => ipcRenderer.invoke('grok:install'),
+  reauthenticate: () => ipcRenderer.invoke('grok:account:reauthenticate'),
   connect: () => ipcRenderer.invoke('grok:connect'),
   listSessions: () => ipcRenderer.invoke('grok:sessions'),
   getSettings: () => ipcRenderer.invoke('settings:get'),

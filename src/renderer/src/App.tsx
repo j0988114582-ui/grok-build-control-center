@@ -28,6 +28,17 @@ import type {
 const EMPTY_CAPS: AgentCapabilities = { loadSession: false, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [] }
 const emptyStatus: CliStatus = { executable: '', found: false, connected: false }
 type Panel = 'none' | 'settings' | 'features' | 'commands' | 'shortcuts'
+type SetupDialog = 'install' | 'account' | null
+
+const containDialogFocus = (event: React.KeyboardEvent<HTMLElement>): void => {
+  if (event.key !== 'Tab') return
+  const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+  if (focusable.length === 0) { event.preventDefault(); event.currentTarget.focus(); return }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+}
 
 const readQuotaReminders = (storageKey: string): Set<number> => {
   try {
@@ -165,6 +176,8 @@ export function App(): React.JSX.Element {
   const [unread, setUnread] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [notice, setNotice] = useState('')
+  const [setupDialog, setSetupDialog] = useState<SetupDialog>(null)
+  const [lifecycleBusy, setLifecycleBusy] = useState(false)
   const virtuoso = useRef<VirtuosoHandle>(null)
   const sessionSearchRef = useRef<HTMLInputElement>(null)
   const transcriptSearchRef = useRef<HTMLInputElement>(null)
@@ -174,6 +187,8 @@ export function App(): React.JSX.Element {
   const activeIdRef = useRef<string | null>(null)
   const billingRef = useRef<BillingInfo | null>(null)
   const loadingSessionsRef = useRef<Set<string>>(new Set())
+  const permissionReturnFocusRef = useRef<HTMLElement | null>(null)
+  const setupReturnFocusRef = useRef<HTMLElement | null>(null)
   followTailRef.current = followTail
   activeIdRef.current = active?.id ?? null
 
@@ -226,8 +241,28 @@ export function App(): React.JSX.Element {
   refreshSessionsRef.current = refreshSessions
 
   const permission = permissions[0] ?? null
+  const safePermissionOptionId = permission?.options.find((option) => option.kind.includes('reject'))?.optionId
   const running = active ? runningMap[active.id] === true : false
   const attachments = active ? attachmentsBySession[active.id] ?? [] : []
+
+  useEffect(() => {
+    if (permission) return
+    const target = permissionReturnFocusRef.current
+    permissionReturnFocusRef.current = null
+    if (target?.isConnected) target.focus()
+  }, [permission])
+
+  useEffect(() => {
+    if (setupDialog) return
+    const target = setupReturnFocusRef.current
+    setupReturnFocusRef.current = null
+    if (target?.isConnected) target.focus()
+  }, [setupDialog])
+
+  const openSetupDialog = (dialog: Exclude<SetupDialog, null>): void => {
+    if (!setupDialog && document.activeElement instanceof HTMLElement) setupReturnFocusRef.current = document.activeElement
+    setSetupDialog(dialog)
+  }
 
   useEffect(() => {
     void Promise.all([window.grokApi.getStatus(), window.grokApi.listSessions(), window.grokApi.getSettings()]).then(([nextStatus, nextSessions, nextSettings]) => { setStatus(nextStatus); setSessions(nextSessions); setSettings(nextSettings); setDrafts(nextSettings.drafts); setSettingsHydrated(true) })
@@ -251,10 +286,20 @@ export function App(): React.JSX.Element {
       }
       if (!followTailRef.current && event.sessionId === activeIdRef.current) setUnread((value) => value + 1)
     })
-    const offPermission = window.grokApi.onPermission((request) => setPermissions((current) => [...current, request]))
+    const offPermission = window.grokApi.onPermission((request) => setPermissions((current) => {
+      if (current.length === 0 && document.activeElement instanceof HTMLElement) permissionReturnFocusRef.current = document.activeElement
+      return [...current, request]
+    }))
     const offStatus = window.grokApi.onStatus((next) => {
       if (next.connected !== undefined) setStatus((current) => ({ ...current, connected: next.connected === true }))
-      if (next.connected === false) setPermissions([])
+      if (next.connected === false) {
+        setPermissions([])
+        setCaps(EMPTY_CAPS)
+        setModels(undefined)
+        billingRef.current = null
+        setBilling(null)
+        setBillingUnavailable(false)
+      }
       if (next.stderr) console.warn('[grok stderr]', next.stderr)
       if (next.message) setNotice(next.message)
     })
@@ -284,16 +329,18 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
       if (event.isComposing) return
+      if (setupDialog && event.key !== 'Escape') return
       const target = event.target as HTMLElement | null
       const editing = Boolean(target?.matches('input, textarea, select') || target?.isContentEditable)
       const command = commandForEvent(settings.shortcuts, event, editing ? ['global'] : ['global', 'transcript'])
       if (command === 'searchTranscript') { event.preventDefault(); setSearchOpen(true); setTimeout(() => transcriptSearchRef.current?.focus(), 0); return }
       if (command === 'commandPalette') { event.preventDefault(); setPanel('commands'); return }
       if (command === 'searchSessions') { event.preventDefault(); if (!sidebarOpen) setSidebarOpen(true); setTimeout(() => sessionSearchRef.current?.focus(), 0); return }
-      if (command === 'newSession') { event.preventDefault(); createSessionRef.current(); return }
+      if (command === 'newSession') { event.preventDefault(); if (!lifecycleBusy) createSessionRef.current(); return }
       if (command === 'jumpToLatest') { event.preventDefault(); jumpToLatestRef.current(); return }
       if (command === 'cancelTurn' || event.key === 'Escape') {
         if (panel !== 'none') { event.preventDefault(); setPanel('none'); return }
+        if (setupDialog) { event.preventDefault(); if (!lifecycleBusy) setSetupDialog(null); return }
         if (deleteTarget) { event.preventDefault(); setDeleteTarget(null); return }
         if (renameTarget) { event.preventDefault(); setRenameTarget(null); return }
         if (searchOpen) { event.preventDefault(); setSearchOpen(false); setTranscriptQuery(''); return }
@@ -307,7 +354,7 @@ export function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [running, active, panel, deleteTarget, renameTarget, searchOpen, sidebarOpen, settings.shortcuts])
+  }, [running, active, panel, setupDialog, lifecycleBusy, deleteTarget, renameTarget, searchOpen, sidebarOpen, settings.shortcuts])
 
   const activeEvents = useMemo(() => active ? events[active.id] ?? [] : [], [active, events])
   const searchHits = useMemo(() => transcriptQuery ? activeEvents.filter((event) => eventText(event).toLocaleLowerCase().includes(transcriptQuery.toLocaleLowerCase())).length : 0, [activeEvents, transcriptQuery])
@@ -316,16 +363,12 @@ export function App(): React.JSX.Element {
   const filteredSessions = useMemo(() => sessions.filter((session) => `${sessionDisplayTitle(session, settings.sessionTitles)} ${session.cwd}`.toLocaleLowerCase().includes(sessionQuery.toLocaleLowerCase())), [sessions, sessionQuery, settings.sessionTitles])
   const sessionGroups = useMemo(() => groupSessionsByProject(filteredSessions), [filteredSessions])
   const connect = async (): Promise<AgentCapabilities | null> => {
+    if (lifecycleBusy) return null
     setNotice('正在連接 Grok ACP…')
     try {
       const value = await window.grokApi.connect()
-      setCaps((current) => ({
-        ...value,
-        commands: current.commands.length ? current.commands : value.commands,
-        modes: current.modes.length ? current.modes : value.modes,
-        ...(current.currentModeId ? { currentModeId: current.currentModeId } : {})
-      }))
-      if (value.modelState) setModels((current) => current ?? value.modelState)
+      setCaps(value)
+      setModels(value.modelState)
       setStatus((current) => ({ ...current, connected: true }))
       setNotice('ACP 已連線')
       void refreshBillingRef.current()
@@ -335,21 +378,68 @@ export function App(): React.JSX.Element {
       return null
     }
   }
+  const installCli = async (): Promise<void> => {
+    if (lifecycleBusy) return
+    setLifecycleBusy(true)
+    setNotice('正在準備官方 Grok CLI 安裝程式…')
+    try {
+      const nextStatus = await window.grokApi.installCli()
+      setStatus(nextStatus)
+      const nextSettings = await window.grokApi.getSettings()
+      setSettings(nextSettings)
+      setNotice(`Grok CLI ${nextStatus.version ?? ''} 安裝完成，下一步請登入帳號`)
+      setSetupDialog('account')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      setLifecycleBusy(false)
+    }
+  }
+  const reauthenticateAccount = async (): Promise<void> => {
+    if (lifecycleBusy || running) return
+    setLifecycleBusy(true)
+    setNotice('等待瀏覽器完成 Grok 登入…')
+    try {
+      const value = await window.grokApi.reauthenticate()
+      setCaps(value)
+      setModels(value.modelState)
+      setActive(null)
+      setUsage(null)
+      setRunningMap({})
+      setFollowTail(true)
+      setUnread(0)
+      setStatus((current) => ({ ...current, found: true, connected: true }))
+      setSetupDialog(null)
+      setNotice('Grok 帳號已重新登入')
+      void refreshSessionsRef.current()
+      void refreshBillingRef.current()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      setLifecycleBusy(false)
+    }
+  }
   const applySessionModes = (modes: unknown): void => {
     if (!modes || typeof modes !== 'object') return
     const source = modes as { currentModeId?: unknown; availableModes?: unknown }
-    const availableModes = Array.isArray(source.availableModes) ? source.availableModes.flatMap((mode) => {
+    const hasAvailableModes = Array.isArray(source.availableModes)
+    const availableModes = hasAvailableModes ? (source.availableModes as unknown[]).flatMap((mode) => {
       if (!mode || typeof mode !== 'object') return []
       const entry = mode as Record<string, unknown>
       return typeof entry.id === 'string' && typeof entry.name === 'string' ? [{ id: entry.id, name: entry.name }] : []
     }) : []
-    setCaps((current) => ({
-      ...current,
-      ...(availableModes.length ? { modes: availableModes } : {}),
-      ...(typeof source.currentModeId === 'string' ? { currentModeId: source.currentModeId } : {})
-    }))
+    setCaps((current) => {
+      const next = { ...current }
+      if (hasAvailableModes) {
+        next.modes = availableModes
+        if (!availableModes.some((mode) => mode.id === next.currentModeId)) delete next.currentModeId
+      }
+      if (typeof source.currentModeId === 'string') next.currentModeId = source.currentModeId
+      return next
+    })
   }
   const createSession = async (): Promise<void> => {
+    if (lifecycleBusy) return
     try {
       const cwd = await window.grokApi.chooseDirectory()
       if (!cwd) return
@@ -363,13 +453,15 @@ export function App(): React.JSX.Element {
       setSessions((current) => [summary, ...current])
       setActive(summary)
       setUsage(null)
+      setFollowTail(true)
+      setUnread(0)
       void refreshUsage(response.sessionId)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error))
     }
   }
   const loadSession = async (session: SessionSummary): Promise<void> => {
-    if (loadingSessionsRef.current.has(session.id)) return
+    if (lifecycleBusy || loadingSessionsRef.current.has(session.id)) return
     loadingSessionsRef.current.add(session.id)
     try {
       const capsValue = await connect()
@@ -527,21 +619,22 @@ export function App(): React.JSX.Element {
     <header className="titlebar"><div className="brand-mark"><span>G</span></div><strong>GROK BUILD</strong><i>DESKTOP WORKBENCH</i><div className="drag-region" />
       <QuotaRings billing={billing} unavailable={billingUnavailable} />
       {active && <div className="usage-pill" title={`Context 額度${usage?.turnCount !== undefined ? ` · ${usage.turnCount} 回合` : ''}${usage?.toolCallCount !== undefined ? ` · ${usage.toolCallCount} 次工具` : ''} · 訂閱用量請至 grok.com 查看`}><Gauge /><span>{usagePercent !== undefined ? `${usagePercent}%` : '—'}</span><div className="usage-bar"><i className={usageLevel} style={{ width: `${Math.min(100, usagePercent ?? 0)}%` }} /></div><em>{formatTokens(usage?.contextTokensUsed)} / {formatTokens(usageTotal)}</em></div>}
-      <button className={`status-pill ${status.connected ? 'online' : ''}`} onClick={() => void connect()}><span />{status.found ? `Grok ${status.version ?? ''}` : 'CLI not found'} · {status.connected ? 'Connected' : 'Connect'}</button></header>
+      {status.found && <button className="account-pill" aria-label="切換 Grok 帳號" title={running ? '請先停止目前執行中的回合' : '切換 Grok 帳號'} disabled={lifecycleBusy || running} onClick={() => openSetupDialog('account')}><UserRound />切換帳號</button>}
+      <button className={`status-pill ${status.connected ? 'online' : ''}`} disabled={lifecycleBusy} onClick={() => { if (status.found) void connect(); else openSetupDialog('install') }}><span />{status.found ? `Grok ${status.version ?? ''}` : 'CLI not found'} · {status.connected ? 'Connected' : status.found ? 'Connect' : 'Setup'}</button></header>
     <div className={`workspace ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
       <aside className="sidebar">
-        <div className="sidebar-actions"><button className="primary" data-magnetic data-nova-tone="primary" onClick={() => void createSession()}><FilePlus2 />新 Session</button><button className="icon-button" aria-label="收合側欄" onClick={() => setSidebarOpen(false)}><PanelLeftClose /></button></div>
+        <div className="sidebar-actions"><button className="primary" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => void createSession()}><FilePlus2 />新 Session</button><button className="icon-button" aria-label="收合側欄" onClick={() => setSidebarOpen(false)}><PanelLeftClose /></button></div>
         <label className="searchbox"><Search /><input ref={sessionSearchRef} placeholder={`搜尋 sessions  ${shortcutFor('searchSessions').replaceAll('+', ' ')}`} value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} /></label>
         <div className="session-caption"><span>RECENT SESSIONS</span><em>{filteredSessions.length}</em></div>
         <nav className="session-list">{sessionGroups.map((group) => <section className="session-group" key={group.cwd}><header><span>{group.name}</span><em>{group.sessions.length}</em></header>{group.sessions.map((session) => { const title = sessionDisplayTitle(session, settings.sessionTitles); return <div key={session.id} className={`session-row ${active?.id === session.id ? 'active' : ''} ${collapsingSessionId === session.id ? 'collapsing' : ''}`}>
-          <button className="session-open" onClick={() => void loadSession(session)}><span className="session-dot" /><div><strong>{title}</strong><small>{session.cwd}</small><time>{formatDate(session.updatedAt)}</time></div></button>
+          <button className="session-open" disabled={lifecycleBusy} onClick={() => void loadSession(session)}><span className="session-dot" /><div><strong>{title}</strong><small>{session.cwd}</small><time>{formatDate(session.updatedAt)}</time></div></button>
           <button className="session-rename" title="重新命名" aria-label={`重新命名 ${title}`} onClick={() => { setRenameTarget(session); setRenameDraft(title) }}><Pencil /></button>
           <button className="session-delete" data-nova-tone="danger" title="刪除對話" aria-label={`刪除對話 ${title}`} onClick={() => setDeleteTarget(session)}><Trash2 /></button>
         </div>})}</section>)}</nav>
         <div className="sidebar-footer"><button onClick={() => setPanel('features')}><Gauge />功能矩陣</button><button onClick={() => setPanel('settings')}><Settings />設定</button></div>
       </aside>
       <main className="main">
-        {!active ? <section className="empty-state"><div className="empty-orbit"><Cpu /><span /></div><span className="eyebrow">WINDOWS GROK BUILD CONTROL CENTER</span><h1>選一個專案資料夾，<br/><em>就可以開始。</em></h1><p>不用輸入終端指令。這裡會替你連接本機 Grok、保留未送出的文字，並在執行前顯示權限確認。</p><div className="onboarding-steps"><span><b>1</b>按「選擇專案開始」</span><span><b>2</b>選擇你的工作資料夾</span><span><b>3</b>用白話交代任務</span></div><div><button className="primary large" data-magnetic data-nova-tone="primary" onClick={() => void createSession()}><FolderOpen />選擇專案開始</button><button className="secondary large" onClick={() => void connect()}><Play />{status.found ? '連接本機 Grok' : '重新檢查 Grok 安裝'}</button></div><div className="empty-stats"><span><b>{sessions.length}</b>個本機對話</span><span><b>{status.version ?? '—'}</b>Grok CLI 版本</span><span><b>ACP</b>不模擬終端</span></div></section> : <>
+        {!active ? <section className="empty-state"><div className="empty-orbit"><Cpu /><span /></div><span className="eyebrow">WINDOWS GROK BUILD CONTROL CENTER</span><h1>{status.found ? <>選一個專案資料夾，<br/><em>就可以開始。</em></> : <>第一次使用？<br/><em>一鍵準備 Grok。</em></>}</h1><p>{status.found ? '不用輸入終端指令。這裡會替你連接本機 Grok、保留未送出的文字，並在執行前顯示權限確認。' : '不用先學終端，也不用安裝 Node.js。程式會在你確認後，從 x.ai 官方來源安裝 Grok CLI。'}</p><div className="onboarding-steps">{status.found ? <><span><b>1</b>按「選擇專案開始」</span><span><b>2</b>選擇你的工作資料夾</span><span><b>3</b>用白話交代任務</span></> : <><span><b>1</b>確認安裝 Grok CLI</span><span><b>2</b>在瀏覽器登入 Grok</span><span><b>3</b>選資料夾開始</span></>}</div><div>{status.found ? <><button className="primary large" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => void createSession()}><FolderOpen />選擇專案開始</button><button className="secondary large" disabled={lifecycleBusy} onClick={() => void connect()}><Play />連接本機 Grok</button></> : <button className="primary large" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => openSetupDialog('install')}><TerminalSquare />安裝 Grok CLI</button>}</div><div className="empty-stats"><span><b>{sessions.length}</b>個本機對話</span><span><b>{status.version ?? '—'}</b>Grok CLI 版本</span><span><b>ACP</b>不模擬終端</span></div></section> : <>
           <header className="session-header">{!sidebarOpen && <button className="icon-button" aria-label="展開側欄" onClick={() => setSidebarOpen(true)}><Archive /></button>}<div><span className="eyebrow">ACTIVE SESSION</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{caps.modes.length > 0 && <select aria-label="Mode" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>Mode</option>{caps.modes.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}</select>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) setNotice(`已匯出到 ${path}`) }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
           <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
@@ -555,7 +648,9 @@ export function App(): React.JSX.Element {
     {panel === 'shortcuts' && <div className="modal-backdrop"><section className="shortcut-overlay" role="dialog" aria-modal="true" aria-label="快捷鍵一覽"><header><div><span className="eyebrow">KEYBOARD HELP</span><h2>快捷鍵一覽</h2></div><button className="icon-button" aria-label="關閉快捷鍵" onClick={() => setPanel('none')}><X /></button></header><div>{[
       [shortcutLabel('newSession'), '建立新對話'], [shortcutLabel('searchSessions'), '搜尋本機對話'], [shortcutLabel('searchTranscript'), '搜尋目前內容'], [shortcutLabel('commandPalette'), '開啟命令面板'], [shortcutLabel('jumpToLatest'), '跳到最新訊息'], [shortcutLabel('cancelTurn'), '取消執行（Esc 永遠先關閉視窗）'], ['?', '顯示這張說明']
     ].map(([keys, action]) => <p key={keys}><kbd>{keys}</kbd><span>{action}</span></p>)}</div><footer><Keyboard />在輸入框內按「?」會正常輸入文字，不會打開這張卡片。</footer></section></div>}
-    {permission && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label={permission.title}><div className="permission-icon"><Wrench /></div><span className="eyebrow">ACTION REQUIRES APPROVAL{permissions.length > 1 ? ` · 還有 ${permissions.length - 1} 項待決` : ''}</span><h2>{permission.title}</h2><p>Grok 要求執行一項可能修改檔案或呼叫外部工具的操作。只可選擇代理提供的合法選項。</p><div>{permission.options.map((option, index) => <button key={option.optionId} autoFocus={index === 0} className={option.kind.includes('reject') ? 'danger-option' : ''} onClick={() => void window.grokApi.respondPermission(permission.requestId, option.optionId).catch((error) => setNotice(error instanceof Error ? error.message : String(error))).then(() => setPermissions((current) => current.filter((item) => item.requestId !== permission.requestId)))}>{option.kind.includes('reject') ? <X /> : <Check />}<span><strong>{option.name}</strong><small>{option.kind}</small></span></button>)}</div></section></div>}
+    {setupDialog === 'install' && <div className="modal-backdrop"><section className="permission-modal setup-modal" role="dialog" aria-modal="true" aria-label="安裝 Grok CLI" onKeyDown={containDialogFocus}><div className="permission-icon"><TerminalSquare /></div><span className="eyebrow">FIRST-TIME SETUP</span><h2>安裝 Grok CLI</h2><p>這是程式真正需要的工具，不是 Windows Terminal，也不是 Node.js。按下確認後才會從 x.ai 官方網址下載，安裝在你的 Windows 帳號內，不要求系統管理員權限。</p><code>https://x.ai/cli/install.ps1</code><div><button className="primary" aria-label="確認安裝 Grok CLI" disabled={lifecycleBusy} onClick={() => void installCli()}><TerminalSquare /><span><strong>{lifecycleBusy ? '正在安裝…' : '確認安裝 Grok CLI'}</strong><small>下載後會驗證 grok --version</small></span></button><button autoFocus disabled={lifecycleBusy} onClick={() => setSetupDialog(null)}><X /><span><strong>先不要</strong><small>不會下載或執行任何東西</small></span></button></div></section></div>}
+    {setupDialog === 'account' && <div className="modal-backdrop"><section className="permission-modal setup-modal" role="dialog" aria-modal="true" aria-label="登入 Grok 帳號" onKeyDown={containDialogFocus}><div className="permission-icon"><UserRound /></div><span className="eyebrow">OFFICIAL GROK OAUTH</span><h2>{status.connected ? '切換 Grok 帳號' : '登入 Grok 帳號'}</h2><p>接下來會由 Grok CLI 開啟 x.ai 的瀏覽器登入頁。程式不會看見、保存或複製你的密碼與 token；CLI 目前也不提供帳號 email 或多帳號清單。</p><div><button className="primary" aria-label="開啟瀏覽器並重新登入" disabled={lifecycleBusy || running} onClick={() => void reauthenticateAccount()}><UserRound /><span><strong>{lifecycleBusy ? '等待瀏覽器登入…' : running ? '請先停止目前回合' : '開啟瀏覽器並重新登入'}</strong><small>完成後會重建連線與額度資料</small></span></button><button autoFocus disabled={lifecycleBusy} onClick={() => setSetupDialog(null)}><X /><span><strong>取消</strong><small>維持目前狀態</small></span></button></div></section></div>}
+    {permission && <div className="modal-backdrop"><section key={permission.requestId} className="permission-modal" role="dialog" aria-modal="true" aria-label={permission.title} tabIndex={-1} autoFocus={!safePermissionOptionId} onKeyDown={containDialogFocus}><div className="permission-icon"><Wrench /></div><span className="eyebrow">ACTION REQUIRES APPROVAL{permissions.length > 1 ? ` · 還有 ${permissions.length - 1} 項待決` : ''}</span><h2>{permission.title}</h2><p>Grok 要求執行一項可能修改檔案或呼叫外部工具的操作。只可選擇代理提供的合法選項。</p><div>{permission.options.map((option) => <button key={option.optionId} autoFocus={option.optionId === safePermissionOptionId} className={option.kind.includes('reject') ? 'danger-option' : ''} onClick={() => void window.grokApi.respondPermission(permission.requestId, option.optionId).catch((error) => setNotice(error instanceof Error ? error.message : String(error))).then(() => setPermissions((current) => current.filter((item) => item.requestId !== permission.requestId)))}>{option.kind.includes('reject') ? <X /> : <Check />}<span><strong>{option.name}</strong><small>{option.kind}</small></span></button>)}</div></section></div>}
     {deleteTarget && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="刪除對話確認"><div className="permission-icon danger"><Trash2 /></div><span className="eyebrow">DELETE SESSION</span><h2>刪除這則對話？</h2><p>「{sessionDisplayTitle(deleteTarget, settings.sessionTitles)}」（{deleteTarget.cwd}）將從本機 session 歷史永久刪除，無法復原。</p><div><button className="danger-option" onClick={() => void deleteSession()}><Trash2 /><span><strong>永久刪除</strong><small>grok sessions delete</small></span></button><button autoFocus onClick={() => setDeleteTarget(null)}><X /><span><strong>取消</strong><small>保留這則對話</small></span></button></div></section></div>}
     {renameTarget && <div className="modal-backdrop"><section className="permission-modal rename-modal" role="dialog" aria-modal="true" aria-label="重新命名對話"><div className="permission-icon"><Pencil /></div><span className="eyebrow">LOCAL TITLE</span><h2>替這則對話取一個好找的名稱</h2><p>只改這台電腦上的顯示名稱，不會修改 Grok CLI 的原始紀錄。</p><label>對話名稱<input aria-label="對話名稱" autoFocus value={renameDraft} maxLength={80} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; if (event.key === 'Enter') void saveSessionTitle(); if (event.key === 'Escape') { event.stopPropagation(); setRenameTarget(null) } }} /></label><div><button onClick={() => void saveSessionTitle()}><Check /><span><strong>儲存名稱</strong><small>保存在本機設定</small></span></button><button onClick={() => setRenameTarget(null)}><X /><span><strong>取消</strong></span></button></div></section></div>}
     {notice && <button className="notice" aria-live="polite" onClick={() => setNotice('')}><Zap />{notice}<X /></button>}

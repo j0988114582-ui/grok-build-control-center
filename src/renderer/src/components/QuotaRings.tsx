@@ -15,7 +15,7 @@ const PRODUCT_LABELS: Record<string, string> = {
 }
 
 function ReactorRing({ label, percent }: { label: string; percent?: number }): React.JSX.Element {
-  if (percent === undefined) return <div className="quota-ring unavailable" aria-label={`${label} 額度暫無資料`}>
+  if (percent === undefined) return <div className="quota-ring unavailable" aria-label={`${label} 額度暫無資料`} title="服務未提供此項額度">
     <svg viewBox="0 0 40 40" aria-hidden="true"><circle className="quota-ring-track" cx="20" cy="20" r="15" /></svg>
     <span><strong>—</strong><small>{label}</small></span>
   </div>
@@ -33,22 +33,30 @@ function ReactorRing({ label, percent }: { label: string; percent?: number }): R
 
 export function QuotaRings({ billing, unavailable = false, now }: QuotaRingsProps): React.JSX.Element | null {
   if (!billing) return unavailable ? <div className="quota-unavailable">額度資料暫不可用</div> : null
-  const build = billing.productUsage.find((item) => item.product === 'GrokBuild')?.usagePercent
+  const usageFor = (product: string): number | undefined => billing.productUsage.find((item) => item.product === product)?.usagePercent
+  const fixedProducts = [
+    { product: 'GrokBuild', label: 'Build' },
+    { product: 'GrokImagine', label: 'Imagine' },
+    { product: 'Api', label: 'API' }
+  ]
   const periodStart = billing.billingPeriodStart ?? billing.currentPeriod?.start
   const periodEnd = billing.billingPeriodEnd ?? billing.currentPeriod?.end
 
   return <div className="quota-reactor" data-testid="quota-reactor" tabIndex={0}>
-    <div className="quota-reactor-main">
+    <div className="quota-reactor-main" data-testid="quota-summary" aria-label="額度摘要">
       <ReactorRing label="總額度" percent={billing.creditUsagePercent} />
-      <ReactorRing label="GrokBuild" percent={build} />
+      {fixedProducts.map((item) => <ReactorRing key={item.product} label={item.label} percent={usageFor(item.product)} />)}
       <time>{formatBillingReset(periodEnd, now)}</time>
     </div>
     <section className="quota-popover" aria-label="週額度明細">
       <header><strong>反應爐額度</strong><span>WEEKLY</span></header>
-      <div className="quota-products">{billing.productUsage.map((item) => <div key={item.product}>
-        <label><span>{PRODUCT_LABELS[item.product] ?? item.product}</span><b>{Math.round(item.usagePercent)}%</b></label>
-        <i><span className={quotaLevel(item.usagePercent)} style={{ width: `${Math.min(100, Math.max(0, item.usagePercent))}%` }} /></i>
-      </div>)}</div>
+      <div className="quota-products">{fixedProducts.map((fixed) => {
+        const usage = usageFor(fixed.product)
+        return <div key={fixed.product} className={usage === undefined ? 'unavailable' : undefined}>
+          <label><span>{PRODUCT_LABELS[fixed.product]}</span><b>{usage === undefined ? '—' : `${Math.round(usage)}%`}</b></label>
+          <i>{usage !== undefined && <span className={quotaLevel(usage)} style={{ width: `${Math.min(100, Math.max(0, usage))}%` }} />}</i>
+        </div>
+      })}</div>
       <footer><span>{periodStart ? new Date(periodStart).toLocaleDateString('zh-TW') : '—'}</span><em>→</em><span>{periodEnd ? new Date(periodEnd).toLocaleDateString('zh-TW') : '—'}</span></footer>
     </section>
   </div>

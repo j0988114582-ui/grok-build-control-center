@@ -106,7 +106,7 @@ describe('BillingCache', () => {
     const freshLoad = vi.fn(() => new Promise<string>((resolve) => { resolveFresh = resolve }))
     const fresh = cache.get(freshLoad)
     resolveStale('old-executable-data')
-    await stale
+    await expect(stale).resolves.toBeUndefined()
     const coalesced = cache.get(freshLoad)
     expect(freshLoad).toHaveBeenCalledTimes(1)
     resolveFresh('fresh')

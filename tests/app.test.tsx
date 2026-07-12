@@ -9,6 +9,8 @@ import type { GrokBridgeApi } from '../src/shared/bridge'
 
 const createApiMock = (): GrokBridgeApi => ({
   getStatus: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\111\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
+  installCli: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\111\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
+  reauthenticate: vi.fn().mockResolvedValue({ loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [] }),
   connect: vi.fn().mockResolvedValue({
     loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [{ name: 'compact', description: '壓縮目前 context' }],
     modelState: {
@@ -43,6 +45,98 @@ describe('App', () => {
     expect(await screen.findByText('Fix tests')).toBeInTheDocument()
     expect(screen.getByText(/Grok 0.2.93/)).toBeInTheDocument()
     expect(screen.queryByText('Terminal')).not.toBeInTheDocument()
+  })
+
+  it('requires confirmation before installing the official Grok CLI and then offers browser sign-in', async () => {
+    const api = createApiMock()
+    api.getStatus = vi.fn().mockResolvedValue({ executable: 'C:\\Users\\newbie\\.grok\\bin\\grok.exe', found: false, connected: false })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: '安裝 Grok CLI' }))
+    expect(screen.getByRole('dialog', { name: '安裝 Grok CLI' })).toBeInTheDocument()
+    expect(screen.getByText('https://x.ai/cli/install.ps1')).toBeInTheDocument()
+    expect(api.installCli).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: '確認安裝 Grok CLI' }))
+    await waitFor(() => expect(api.installCli).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('dialog', { name: '登入 Grok 帳號' })).toBeInTheDocument()
+  })
+
+  it('keeps the install confirmation available when setup fails', async () => {
+    const api = createApiMock()
+    api.getStatus = vi.fn().mockResolvedValue({ executable: 'C:\\Users\\newbie\\.grok\\bin\\grok.exe', found: false, connected: false })
+    api.installCli = vi.fn().mockRejectedValue(new Error('網路中斷，請稍後再試'))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: '安裝 Grok CLI' }))
+    await user.click(screen.getByRole('button', { name: '確認安裝 Grok CLI' }))
+
+    expect(await screen.findByText('網路中斷，請稍後再試')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '安裝 Grok CLI' })).toBeInTheDocument()
+  })
+
+  it('switches the active account only after confirmation', async () => {
+    const api = createApiMock()
+    api.reauthenticate = vi.fn().mockResolvedValue({
+      loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [],
+      modelState: { currentModelId: 'grok-4.5', availableModels: [] }
+    })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: '切換 Grok 帳號' }))
+    expect(screen.getByRole('dialog', { name: '登入 Grok 帳號' })).toBeInTheDocument()
+    expect(api.reauthenticate).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: '開啟瀏覽器並重新登入' }))
+    await waitFor(() => expect(api.reauthenticate).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText('Grok 帳號已重新登入')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '登入 Grok 帳號' })).not.toBeInTheDocument()
+  })
+
+  it('blocks account switching while the active Grok turn is running', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    act(() => { onEvent?.({ id: 'turn-running', sessionId: 's1', kind: 'turn', status: 'running' }) })
+
+    expect(screen.getByRole('button', { name: '切換 Grok 帳號' })).toBeDisabled()
+  })
+
+  it('restores focus to the account button after cancelling its setup dialog', async () => {
+    window.grokApi = createApiMock()
+    const user = userEvent.setup()
+    render(<App />)
+
+    const accountButton = await screen.findByRole('button', { name: '切換 Grok 帳號' })
+    await user.click(accountButton)
+    await user.click(screen.getByRole('button', { name: /取消/ }))
+
+    expect(accountButton).toHaveFocus()
+  })
+
+  it('disables session entry points while browser account authentication is pending', async () => {
+    const api = createApiMock()
+    api.reauthenticate = vi.fn(() => new Promise<never>(() => {}))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: '切換 Grok 帳號' }))
+    await user.click(screen.getByRole('button', { name: '開啟瀏覽器並重新登入' }))
+
+    expect(screen.getByRole('button', { name: /新 Session/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Grok 0\.2\.93/ })).toBeDisabled()
   })
 
   it('deletes a session after the in-app confirmation', async () => {
@@ -81,7 +175,7 @@ describe('App', () => {
     await user.click(await screen.findByText('Fix tests'))
 
     expect(await screen.findByLabelText('總額度已使用 79%')).toBeInTheDocument()
-    expect(screen.getByLabelText('GrokBuild 已使用 50%')).toBeInTheDocument()
+    expect(screen.getByLabelText('Build 已使用 50%')).toBeInTheDocument()
     expect(screen.getByText(/7\/17 重置/)).toBeInTheDocument()
     expect(api.getBilling).toHaveBeenCalled()
   })
@@ -152,6 +246,59 @@ describe('App', () => {
     expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ recentCommands: ['slash:compact'] }))
   })
 
+  it('replaces stale commands and modes when a new connection explicitly reports empty lists', async () => {
+    const api = createApiMock()
+    api.connect = vi.fn()
+      .mockResolvedValueOnce({
+        loadSession: true,
+        promptCapabilities: {},
+        sessionCapabilities: {},
+        commands: [{ name: 'legacy-command', description: 'old account command' }],
+        modes: [{ id: 'legacy-mode', name: 'Old account mode' }],
+        currentModeId: 'legacy-mode'
+      })
+      .mockResolvedValueOnce({
+        loadSession: true,
+        promptCapabilities: {},
+        sessionCapabilities: {},
+        commands: [],
+        modes: []
+      })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    expect(screen.getByRole('combobox', { name: 'Mode' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Grok 0\.2\.93.*Connected/ }))
+    await user.click(screen.getByTitle('命令'))
+
+    expect(screen.queryByText('/legacy-command')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Mode' })).not.toBeInTheDocument()
+  })
+
+  it('clears a stale mode when a session response explicitly reports an empty mode list', async () => {
+    const api = createApiMock()
+    api.connect = vi.fn().mockResolvedValue({
+      loadSession: true,
+      promptCapabilities: {},
+      sessionCapabilities: {},
+      commands: [],
+      modes: [{ id: 'legacy-mode', name: 'Old account mode' }],
+      currentModeId: 'legacy-mode'
+    })
+    api.chooseDirectory = vi.fn().mockResolvedValue('C:\\new-project')
+    api.createSession = vi.fn().mockResolvedValue({ sessionId: 's2', modes: { availableModes: [] } })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: /新 Session/ }))
+    expect(await screen.findByRole('heading', { name: 'New session' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Mode' })).not.toBeInTheDocument()
+  })
+
   it('keeps rendering when a session summary has a corrupted timestamp', async () => {
     const api = createApiMock()
     api.listSessions = vi.fn().mockResolvedValue([{ id: 's1', cwd: 'C:\\repo', title: 'Fix tests', updatedAt: 'not-a-date' }])
@@ -174,6 +321,100 @@ describe('App', () => {
     expect(await screen.findByRole('dialog', { name: '需要權限' })).toBeInTheDocument()
     act(() => { onEvent?.({ id: 'e1', sessionId: 's1', kind: 'turn', status: 'completed' }) })
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '需要權限' })).not.toBeInTheDocument())
+  })
+
+  it('focuses the safe reject option when a permission dialog opens', async () => {
+    const api = createApiMock()
+    let onPermission: ((request: Parameters<Parameters<GrokBridgeApi['onPermission']>[0]>[0]) => void) | undefined
+    api.onPermission = vi.fn((callback) => { onPermission = callback; return () => {} })
+    window.grokApi = api
+    render(<App />)
+    await screen.findByText('Fix tests')
+
+    act(() => { onPermission?.({
+      requestId: 'p-safe',
+      sessionId: 's1',
+      title: '允許修改檔案？',
+      options: [
+        { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+        { optionId: 'reject', name: 'Cancel', kind: 'reject_once' }
+      ]
+    }) })
+
+    expect(await screen.findByRole('button', { name: /Cancel/ })).toHaveFocus()
+    expect(screen.getByRole('button', { name: /Allow once/ })).not.toHaveFocus()
+  })
+
+  it('focuses the safe reject option when a queued permission replaces the current request', async () => {
+    const api = createApiMock()
+    let onPermission: ((request: Parameters<Parameters<GrokBridgeApi['onPermission']>[0]>[0]) => void) | undefined
+    api.onPermission = vi.fn((callback) => { onPermission = callback; return () => {} })
+    api.respondPermission = vi.fn().mockResolvedValue(undefined)
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByText('Fix tests')
+
+    act(() => {
+      onPermission?.({ requestId: 'p-first', sessionId: 's1', title: '第一項權限', options: [{ optionId: 'allow', name: 'Allow once', kind: 'allow_once' }] })
+      onPermission?.({ requestId: 'p-second', sessionId: 's1', title: '第二項權限', options: [
+        { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+        { optionId: 'reject', name: 'Cancel', kind: 'reject_once' }
+      ] })
+    })
+
+    await user.click(await screen.findByRole('button', { name: /Allow once/ }))
+    expect(await screen.findByRole('button', { name: /Cancel/ })).toHaveFocus()
+  })
+
+  it('restores focus after a permission dialog closes', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    let onPermission: ((request: Parameters<Parameters<GrokBridgeApi['onPermission']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.onPermission = vi.fn((callback) => { onPermission = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    const sessionSearch = await screen.findByPlaceholderText(/搜尋 sessions/)
+    await user.click(sessionSearch)
+
+    act(() => { onPermission?.({
+      requestId: 'p-restore',
+      sessionId: 's1',
+      title: '需要權限',
+      options: [{ optionId: 'reject', name: 'Cancel', kind: 'reject_once' }]
+    }) })
+    expect(await screen.findByRole('button', { name: /Cancel/ })).toHaveFocus()
+
+    act(() => { onEvent?.({ id: 'turn-finished', sessionId: 's1', kind: 'turn', status: 'completed' }) })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '需要權限' })).not.toBeInTheDocument())
+    expect(sessionSearch).toHaveFocus()
+  })
+
+  it('contains keyboard focus inside an open permission dialog', async () => {
+    const api = createApiMock()
+    let onPermission: ((request: Parameters<Parameters<GrokBridgeApi['onPermission']>[0]>[0]) => void) | undefined
+    api.onPermission = vi.fn((callback) => { onPermission = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByText('Fix tests')
+
+    act(() => { onPermission?.({
+      requestId: 'p-trap',
+      sessionId: 's1',
+      title: '需要權限',
+      options: [
+        { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+        { optionId: 'reject', name: 'Cancel', kind: 'reject_once' }
+      ]
+    }) })
+    const dialog = await screen.findByRole('dialog', { name: '需要權限' })
+    expect(screen.getByRole('button', { name: /Cancel/ })).toHaveFocus()
+
+    await user.tab()
+    expect(dialog).toContainElement(document.activeElement as HTMLElement)
   })
 
   it('does not send the draft when Enter only confirms an IME composition', async () => {
@@ -249,6 +490,33 @@ describe('App', () => {
     await user.click(screen.getByText('Broken load'))
     expect(await screen.findByText('讀取對話失敗')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Fix tests' })).toBeInTheDocument()
+  })
+
+  it('resets follow-tail and unread state after creating a new active session', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.chooseDirectory = vi.fn().mockResolvedValue('C:\\new-project')
+    api.createSession = vi.fn().mockResolvedValue({ sessionId: 's2' })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]') as HTMLElement | null
+    expect(scroller).not.toBeNull()
+    Object.defineProperties(scroller!, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 1000 },
+      scrollTop: { configurable: true, writable: true, value: 0 }
+    })
+    fireEvent.scroll(scroller!)
+    act(() => { onEvent?.({ id: 'away-event', sessionId: 's1', kind: 'message', role: 'assistant', text: 'new output' }) })
+    expect(await screen.findByRole('button', { name: /跳到最新/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /新 Session/ }))
+    expect(await screen.findByRole('heading', { name: 'New session' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /跳到最新/ })).not.toBeInTheDocument()
   })
 
   it('restores a failed prompt and leaves the session ready to retry', async () => {

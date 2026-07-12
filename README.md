@@ -11,17 +11,18 @@ This project is not affiliated with or endorsed by xAI. Grok and Grok Build are 
 Requirements:
 
 - Windows 10 or 11, x64
-- Grok Build CLI installed and signed in
+- An internet connection for first-time Grok CLI setup and sign-in
 
 Steps:
 
 1. Open the latest GitHub Release.
-2. Download `Grok-Build-Control-Center-Setup-0.3.1.exe` and `SHA256SUMS.txt`.
+2. Download `Grok-Build-Control-Center-Setup-0.3.2.exe` and `SHA256SUMS.txt`.
 3. Verify the installer checksum before opening it.
 4. Run the installer. It installs only for your Windows account and does not request administrator access.
-5. Open the app and click **選擇專案開始**.
+5. Open the app. If Grok CLI is missing, click **安裝 Grok CLI**, review the official `https://x.ai/cli/install.ps1` source notice, and confirm.
+6. Complete Grok's browser sign-in, then click **選擇專案開始**.
 
-The v0.3.1 community build is currently unsigned. Windows SmartScreen may show a warning. Only continue if the SHA-256 value matches the release checksum. Code signing is tracked as a release requirement, not represented as complete.
+The v0.3.2 community build is currently unsigned. Windows SmartScreen may show a warning. Only continue if the SHA-256 value matches the release checksum. Code signing is tracked as a release requirement, not represented as complete.
 
 ## First task
 
@@ -32,10 +33,12 @@ The v0.3.1 community build is currently unsigned. Windows SmartScreen may show a
 
 Useful keys: `Ctrl+Shift+P` opens command search, and `?` shows all shortcuts. Unsent text is saved locally after 500 ms.
 
-## What v0.3.1 includes
+## What v0.3.2 includes
 
 - ACP-native sessions, streaming messages, tools, permissions, modes, and models
-- Weekly subscription usage and reset countdown
+- Enlarged weekly subscription summary for Total, Build, Imagine, and API; products omitted by the service show `—` instead of a fabricated zero
+- Confirmed first-time installation of Grok CLI from xAI's documented Windows installer
+- Safe browser OAuth reauthentication for switching the single active Grok account
 - Project-grouped sessions, local rename, search, export, and persistent drafts
 - Accessible model picker and searchable command palette
 - Copyable syntax-highlighted code blocks
@@ -43,7 +46,7 @@ Useful keys: `Ctrl+Shift+P` opens command search, and `?` shows all shortcuts. U
 - Optional cursor effects with reduced-motion and background-pause support
 - Virtualized long transcripts and a Canvas2D fallback when WebGL is unavailable
 
-This is not a full IDE, a multi-model chat platform, or a replacement for Grok Build authentication. Unsupported operations route to the real Grok TUI instead of simulating terminal keystrokes.
+This is not a full IDE, a multi-model chat platform, a multi-account credential vault, or a replacement for Grok Build authentication. The app never stores account tokens. Unsupported operations route to the real Grok TUI instead of simulating terminal keystrokes.
 
 ## Trust and privacy
 
@@ -53,8 +56,10 @@ This is not a full IDE, a multi-model chat platform, or a replacement for Grok B
 - No direct reading of `auth.json`
 - Grok CLI remains responsible for authentication and model/network traffic
 - Local settings contain preferences, title overrides, and unfinished drafts
+- Third-party dependency license texts are included in `THIRD_PARTY_NOTICES.txt` and in packaged builds
 
 See [SECURITY.md](SECURITY.md), [PRIVACY.md](PRIVACY.md), and [BUILDING.md](BUILDING.md).
+For a plain-language message you can send to first-time testers, see [outputs/SHARE-MESSAGE.md](outputs/SHARE-MESSAGE.md).
 
 ## Development
 
@@ -65,7 +70,7 @@ npm run smoke:ui
 npm run package
 ```
 
-The verified development environment for v0.3.1 is Node.js 22.22.0 and npm 10.9.4 on Windows. See [BUILDING.md](BUILDING.md) for reproducible steps and artifact verification.
+The verified development environment for v0.3.2 is Node.js 22.22.0 and npm 10.9.4 on Windows. See [BUILDING.md](BUILDING.md) for reproducible steps and artifact verification.
 
 ## Architecture
 

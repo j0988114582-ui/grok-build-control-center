@@ -1,6 +1,6 @@
 # Grok Build GUI — agent notes
 
-狀態（2026-07-12，v0.3.1）：weekly billing、銀河背景、游標/語意動效、新手 UX、a11y/效能檢查與 unsigned NSIS installer 已完成；定位為 unofficial Windows control center。
+狀態（2026-07-12，v0.3.2 完成）：本輪加入官方 OAuth 重新登入、確認後一鍵安裝 Grok CLI、放大且不捏造數字的產品額度列；110 tests、live CLI、來源與 packaged UI/a11y smoke 皆通過，installer 仍為未簽章測試版。
 
 狀態補充（2026-07-12）：啟動／連線競態、快捷鍵、Esc 優先序、prompt 失敗復原、額度提醒、task 合併與視窗導覽已完成審查加固。
 
@@ -17,11 +17,14 @@
 - **Context 與訂閱額度是兩條管線**：grok 不推 `usage_update`；context window 仍讀 `~/.grok/sessions/<url-encoded-cwd>/<sessionId>/signals.json`。週訂閱額度走已實測的 ACP extension `_x.ai/billing`，params `{}`，CLI 自行認證；回應需經 `src/shared/billing.ts` 容錯 normalize，不能讀 `auth.json`。
 - **刪除對話**：`grok sessions delete <id>`，非互動、無 --force、成功印 `Deleted session <id>`。GUI 走這個 CLI，不自己 rm 目錄。
 - **initialize `_meta.availableCommands`** 有 slash 命令清單（compact/context/session-info…），可直接餵 command palette。
+- **帳號**：CLI 0.2.93 只有 `grok login` / `grok logout`，沒有 `whoami`、帳號清單或 profiles；GUI 的「切換帳號」只跑 `grok login --oauth` 並重建 ACP，不保存或讀取憑證。
+- **首次安裝**：一般使用者只需要 Grok CLI，不需要 Node；Windows Terminal 僅是 TUI fallback。官方 PowerShell installer URL 是 `https://x.ai/cli/install.ps1`，GUI 必須先明確確認再下載執行，並以 `grok --version` 驗證。
+- **產品額度**：`productUsage` 可能是空陣列；Build/Imagine/API 無資料時顯示 `—`，不得用 fixture、總額度或 0% 代替。
 
 ## 驗證流程
 
-- `npm test`（82 tests）＋ `npm run lint` ＋ `npm run typecheck`。
+- `npm test`＋ `npm run lint` ＋ `npm run typecheck`（測試數以當次輸出為準，不在本檔寫死）。
 - 免額度 live 驗證：`node work/live_feature_smoke.mjs`（真 CLI 連線、建 session、切模型、刪 session，不發 prompt）。
 - 花額度的完整 smoke：`node work/live_acp_smoke.mjs`（會發 3 個 prompt）。
 - UI/a11y：`npm run smoke:ui`（真 Electron、axe serious/critical、會寫含本機路徑的 gitignored 截圖）。
-- 打包：`npm run package` → `outputs/installer/Grok-Build-Control-Center-Setup-0.3.1.exe`；目前 `Get-AuthenticodeSignature` 為 `NotSigned`，不可誤稱已簽章。
+- 打包：`npm run package` → `outputs/installer/Grok-Build-Control-Center-Setup-0.3.2.exe`；目前 `Get-AuthenticodeSignature` 為 `NotSigned`，不可誤稱已簽章。

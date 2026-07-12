@@ -1,7 +1,7 @@
 export class BillingCache<T = unknown> {
   private value?: T
   private expiresAt = 0
-  private inFlight?: Promise<T>
+  private inFlight?: Promise<T | undefined>
   private generation = 0
 
   constructor(
@@ -9,15 +9,14 @@ export class BillingCache<T = unknown> {
     private readonly now: () => number = Date.now
   ) {}
 
-  async get(load: () => Promise<T>): Promise<T> {
+  async get(load: () => Promise<T>): Promise<T | undefined> {
     if (this.value !== undefined && this.now() < this.expiresAt) return this.value
     if (this.inFlight) return this.inFlight
     const generation = this.generation
     const request = load().then((value) => {
-      if (generation === this.generation) {
-        this.value = value
-        this.expiresAt = this.now() + this.ttlMs
-      }
+      if (generation !== this.generation) return undefined
+      this.value = value
+      this.expiresAt = this.now() + this.ttlMs
       return value
     }).finally(() => { if (this.inFlight === request) this.inFlight = undefined })
     this.inFlight = request
