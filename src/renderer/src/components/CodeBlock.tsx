@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
@@ -34,8 +34,11 @@ export function CodeBlock({ className, children }: { className?: string; childre
     return () => window.clearTimeout(timer)
   }, [copied])
 
+  const highlighted = useMemo(
+    () => !language ? '' : hljs.getLanguage(language) ? hljs.highlight(code, { language }).value : hljs.highlightAuto(code).value,
+    [code, language]
+  )
   if (!language) return <code className={className}>{children}</code>
-  const highlighted = hljs.getLanguage(language) ? hljs.highlight(code, { language }).value : hljs.highlightAuto(code).value
   return <div className="code-block" data-language={language}>
     <header><span>{language}</span><button aria-label={copied ? '已複製' : '複製程式碼'} onClick={() => { void navigator.clipboard.writeText(code).then(() => setCopied(true)) }}>{copied ? <Check /> : <Copy />}{copied ? '已複製' : '複製'}</button></header>
     <pre><code data-testid="highlighted-code" data-language={language} className={`hljs language-${language}`} dangerouslySetInnerHTML={{ __html: highlighted }} /></pre>

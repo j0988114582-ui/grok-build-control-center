@@ -16,12 +16,12 @@ Requirements:
 Steps:
 
 1. Open the latest GitHub Release.
-2. Download `Grok-Build-Control-Center-Setup-0.3.0.exe` and `SHA256SUMS.txt`.
+2. Download `Grok-Build-Control-Center-Setup-0.3.1.exe` and `SHA256SUMS.txt`.
 3. Verify the installer checksum before opening it.
 4. Run the installer. It installs only for your Windows account and does not request administrator access.
 5. Open the app and click **選擇專案開始**.
 
-The v0.3.0 community build is currently unsigned. Windows SmartScreen may show a warning. Only continue if the SHA-256 value matches the release checksum. Code signing is tracked as a release requirement, not represented as complete.
+The v0.3.1 community build is currently unsigned. Windows SmartScreen may show a warning. Only continue if the SHA-256 value matches the release checksum. Code signing is tracked as a release requirement, not represented as complete.
 
 ## First task
 
@@ -32,7 +32,7 @@ The v0.3.0 community build is currently unsigned. Windows SmartScreen may show a
 
 Useful keys: `Ctrl+Shift+P` opens command search, and `?` shows all shortcuts. Unsent text is saved locally after 500 ms.
 
-## What v0.3.0 includes
+## What v0.3.1 includes
 
 - ACP-native sessions, streaming messages, tools, permissions, modes, and models
 - Weekly subscription usage and reset countdown
@@ -65,7 +65,7 @@ npm run smoke:ui
 npm run package
 ```
 
-The verified development environment for v0.3.0 is Node.js 22.22.0 and npm 10.9.4 on Windows. See [BUILDING.md](BUILDING.md) for reproducible steps and artifact verification.
+The verified development environment for v0.3.1 is Node.js 22.22.0 and npm 10.9.4 on Windows. See [BUILDING.md](BUILDING.md) for reproducible steps and artifact verification.
 
 ## Architecture
 

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { GrokBridgeApi } from '../shared/bridge'
+import type { CliStatusUpdate, GrokBridgeApi } from '../shared/bridge'
 import type { PermissionRequest, UiSessionEvent } from '../shared/types'
 
 const api: GrokBridgeApi = {
@@ -35,7 +35,7 @@ const api: GrokBridgeApi = {
     return () => ipcRenderer.removeListener('grok:permission-request', listener)
   },
   onStatus: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, value: { message?: string }): void => callback(value)
+    const listener = (_event: Electron.IpcRendererEvent, value: CliStatusUpdate): void => callback(value)
     ipcRenderer.on('grok:status-update', listener)
     return () => ipcRenderer.removeListener('grok:status-update', listener)
   }

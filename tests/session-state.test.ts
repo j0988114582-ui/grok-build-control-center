@@ -36,4 +36,26 @@ describe('sessionReducer', () => {
     expect(state.events).toHaveLength(1)
     expect(state.events[0]).toMatchObject({ status: 'completed', output: 'ok' })
   })
+
+  it('merges background task updates into one card and keeps the original description', () => {
+    let state = createSessionState('s1')
+    state = sessionReducer(state, { type: 'event', event: { id: '1', sessionId: 's1', kind: 'task', taskId: 'task-1', description: 'npm run build', status: 'running' } })
+    state = sessionReducer(state, { type: 'event', event: { id: '2', sessionId: 's1', kind: 'task', taskId: 'task-1', description: 'Background task', status: 'completed' } })
+    expect(state.events).toHaveLength(1)
+    expect(state.events[0]).toMatchObject({ kind: 'task', description: 'npm run build', status: 'completed' })
+  })
+
+  it('appends task events without an id instead of merging unrelated tasks', () => {
+    let state = createSessionState('s1')
+    state = sessionReducer(state, { type: 'event', event: { id: '1', sessionId: 's1', kind: 'task', taskId: '', description: 'A', status: 'running' } })
+    state = sessionReducer(state, { type: 'event', event: { id: '2', sessionId: 's1', kind: 'task', taskId: '', description: 'B', status: 'running' } })
+    expect(state.events).toHaveLength(2)
+  })
+
+  it('does not regress a completed task or erase its useful description on replay', () => {
+    let state = createSessionState('s1')
+    state = sessionReducer(state, { type: 'event', event: { id: '1', sessionId: 's1', kind: 'task', taskId: 'task-1', description: 'npm test', status: 'completed' } })
+    state = sessionReducer(state, { type: 'event', event: { id: '2', sessionId: 's1', kind: 'task', taskId: 'task-1', description: '  ', status: 'running' } })
+    expect(state.events[0]).toMatchObject({ description: 'npm test', status: 'completed' })
+  })
 })

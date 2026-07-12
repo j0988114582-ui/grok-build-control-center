@@ -41,7 +41,7 @@ npm run package
 Expected artifact:
 
 ```text
-outputs/installer/Grok-Build-Control-Center-Setup-0.3.0.exe
+outputs/installer/Grok-Build-Control-Center-Setup-0.3.1.exe
 ```
 
 Generate release evidence:
@@ -49,7 +49,7 @@ Generate release evidence:
 ```powershell
 New-Item -ItemType Directory -Force outputs/release | Out-Null
 npm sbom --sbom-format cyclonedx | Set-Content -Encoding utf8 outputs/release/sbom.cdx.json
-$installer = Get-Item outputs/installer/Grok-Build-Control-Center-Setup-0.3.0.exe
+$installer = Get-Item outputs/installer/Grok-Build-Control-Center-Setup-0.3.1.exe
 $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
 "$($hash.Hash.ToLower())  $($installer.Name)" | Set-Content -Encoding ascii outputs/release/SHA256SUMS.txt
 ```

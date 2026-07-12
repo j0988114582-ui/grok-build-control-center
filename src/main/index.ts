@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import Store from 'electron-store'
 import { GrokAcpClient } from './acp-client'
 import { BillingCache } from './billing-cache'
+import { AcpConnectionState, reportAsyncError } from './acp-connection-state'
 import { parseGrokVersion } from './grok-cli'
 import { listLocalSessions, readSessionUsage } from './session-index'
 import { createDefaultSettings, normalizeSettings } from '../shared/settings'
@@ -17,7 +18,7 @@ const execFileAsync = promisify(execFile)
 const defaults = createDefaultSettings(homedir())
 const settingsStore = new Store<AppSettings>({ name: 'settings', defaults })
 let mainWindow: BrowserWindow | null = null
-let acpClient: GrokAcpClient | null = null
+const acpConnection = new AcpConnectionState<GrokAcpClient>()
 let connectedExecutable = ''
 const billingCache = new BillingCache<unknown>()
 
@@ -31,27 +32,48 @@ async function cliStatus(): Promise<CliStatus> {
     await access(executable)
     const { stdout } = await execFileAsync(executable, ['--version'], { windowsHide: true, timeout: 10_000 })
     const parsed = parseGrokVersion(stdout)
-    return { executable, found: true, version: parsed?.version, revision: parsed?.revision, connected: acpClient !== null && connectedExecutable === executable }
+    return { executable, found: true, version: parsed?.version, revision: parsed?.revision, connected: acpConnection.current !== null && connectedExecutable === executable }
   } catch (error) {
     return { executable, found: false, connected: false, error: error instanceof Error ? error.message : String(error) }
   }
 }
 
+let acpConnecting: { executable: string; client: GrokAcpClient; promise: Promise<GrokAcpClient> } | null = null
+
 async function connectAcp(): Promise<GrokAcpClient> {
   const executable = settings().grokExecutable
-  if (acpClient && connectedExecutable === executable) return acpClient
-  acpClient?.stop()
+  if (acpConnection.current && connectedExecutable === executable) return acpConnection.current
+  if (acpConnecting?.executable === executable) return acpConnecting.promise
+  acpConnecting?.client.stop()
+  const previous = acpConnection.current
+  const generation = acpConnection.begin()
+  previous?.stop()
   const client = new GrokAcpClient(executable, {
     onEvent: (event) => send('grok:event', event),
     onPermission: (request) => send('grok:permission-request', request),
-    onStderr: (text) => send('grok:status-update', { message: text.trim().slice(0, 500) }),
-    onExit: (message) => { if (acpClient === client) acpClient = null; send('grok:status-update', { connected: false, message }) }
-  })
-  await client.start()
-  acpClient = client
-  connectedExecutable = executable
-  send('grok:status-update', { connected: true })
-  return client
+    onStderr: (text) => send('grok:status-update', { stderr: text.trim().slice(0, 500) }),
+    onExit: (message) => {
+      if (!acpConnection.release(client)) return
+      connectedExecutable = ''
+      send('grok:status-update', { connected: false, message })
+    }
+  }, app.getVersion())
+  const promise = (async (): Promise<GrokAcpClient> => {
+    await client.start()
+    if (settings().grokExecutable !== executable || !acpConnection.commit(generation, client)) {
+      client.stop()
+      throw new Error('Grok 執行檔設定已變更,請重新連線')
+    }
+    connectedExecutable = executable
+    send('grok:status-update', { connected: true })
+    return client
+  })()
+  acpConnecting = { executable, client, promise }
+  try {
+    return await promise
+  } finally {
+    if (acpConnecting?.promise === promise) acpConnecting = null
+  }
 }
 
 const mimeFor = (file: string): string | undefined => ({
@@ -79,7 +101,14 @@ function registerIpc(): void {
   ipcMain.handle('settings:save', (_event, value: AppSettings) => {
     const next = normalizeSettings(value, homedir())
     settingsStore.store = next
-    if (connectedExecutable && connectedExecutable !== next.grokExecutable) { acpClient?.stop(); acpClient = null; billingCache.clear() }
+    if ((connectedExecutable && connectedExecutable !== next.grokExecutable) || (acpConnecting && acpConnecting.executable !== next.grokExecutable)) {
+      const previous = acpConnection.current
+      acpConnection.begin()
+      connectedExecutable = ''
+      previous?.stop()
+      acpConnecting?.client.stop()
+      billingCache.clear()
+    }
     return next
   })
   ipcMain.handle('grok:session:create', async (_event, cwd: string) => (await connectAcp()).createSession(cwd))
@@ -89,7 +118,7 @@ function registerIpc(): void {
   ipcMain.handle('grok:mode', async (_event, sessionId: string, modeId: string) => (await connectAcp()).setMode(sessionId, modeId))
   ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort))
   ipcMain.handle('grok:config', async (_event, sessionId: string, configId: string, value: string | boolean) => (await connectAcp()).setConfigOption(sessionId, configId, value))
-  ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => acpClient?.respondPermission(requestId, optionId))
+  ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => acpConnection.current?.respondPermission(requestId, optionId))
   ipcMain.handle('dialog:directory', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0]
@@ -111,6 +140,10 @@ function registerIpc(): void {
   })
   ipcMain.handle('grok:tui', async (_event, cwd: string) => {
     const child = spawn('wt.exe', ['new-tab', '--startingDirectory', cwd, settings().grokExecutable, '--cwd', cwd], { detached: true, stdio: 'ignore', windowsHide: false, shell: false })
+    await new Promise<void>((resolve, reject) => {
+      child.once('spawn', () => resolve())
+      child.once('error', (error) => reject(new Error(`無法開啟 Windows Terminal(wt.exe):${error.message}`)))
+    })
     child.unref()
   })
   ipcMain.handle('shell:external', async (_event, url: string) => {
@@ -126,9 +159,16 @@ function createWindow(): void {
     titleBarStyle: 'hidden', titleBarOverlay: { color: '#151613', symbolColor: '#e8e4d9', height: 38 },
     webPreferences: { preload: path.join(__dirname, '../preload/index.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
   })
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) reportAsyncError(shell.openExternal(url), (message) => send('grok:status-update', { message: `無法開啟外部連結:${message}` }))
+    return { action: 'deny' }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== mainWindow?.webContents.getURL()) event.preventDefault()
+  })
   if (process.env.ELECTRON_RENDERER_URL) mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   else mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
 }
 
 app.whenReady().then(() => { registerIpc(); createWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() }) })
-app.on('window-all-closed', () => { acpClient?.stop(); if (process.platform !== 'darwin') app.quit() })
+app.on('window-all-closed', () => { acpConnection.current?.stop(); if (process.platform !== 'darwin') app.quit() })

@@ -7,7 +7,6 @@ import type {
   NewSessionResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
-  SessionConfigOption,
   SessionModeState,
   SetSessionConfigOptionResponse
 } from '@agentclientprotocol/sdk'
@@ -53,9 +52,12 @@ export function normalizeModelState(value: unknown): ModelState | undefined {
 }
 
 type PendingPermission = {
+  sessionId: string
   options: PermissionOption[]
   resolve: (value: RequestPermissionResponse) => void
 }
+
+const START_TIMEOUT_MS = 15_000
 
 export type AcpClientCallbacks = {
   onEvent: (event: UiSessionEvent) => void
@@ -71,19 +73,30 @@ export class GrokAcpClient {
   private capabilities: AgentCapabilities = normalizeCapabilities(undefined)
   private permissions = new Map<string, PendingPermission>()
   private requestSequence = 0
+  private lastStderr = ''
+  private exitNotified = false
+  private startupReject?: (error: Error) => void
 
-  constructor(private executable: string, private callbacks: AcpClientCallbacks) {}
+  constructor(private executable: string, private callbacks: AcpClientCallbacks, private clientVersion = '0.0.0') {}
 
   async start(): Promise<AgentCapabilities> {
     if (this.connection) return this.capabilities
+    this.exitNotified = false
     this.child = spawn(this.executable, buildAgentArgs(), { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
     this.child.stderr.setEncoding('utf8')
-    this.child.stderr.on('data', (chunk: string) => this.callbacks.onStderr(chunk))
+    this.child.stderr.on('data', (chunk: string) => {
+      const trimmed = chunk.trim()
+      if (trimmed) this.lastStderr = trimmed.slice(0, 300)
+      this.callbacks.onStderr(chunk)
+    })
+    this.child.on('error', (error) => {
+      this.startupReject?.(new Error(`無法啟動 Grok CLI(${this.executable}):${error.message}`))
+      this.teardown(`Grok ACP process error (${error.message})`)
+    })
     this.child.once('exit', (code, signal) => {
-      this.rejectPermissions()
-      this.connection = undefined
-      this.context = undefined
-      this.callbacks.onExit(`Grok ACP exited (${signal ?? code ?? 'unknown'})`)
+      const detail = `${signal ?? code ?? 'unknown'}${this.lastStderr ? `: ${this.lastStderr}` : ''}`
+      this.startupReject?.(new Error(`Grok CLI 啟動後立即結束(${detail})`))
+      this.teardown(`Grok ACP exited (${detail})`)
     })
 
     const app = acp.client({ name: 'Grok Build GUI' })
@@ -98,24 +111,41 @@ export class GrokAcpClient {
     )
     this.connection = app.connect(stream)
     this.context = this.connection.agent
-    const initialized = await this.context.request(acp.methods.agent.initialize, {
-      protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, plan: {} },
-      clientInfo: { name: 'Grok Build GUI', version: '0.2.0' }
+    const startupFailure = new Promise<never>((_resolve, reject) => { this.startupReject = reject })
+    let startTimer: NodeJS.Timeout | undefined
+    const startTimeout = new Promise<never>((_resolve, reject) => {
+      startTimer = setTimeout(() => reject(new Error(`Grok ACP initialize 逾時(${START_TIMEOUT_MS / 1000} 秒),請確認執行檔路徑與版本`)), START_TIMEOUT_MS)
     })
-    this.capabilities = normalizeCapabilities(initialized.agentCapabilities as RawCapabilities | undefined)
-    const meta = initialized._meta && typeof initialized._meta === 'object' ? initialized._meta as Record<string, unknown> : {}
-    const modelState = normalizeModelState(meta.modelState)
-    if (modelState) this.capabilities.modelState = modelState
-    if (Array.isArray(meta.availableCommands)) {
-      this.capabilities.commands = meta.availableCommands.flatMap((item) => {
-        if (!item || typeof item !== 'object') return []
-        const command = item as Record<string, unknown>
-        if (typeof command.name !== 'string') return []
-        return [{ name: command.name, ...(typeof command.description === 'string' ? { description: command.description } : {}) }]
-      })
+    try {
+      const initialized = await Promise.race([
+        this.context.request(acp.methods.agent.initialize, {
+          protocolVersion: acp.PROTOCOL_VERSION,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, plan: {} },
+          clientInfo: { name: 'Grok Build GUI', version: this.clientVersion }
+        }),
+        startupFailure,
+        startTimeout
+      ])
+      this.capabilities = normalizeCapabilities(initialized.agentCapabilities as RawCapabilities | undefined)
+      const meta = initialized._meta && typeof initialized._meta === 'object' ? initialized._meta as Record<string, unknown> : {}
+      const modelState = normalizeModelState(meta.modelState)
+      if (modelState) this.capabilities.modelState = modelState
+      if (Array.isArray(meta.availableCommands)) {
+        this.capabilities.commands = meta.availableCommands.flatMap((item) => {
+          if (!item || typeof item !== 'object') return []
+          const command = item as Record<string, unknown>
+          if (typeof command.name !== 'string') return []
+          return [{ name: command.name, ...(typeof command.description === 'string' ? { description: command.description } : {}) }]
+        })
+      }
+      return this.capabilities
+    } catch (error) {
+      this.stop()
+      throw error
+    } finally {
+      clearTimeout(startTimer)
+      this.startupReject = undefined
     }
-    return this.capabilities
   }
 
   async createSession(cwd: string): Promise<NewSessionResponse & { models?: ModelState }> {
@@ -141,12 +171,13 @@ export class GrokAcpClient {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.callbacks.onEvent({ id: `${sessionId}:turn:error`, sessionId, kind: 'error', message })
+      this.callbacks.onEvent({ id: `${sessionId}:turn:stop`, sessionId, kind: 'turn', status: 'error', stopReason: message })
       throw error
     }
   }
 
   async cancel(sessionId: string): Promise<void> {
-    this.cancelPermissions()
+    this.cancelPermissions(sessionId)
     await this.requireContext().notify(acp.methods.agent.session.cancel, { sessionId })
   }
 
@@ -191,19 +222,27 @@ export class GrokAcpClient {
     const requestId = `permission:${++this.requestSequence}`
     const options = params.options.map((option) => ({ optionId: option.optionId, name: option.name, kind: option.kind }))
     this.callbacks.onPermission({ requestId, sessionId: params.sessionId, title: params.toolCall.title ?? 'Grok requests permission', options })
-    return new Promise((resolve) => this.permissions.set(requestId, { options, resolve }))
+    return new Promise((resolve) => this.permissions.set(requestId, { sessionId: params.sessionId, options, resolve }))
   }
 
-  private cancelPermissions(): void {
-    for (const pending of this.permissions.values()) pending.resolve({ outcome: { outcome: 'cancelled' } })
-    this.permissions.clear()
+  private cancelPermissions(sessionId?: string): void {
+    for (const [requestId, pending] of this.permissions) {
+      if (sessionId !== undefined && pending.sessionId !== sessionId) continue
+      pending.resolve({ outcome: { outcome: 'cancelled' } })
+      this.permissions.delete(requestId)
+    }
   }
 
-  private rejectPermissions(): void {
+  private teardown(message: string): void {
     this.cancelPermissions()
+    this.connection = undefined
+    this.context = undefined
+    if (this.exitNotified) return
+    this.exitNotified = true
+    this.callbacks.onExit(message)
   }
 
-  private updateSessionFeatures(response: { modes?: SessionModeState | null; configOptions?: SessionConfigOption[] | null }): void {
+  private updateSessionFeatures(response: { modes?: SessionModeState | null }): void {
     this.capabilities.modes = response.modes?.availableModes?.map((mode) => ({ id: mode.id, name: mode.name })) ?? []
   }
 }

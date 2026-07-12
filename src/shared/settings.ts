@@ -1,5 +1,5 @@
 import type { AppSettings } from './types'
-import { DEFAULT_SHORTCUTS } from './shortcuts'
+import { DEFAULT_SHORTCUTS, normalizeAccelerator } from './shortcuts'
 
 const windowsJoin = (...parts: string[]): string => parts.map((part, index) => index === 0 ? part.replace(/[\\/]+$/, '') : part.replace(/^[\\/]+|[\\/]+$/g, '')).join('\\')
 
@@ -35,6 +35,37 @@ const normalizeDrafts = (value: unknown): Record<string, string> => {
   ))
 }
 
+const normalizeShortcuts = (value: unknown): AppSettings['shortcuts'] => {
+  const overrides = new Map<string, string>()
+  const seenCommands = new Set<string>()
+  const accepted: Array<{ command: string; accelerator: string; scope: AppSettings['shortcuts'][number]['scope'] }> = []
+  const modifiers = new Set(['Ctrl', 'Alt', 'Shift', 'Meta'])
+  const scopesOverlap = (left: AppSettings['shortcuts'][number]['scope'], right: AppSettings['shortcuts'][number]['scope']): boolean => left === 'global' || right === 'global' || left === right
+  const validAccelerator = (accelerator: string): boolean => {
+    const rawParts = accelerator.split('+').map((part) => part.trim())
+    if (!rawParts.length || rawParts.some((part) => !part)) return false
+    const parts = normalizeAccelerator(accelerator).split('+').filter(Boolean)
+    return parts.filter((part) => !modifiers.has(part)).length === 1
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (!entry || typeof entry !== 'object') continue
+      const binding = entry as Record<string, unknown>
+      if (typeof binding.command !== 'string' || seenCommands.has(binding.command)) continue
+      seenCommands.add(binding.command)
+      const fallback = DEFAULT_SHORTCUTS.find((item) => item.command === binding.command)
+      if (!fallback || typeof binding.accelerator !== 'string' || !validAccelerator(binding.accelerator)) continue
+      const accelerator = normalizeAccelerator(binding.accelerator)
+      const conflictsWithDefault = DEFAULT_SHORTCUTS.some((item) => item.command !== fallback.command && scopesOverlap(item.scope, fallback.scope) && normalizeAccelerator(item.accelerator) === accelerator)
+      const conflictsWithAccepted = accepted.some((item) => scopesOverlap(item.scope, fallback.scope) && item.accelerator === accelerator)
+      if (conflictsWithDefault || conflictsWithAccepted) continue
+      overrides.set(fallback.command, accelerator)
+      accepted.push({ command: fallback.command, accelerator, scope: fallback.scope })
+    }
+  }
+  return DEFAULT_SHORTCUTS.map((binding) => ({ ...binding, accelerator: overrides.get(binding.command) ?? binding.accelerator }))
+}
+
 const normalizeRecentCommands = (value: unknown): string[] => {
   if (!Array.isArray(value)) return []
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()))].slice(0, 8)
@@ -58,6 +89,6 @@ export function normalizeSettings(value: Partial<AppSettings> | undefined, homeD
     fontSize: clamp(value?.fontSize, 12, 22, defaults.fontSize),
     lineHeight: clamp(value?.lineHeight, 1.2, 2.1, defaults.lineHeight),
     contentWidth: clamp(value?.contentWidth, 640, 1400, defaults.contentWidth),
-    shortcuts: Array.isArray(value?.shortcuts) && value.shortcuts.length ? value.shortcuts : defaults.shortcuts
+    shortcuts: normalizeShortcuts(value?.shortcuts)
   }
 }

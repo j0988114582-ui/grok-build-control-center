@@ -49,4 +49,37 @@ describe('settings', () => {
       recentCommands: ['ok']
     })
   })
+
+  it('repairs malformed shortcut entries while keeping valid custom accelerators', () => {
+    const normalized = normalizeSettings({
+      shortcuts: [
+        { command: 'newSession', accelerator: 'Ctrl+Shift+N', scope: 'global' },
+        { command: 'unknownCommand', accelerator: 'Ctrl+U', scope: 'global' },
+        { command: 'cancelTurn' },
+        'garbage',
+        42
+      ]
+    } as never, 'C:\\Users\\111')
+    expect(normalized.shortcuts.find((item) => item.command === 'newSession')?.accelerator).toBe('Ctrl+Shift+N')
+    expect(normalized.shortcuts.find((item) => item.command === 'cancelTurn')?.accelerator).toBe('Escape')
+    expect(normalized.shortcuts.some((item) => item.command === 'unknownCommand')).toBe(false)
+    expect(normalized.shortcuts.every((item) => ['global', 'composer', 'transcript'].includes(item.scope))).toBe(true)
+  })
+
+  it('rejects malformed, duplicate-command, and conflicting shortcut overrides', () => {
+    const normalized = normalizeSettings({
+      shortcuts: [
+        { command: 'newSession', accelerator: 'Ctrl+', scope: 'global' },
+        { command: 'newSession', accelerator: 'Ctrl+Shift+N', scope: 'global' },
+        { command: 'searchSessions', accelerator: 'Ctrl+F', scope: 'global' },
+        { command: 'commandPalette', accelerator: 'Ctrl+Alt+P', scope: 'global' },
+        { command: 'searchTranscript', accelerator: 'Ctrl+Alt+P', scope: 'global' }
+      ]
+    }, 'C:\\Users\\111')
+
+    expect(normalized.shortcuts.find((item) => item.command === 'newSession')?.accelerator).toBe('Ctrl+N')
+    expect(normalized.shortcuts.find((item) => item.command === 'searchSessions')?.accelerator).toBe('Ctrl+K')
+    expect(normalized.shortcuts.find((item) => item.command === 'commandPalette')?.accelerator).toBe('Ctrl+Alt+P')
+    expect(normalized.shortcuts.find((item) => item.command === 'searchTranscript')?.accelerator).toBe('Ctrl+F')
+  })
 })

@@ -51,7 +51,10 @@ export function ModelPicker({ models, onModelChange, onEffortChange }: {
       event.preventDefault()
       selectModel(highlighted)
     } else if (event.key === 'Escape') {
-      setOpen(false)
+      if (open) {
+        event.stopPropagation()
+        setOpen(false)
+      }
     }
   }
 

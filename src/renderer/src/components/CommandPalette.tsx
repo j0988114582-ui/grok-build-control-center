@@ -55,6 +55,7 @@ export function CommandPalette({ commands, recentIds, onUse, onClose }: {
       execute(ranked[highlighted])
     } else if (event.key === 'Escape') {
       event.preventDefault()
+      event.stopPropagation()
       onClose()
     }
   }

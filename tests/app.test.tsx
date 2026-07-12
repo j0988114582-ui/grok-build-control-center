@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/renderer/src/App'
@@ -176,5 +176,110 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: '收合側欄' })).toBeInTheDocument()
     await user.click(screen.getByText('Fix tests'))
     expect(screen.getByRole('button', { name: '加入檔案' })).toBeInTheDocument()
+  })
+
+  it('reports directory picker failures instead of leaking an unhandled rejection', async () => {
+    const api = createApiMock()
+    api.chooseDirectory = vi.fn().mockRejectedValue(new Error('資料夾視窗無法開啟'))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: '選擇專案開始' }))
+    expect(await screen.findByText('資料夾視窗無法開啟')).toBeInTheDocument()
+  })
+
+  it('rolls back to the current session when loading another session fails', async () => {
+    const api = createApiMock()
+    api.listSessions = vi.fn().mockResolvedValue([
+      { id: 's1', cwd: 'C:\\repo', title: 'Fix tests', updatedAt: '2026-07-11T00:00:00Z' },
+      { id: 's2', cwd: 'C:\\other', title: 'Broken load', updatedAt: '2026-07-10T00:00:00Z' }
+    ])
+    api.loadSession = vi.fn().mockImplementation(async (sessionId) => {
+      if (sessionId === 's2') throw new Error('讀取對話失敗')
+      return { sessionId }
+    })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    await user.click(screen.getByText('Broken load'))
+    expect(await screen.findByText('讀取對話失敗')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Fix tests' })).toBeInTheDocument()
+  })
+
+  it('restores a failed prompt and leaves the session ready to retry', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    let rejectPrompt: ((error: Error) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.sendPrompt = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectPrompt = reject }))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    const composer = screen.getByPlaceholderText(/交給 Grok 一個任務/)
+    await user.type(composer, '請修好它')
+    await user.click(screen.getByRole('button', { name: '送出' }))
+    act(() => onEvent?.({ id: 'turn', sessionId: 's1', kind: 'turn', status: 'running' }))
+    expect(await screen.findByRole('button', { name: '停止' })).toBeInTheDocument()
+    act(() => rejectPrompt?.(new Error('Grok 暫時失敗')))
+
+    await waitFor(() => expect(composer).toHaveValue('請修好它'))
+    expect(screen.getByRole('button', { name: '送出' })).toBeInTheDocument()
+  })
+
+  it('restores failed attachments only to their original session', async () => {
+    const api = createApiMock()
+    api.listSessions = vi.fn().mockResolvedValue([
+      { id: 's1', cwd: 'C:\\repo', title: 'Fix tests', updatedAt: '2026-07-11T00:00:00Z' },
+      { id: 's2', cwd: 'C:\\other', title: 'Second task', updatedAt: '2026-07-10T00:00:00Z' }
+    ])
+    api.connect = vi.fn().mockResolvedValue({
+      loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: {}, modes: [], commands: []
+    })
+    api.chooseFiles = vi.fn()
+      .mockResolvedValueOnce([{ path: 'C:\\a.png', name: 'a.png', mimeType: 'image/png', data: 'AAA' }])
+      .mockResolvedValueOnce([{ path: 'C:\\b.png', name: 'b.png', mimeType: 'image/png', data: 'BBB' }])
+    let rejectPrompt: ((error: Error) => void) | undefined
+    api.sendPrompt = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectPrompt = reject }))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    await user.click(screen.getByRole('button', { name: '加入檔案' }))
+    expect(await screen.findByRole('button', { name: '移除附件 a.png' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '送出' }))
+    await user.click(screen.getByText('Second task'))
+    await user.click(screen.getByRole('button', { name: '加入檔案' }))
+    expect(await screen.findByRole('button', { name: '移除附件 b.png' })).toBeInTheDocument()
+    act(() => rejectPrompt?.(new Error('附件傳送失敗')))
+    await screen.findByText('附件傳送失敗')
+
+    await user.click(screen.getByText('Fix tests'))
+    expect(await screen.findByRole('button', { name: '移除附件 a.png' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '移除附件 b.png' })).not.toBeInTheDocument()
+  })
+
+  it('uses Escape only for dismissal when cancelTurn is remapped', async () => {
+    const api = createApiMock()
+    const saved = createDefaultSettings('C:\\Users\\111')
+    saved.shortcuts = saved.shortcuts.map((binding) => binding.command === 'cancelTurn' ? { ...binding, accelerator: 'Ctrl+X' } : binding)
+    api.getSettings = vi.fn().mockResolvedValue(saved)
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    act(() => onEvent?.({ id: 'turn', sessionId: 's1', kind: 'turn', status: 'running' }))
+    await user.keyboard('{Escape}')
+    expect(api.cancel).not.toHaveBeenCalled()
+    await user.keyboard('{Control>}x{/Control}')
+    expect(api.cancel).toHaveBeenCalledWith('s1')
   })
 })

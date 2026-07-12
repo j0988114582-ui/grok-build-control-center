@@ -42,6 +42,14 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
   } else if (event.kind === 'subagent') {
     const index = state.events.findIndex((item) => item.kind === 'subagent' && item.subagentId === event.subagentId)
     events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'subagent' ? { ...item, ...event } : item) : [...state.events, event]
+  } else if (event.kind === 'task' && event.taskId) {
+    const index = state.events.findIndex((item) => item.kind === 'task' && item.taskId === event.taskId)
+    events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'task' ? {
+      ...item,
+      ...event,
+      description: !event.description.trim() || event.description === 'Background task' ? item.description : event.description,
+      status: ['completed', 'cancelled', 'error', 'failed'].includes(item.status) && !['completed', 'cancelled', 'error', 'failed'].includes(event.status) ? item.status : event.status
+    } : item) : [...state.events, event]
   } else if (event.kind === 'turn' && last?.kind === 'turn' && last.status === event.status) {
     events = [...state.events.slice(0, -1), event]
   } else if (event.kind === 'message' && last?.kind === 'message' && last.role === event.role) {

@@ -34,7 +34,7 @@ export function normalizeBilling(value: unknown): BillingInfo | null {
 
   return {
     creditUsagePercent,
-    ...(type ? { currentPeriod: { type, ...(start ? { start } : {}), ...(end ? { end } : {}) } } : {}),
+    ...(type || start || end ? { currentPeriod: { type: type ?? 'unknown', ...(start ? { start } : {}), ...(end ? { end } : {}) } } : {}),
     ...(isoDate(config.billingPeriodStart) ? { billingPeriodStart: isoDate(config.billingPeriodStart) } : {}),
     ...(isoDate(config.billingPeriodEnd) ? { billingPeriodEnd: isoDate(config.billingPeriodEnd) } : {}),
     productUsage: normalizeProducts(config.productUsage),
@@ -62,6 +62,10 @@ export function formatBillingReset(end: string | undefined, now = new Date()): s
   return remaining < 86_400_000
     ? `${label} 重置 · 剩 ${hours} 小時`
     : `${label} 重置 · 剩 ${Math.ceil(remaining / 86_400_000)} 天`
+}
+
+export function quotaAlertStorageKey(info: Pick<BillingInfo, 'billingPeriodEnd' | 'currentPeriod'>): string {
+  return `grok-quota-alerts:${info.billingPeriodEnd ?? info.currentPeriod?.end ?? 'current'}`
 }
 
 export function selectCrossedQuotaThreshold(previous: number, current: number, reminded: ReadonlySet<number>): 80 | 95 | null {

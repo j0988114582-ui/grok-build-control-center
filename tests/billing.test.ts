@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { formatBillingReset, normalizeBilling, quotaLevel, selectCrossedQuotaThreshold } from '../src/shared/billing'
+import { formatBillingReset, normalizeBilling, quotaAlertStorageKey, quotaLevel, selectCrossedQuotaThreshold } from '../src/shared/billing'
 import { BillingCache } from '../src/main/billing-cache'
 
 const sample = {
@@ -95,5 +95,34 @@ describe('BillingCache', () => {
     expect(load).toHaveBeenCalledTimes(1)
     resolveLoad(sample)
     await expect(Promise.all([first, second])).resolves.toEqual([sample, sample])
+  })
+
+  it('discards an in-flight result that resolves after the cache was cleared', async () => {
+    let resolveStale!: (value: string) => void
+    let resolveFresh!: (value: string) => void
+    const cache = new BillingCache<string>()
+    const stale = cache.get(() => new Promise<string>((resolve) => { resolveStale = resolve }))
+    cache.clear()
+    const freshLoad = vi.fn(() => new Promise<string>((resolve) => { resolveFresh = resolve }))
+    const fresh = cache.get(freshLoad)
+    resolveStale('old-executable-data')
+    await stale
+    const coalesced = cache.get(freshLoad)
+    expect(freshLoad).toHaveBeenCalledTimes(1)
+    resolveFresh('fresh')
+    await expect(Promise.all([fresh, coalesced])).resolves.toEqual(['fresh', 'fresh'])
+  })
+})
+
+describe('quotaAlertStorageKey', () => {
+  it('keys quota alerts by the weekly period end with currentPeriod fallback', () => {
+    expect(quotaAlertStorageKey({ billingPeriodEnd: '2026-07-17T02:38:18Z' })).toBe('grok-quota-alerts:2026-07-17T02:38:18Z')
+    expect(quotaAlertStorageKey({ currentPeriod: { type: 'weekly', end: '2026-07-14T00:00:00Z' } })).toBe('grok-quota-alerts:2026-07-14T00:00:00Z')
+    expect(quotaAlertStorageKey({})).toBe('grok-quota-alerts:current')
+  })
+
+  it('preserves a valid period end from a partial normalized payload', () => {
+    const normalized = normalizeBilling({ creditUsagePercent: 81, currentPeriod: { end: '2026-07-14T00:00:00Z' } })
+    expect(normalized && quotaAlertStorageKey(normalized)).toBe('grok-quota-alerts:2026-07-14T00:00:00Z')
   })
 })

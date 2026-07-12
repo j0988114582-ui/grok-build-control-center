@@ -28,6 +28,32 @@ export function normalizeAccelerator(value: string): string {
   return [...normalized.filter((part) => order.includes(part)).sort((a, b) => order.indexOf(a) - order.indexOf(b)), ...normalized.filter((part) => !order.includes(part))].join('+')
 }
 
+export type ShortcutKeyEvent = { key: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }
+
+export function acceleratorFromEvent(event: ShortcutKeyEvent): string {
+  const key = event.key === ' ' ? 'Space' : event.key
+  if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') return ''
+  const parts = [
+    ...(event.ctrlKey ? ['Ctrl'] : []),
+    ...(event.altKey ? ['Alt'] : []),
+    ...(event.shiftKey ? ['Shift'] : []),
+    ...(event.metaKey ? ['Meta'] : []),
+    key.length === 1 ? key.toUpperCase() : key
+  ]
+  return normalizeAccelerator(parts.join('+'))
+}
+
+export function commandForEvent(
+  bindings: ShortcutBinding[],
+  event: ShortcutKeyEvent,
+  scopes: ReadonlyArray<ShortcutBinding['scope']> = ['global', 'transcript']
+): string | null {
+  const accelerator = acceleratorFromEvent(event)
+  if (!accelerator) return null
+  const binding = bindings.find((item) => scopes.includes(item.scope) && normalizeAccelerator(item.accelerator) === accelerator)
+  return binding?.command ?? null
+}
+
 export function findShortcutConflicts(bindings: ShortcutBinding[]): Array<{ accelerator: string; commands: string[] }> {
   const groups = new Map<string, ShortcutBinding[]>()
   for (const binding of bindings) {

@@ -1,6 +1,8 @@
 # Grok Build GUI — agent notes
 
-狀態（2026-07-11，v0.3.0）：weekly billing、銀河背景、游標/語意動效、新手 UX、a11y/效能檢查與 unsigned NSIS installer 已完成；定位為 unofficial Windows control center。
+狀態（2026-07-12，v0.3.1）：weekly billing、銀河背景、游標/語意動效、新手 UX、a11y/效能檢查與 unsigned NSIS installer 已完成；定位為 unofficial Windows control center。
+
+狀態補充（2026-07-12）：啟動／連線競態、快捷鍵、Esc 優先序、prompt 失敗復原、額度提醒、task 合併與視窗導覽已完成審查加固。
 
 ## 實測驗證過的 grok CLI (0.2.93) ACP 事實（別重新猜）
 
@@ -12,8 +14,8 @@
 
 ## 驗證流程
 
-- `npm test`（64 tests）＋ `npm run lint` ＋ `npm run typecheck`。
+- `npm test`（82 tests）＋ `npm run lint` ＋ `npm run typecheck`。
 - 免額度 live 驗證：`node work/live_feature_smoke.mjs`（真 CLI 連線、建 session、切模型、刪 session，不發 prompt）。
 - 花額度的完整 smoke：`node work/live_acp_smoke.mjs`（會發 3 個 prompt）。
 - UI/a11y：`npm run smoke:ui`（真 Electron、axe serious/critical、會寫含本機路徑的 gitignored 截圖）。
-- 打包：`npm run package` → `outputs/installer/Grok-Build-Control-Center-Setup-0.3.0.exe`；目前 `Get-AuthenticodeSignature` 為 `NotSigned`，不可誤稱已簽章。
+- 打包：`npm run package` → `outputs/installer/Grok-Build-Control-Center-Setup-0.3.1.exe`；目前 `Get-AuthenticodeSignature` 為 `NotSigned`，不可誤稱已簽章。

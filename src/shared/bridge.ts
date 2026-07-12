@@ -2,6 +2,8 @@ import type {
   AgentCapabilities, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock, SessionSummary, SessionUsage, UiSessionEvent
 } from './types'
 
+export type CliStatusUpdate = Partial<CliStatus> & { message?: string; stderr?: string }
+
 export type SelectedFile = { path: string; name: string; mimeType?: string; data?: string }
 export type SessionFeatures = { sessionId?: string; modes?: unknown; configOptions?: unknown; models?: ModelState }
 
@@ -29,5 +31,5 @@ export interface GrokBridgeApi {
   openExternal(url: string): Promise<void>
   onEvent(callback: (event: UiSessionEvent) => void): () => void
   onPermission(callback: (request: PermissionRequest) => void): () => void
-  onStatus(callback: (status: Partial<CliStatus> & { message?: string }) => void): () => void
+  onStatus(callback: (status: CliStatusUpdate) => void): () => void
 }
