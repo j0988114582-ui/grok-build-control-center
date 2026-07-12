@@ -3,8 +3,8 @@ import { createDefaultSettings, normalizeSettings } from '../src/shared/settings
 
 describe('settings', () => {
   it('uses the verified local Grok executable by default', () => {
-    expect(createDefaultSettings('C:\\Users\\111')).toMatchObject({
-      grokExecutable: 'C:\\Users\\111\\.grok\\bin\\grok.exe',
+    expect(createDefaultSettings('C:\\Users\\demo')).toMatchObject({
+      grokExecutable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe',
       immersion: 'focus',
       effects: { galaxy: true, cursor: true, density: 'medium', reducedMotion: false },
       sessionTitles: {},
@@ -14,7 +14,7 @@ describe('settings', () => {
   })
 
   it('clamps unsafe visual values and preserves valid choices', () => {
-    expect(normalizeSettings({ fontSize: 60, lineHeight: 0.5, contentWidth: 400, theme: 'light' }, 'C:\\Users\\111')).toMatchObject({
+    expect(normalizeSettings({ fontSize: 60, lineHeight: 0.5, contentWidth: 400, theme: 'light' }, 'C:\\Users\\demo')).toMatchObject({
       fontSize: 22, lineHeight: 1.2, contentWidth: 640, theme: 'light'
     })
   })
@@ -27,7 +27,7 @@ describe('settings', () => {
       sessionTitles: { abc: '銀河任務' },
       drafts: { abc: '  keep my work  ' },
       recentCommands: ['compact', 'context', 'compact']
-    }, 'C:\\Users\\111')).toMatchObject({
+    }, 'C:\\Users\\demo')).toMatchObject({
       immersion: 'deep',
       effects: { galaxy: false, cursor: true, density: 'high', reducedMotion: true },
       sessionTitles: { abc: '銀河任務' },
@@ -41,7 +41,7 @@ describe('settings', () => {
       sessionTitles: { good: '  保留名稱  ', empty: '', bad: 7 },
       drafts: { good: 'unfinished', empty: '', bad: 7 },
       recentCommands: ['ok', '', 7]
-    } as never, 'C:\\Users\\111')).toMatchObject({
+    } as never, 'C:\\Users\\demo')).toMatchObject({
       immersion: 'focus',
       effects: { galaxy: true, cursor: true, density: 'medium', reducedMotion: false },
       sessionTitles: { good: '保留名稱' },
@@ -59,7 +59,7 @@ describe('settings', () => {
         'garbage',
         42
       ]
-    } as never, 'C:\\Users\\111')
+    } as never, 'C:\\Users\\demo')
     expect(normalized.shortcuts.find((item) => item.command === 'newSession')?.accelerator).toBe('Ctrl+Shift+N')
     expect(normalized.shortcuts.find((item) => item.command === 'cancelTurn')?.accelerator).toBe('Escape')
     expect(normalized.shortcuts.some((item) => item.command === 'unknownCommand')).toBe(false)
@@ -75,7 +75,7 @@ describe('settings', () => {
         { command: 'commandPalette', accelerator: 'Ctrl+Alt+P', scope: 'global' },
         { command: 'searchTranscript', accelerator: 'Ctrl+Alt+P', scope: 'global' }
       ]
-    }, 'C:\\Users\\111')
+    }, 'C:\\Users\\demo')
 
     expect(normalized.shortcuts.find((item) => item.command === 'newSession')?.accelerator).toBe('Ctrl+N')
     expect(normalized.shortcuts.find((item) => item.command === 'searchSessions')?.accelerator).toBe('Ctrl+K')

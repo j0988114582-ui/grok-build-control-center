@@ -185,11 +185,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .event-card { overflow: hidden; border: 1px solid rgba(35,35,30,.16); border-radius: 4px; background: rgba(255,255,255,.26); }
 .event-head { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 7px; padding: 7px 10px; color: #4c4b43; text-align: left; }
 .event-head span { flex: 1; font-size: 12px; font-weight: 650; }
-.event-head em { font-size: 9px; font-style: normal; text-transform: uppercase; color: #89867d; }
+.event-head em { font-size: 9px; font-style: normal; text-transform: uppercase; color: #6b6759; }
 .event-content { padding: 4px 14px 13px 38px; font-size: 12px; }
 .event-content ol { margin: 0; padding-left: 20px; }
 .event-content li { padding: 4px; }
-.event-content li small { float: right; color: #89867d; }
+.event-content li small { float: right; color: #6b6759; }
 .search-hit { box-shadow: inset 3px 0 0 var(--accent); background: rgba(233,173,71,.11); }
 .turn-marker { display: flex; align-items: center; gap: 8px; padding: 2px 4px; color: #8a867b; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
 .turn-marker span { width: 7px; height: 7px; border-radius: 50%; background: #8a867b; }
@@ -326,6 +326,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .app[data-immersion='deep'] .message-label, .app[data-immersion='deep'] .turn-marker, .app[data-immersion='deep'] .transcript-end { color: #8797a7; }
 .app[data-immersion='deep'] .event-card { border-color: rgba(151,182,207,.18); background: rgba(10,21,38,.68); }
 .app[data-immersion='deep'] .event-head { color: #cbd7e1; }
+.app[data-immersion='deep'] .event-head em, .app[data-immersion='deep'] .event-content li small { color: #9aa7b3; }
 .app[data-immersion='deep'] .message-body code:not(pre code), .app[data-immersion='deep'] .event-content code:not(pre code) { background: rgba(142,183,217,.12); }
 .app[data-immersion='deep'] .message-body th, .app[data-immersion='deep'] .message-body td { border-color: rgba(151,182,207,.2); }
 .app[data-immersion='deep'] .message-body a { color: #e9ad47; }

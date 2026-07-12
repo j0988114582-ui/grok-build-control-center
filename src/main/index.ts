@@ -171,12 +171,8 @@ function registerIpc(): void {
     const next = normalizeSettings(value, homedir())
     settingsStore.store = next
     if ((connectedExecutable && connectedExecutable !== next.grokExecutable) || (acpConnecting && acpConnecting.executable !== next.grokExecutable)) {
-      const previous = acpConnection.current
-      acpConnection.begin()
-      connectedExecutable = ''
-      previous?.stop()
-      acpConnecting?.client.stop()
-      billingCache.clear()
+      disconnectAcp()
+      send('grok:status-update', { connected: false, message: 'Grok 執行檔已更換，請重新連線' })
     }
     return next
   })

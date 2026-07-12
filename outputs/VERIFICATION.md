@@ -1,10 +1,10 @@
 # Grok Build Control Center v0.3.2 驗證紀錄
 
-日期：2026-07-12（Asia/Taipei）
+日期：2026-07-12（Asia/Taipei）；發布前終審後於同日重新打包並全數重跑。
 
 ## 完整迴圈
 
-- `npm run verify`：110/110 tests、ESLint 0 warnings、TypeScript、production build 全部通過。
+- `npm run verify`：115/115 tests、ESLint 0 warnings、TypeScript、production build 全部通過（終審新增 capability 同步測試後的數字）。
 - `node work/live_feature_smoke.mjs`：真實 Grok CLI 0.2.93 完成 ACP 連線、Grok 4.5／Composer 2.5 capability、週額度、session 建立、模型切換與精確 ID 清理。
 - 真實帳號回傳總用量 79%，`productUsage: []`；Build／Imagine／API 因來源未提供而顯示 `—`。
 - 原始碼 UI smoke：WebGL、三種視覺模式、快捷鍵、模型選單、帳號切換、產品額度列全通過；axe 在空白頁、帳號確認、session 三個狀態皆 0 violations。
@@ -21,8 +21,8 @@
 ## 安裝包
 
 - 檔名：`Grok-Build-Control-Center-Setup-0.3.2.exe`
-- 大小：100,256,511 bytes
-- SHA-256：`9A1892E2985A3FC72BA613754B92F1AA40D3F095101B63ED8FE0CBDABDADF6D8`
+- 大小：100,256,443 bytes
+- SHA-256：`A24D8CBE40C97D78F73DF930B39558F0E1A81BB130DC29D0DDF25AE64ED5A72F`
 - Windows Authenticode：installer 與 packaged app 均為 `NotSigned`。
 - asar 已包含 `LICENSE`、`PRIVACY.md`、`THIRD_PARTY_NOTICES.txt`。
 

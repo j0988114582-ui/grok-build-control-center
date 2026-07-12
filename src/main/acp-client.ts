@@ -151,13 +151,13 @@ export class GrokAcpClient {
   async createSession(cwd: string): Promise<NewSessionResponse & { models?: ModelState }> {
     const response = await this.requireContext().request(acp.methods.agent.session.new, { cwd, mcpServers: [] }) as NewSessionResponse & { models?: unknown }
     this.updateSessionFeatures(response)
-    return { ...response, models: normalizeModelState(response.models) }
+    return { ...response, models: this.updateModelState(normalizeModelState(response.models)) }
   }
 
   async loadSession(sessionId: string, cwd: string): Promise<LoadSessionResponse & { models?: ModelState }> {
     const response = await this.requireContext().request(acp.methods.agent.session.load, { sessionId, cwd, mcpServers: [] }) as LoadSessionResponse & { models?: unknown }
     this.updateSessionFeatures(response)
-    return { ...response, models: normalizeModelState(response.models) }
+    return { ...response, models: this.updateModelState(normalizeModelState(response.models)) }
   }
 
   async prompt(sessionId: string, blocks: PromptBlock[]): Promise<void> {
@@ -183,10 +183,19 @@ export class GrokAcpClient {
 
   async setMode(sessionId: string, modeId: string): Promise<void> {
     await this.requireContext().request(acp.methods.agent.session.setMode, { sessionId, modeId })
+    this.capabilities.currentModeId = modeId
   }
 
   async setModel(sessionId: string, modelId: string, reasoningEffort?: string): Promise<void> {
     await this.requireContext().request('session/set_model', { sessionId, modelId, ...(reasoningEffort ? { reasoningEffort } : {}) })
+    const state = this.capabilities.modelState
+    if (!state) return
+    this.capabilities.modelState = {
+      currentModelId: modelId,
+      availableModels: reasoningEffort
+        ? state.availableModels.map((model) => model.modelId === modelId ? { ...model, currentReasoningEffort: reasoningEffort } : model)
+        : state.availableModels
+    }
   }
 
   async setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<SetSessionConfigOptionResponse> {
@@ -243,7 +252,16 @@ export class GrokAcpClient {
     this.callbacks.onExit(message)
   }
 
+  // Keeps cached capabilities aligned with the latest session so an idempotent
+  // start() on a live connection never hands the renderer stale mode/model state.
   private updateSessionFeatures(response: { modes?: SessionModeState | null }): void {
     this.capabilities.modes = response.modes?.availableModes?.map((mode) => ({ id: mode.id, name: mode.name })) ?? []
+    if (response.modes?.currentModeId) this.capabilities.currentModeId = response.modes.currentModeId
+    else delete this.capabilities.currentModeId
+  }
+
+  private updateModelState(models: ModelState | undefined): ModelState | undefined {
+    if (models) this.capabilities.modelState = models
+    return models
   }
 }

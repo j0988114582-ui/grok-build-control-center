@@ -8,8 +8,8 @@ import { createDefaultSettings } from '../src/shared/settings'
 import type { GrokBridgeApi } from '../src/shared/bridge'
 
 const createApiMock = (): GrokBridgeApi => ({
-  getStatus: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\111\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
-  installCli: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\111\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
+  getStatus: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
+  installCli: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
   reauthenticate: vi.fn().mockResolvedValue({ loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [] }),
   connect: vi.fn().mockResolvedValue({
     loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [{ name: 'compact', description: '壓縮目前 context' }],
@@ -22,7 +22,7 @@ const createApiMock = (): GrokBridgeApi => ({
     }
   }),
   listSessions: vi.fn().mockResolvedValue([{ id: 's1', cwd: 'C:\\repo', title: 'Fix tests', updatedAt: '2026-07-11T00:00:00Z' }]),
-  getSettings: vi.fn().mockResolvedValue(createDefaultSettings('C:\\Users\\111')),
+  getSettings: vi.fn().mockResolvedValue(createDefaultSettings('C:\\Users\\demo')),
   saveSettings: vi.fn().mockImplementation(async (settings) => settings), createSession: vi.fn(), sendPrompt: vi.fn(), cancel: vi.fn(), setMode: vi.fn(), setModel: vi.fn(), setConfigOption: vi.fn(),
   loadSession: vi.fn().mockResolvedValue({ sessionId: 's1' }),
   deleteSession: vi.fn().mockResolvedValue(true),
@@ -188,7 +188,7 @@ describe('App', () => {
     expect(await screen.findByTestId('cursor-fx')).toBeInTheDocument()
     first.unmount()
 
-    const reduced = createDefaultSettings('C:\\Users\\111')
+    const reduced = createDefaultSettings('C:\\Users\\demo')
     reduced.effects.reducedMotion = true
     api.getSettings = vi.fn().mockResolvedValue(reduced)
     render(<App />)
@@ -198,7 +198,7 @@ describe('App', () => {
 
   it('restores and persists a session draft without losing unfinished text', async () => {
     const api = createApiMock()
-    const saved = createDefaultSettings('C:\\Users\\111')
+    const saved = createDefaultSettings('C:\\Users\\demo')
     saved.drafts = { s1: '還沒送出的工作' }
     api.getSettings = vi.fn().mockResolvedValue(saved)
     window.grokApi = api
@@ -576,7 +576,7 @@ describe('App', () => {
 
   it('uses Escape only for dismissal when cancelTurn is remapped', async () => {
     const api = createApiMock()
-    const saved = createDefaultSettings('C:\\Users\\111')
+    const saved = createDefaultSettings('C:\\Users\\demo')
     saved.shortcuts = saved.shortcuts.map((binding) => binding.command === 'cancelTurn' ? { ...binding, accelerator: 'Ctrl+X' } : binding)
     api.getSettings = vi.fn().mockResolvedValue(saved)
     let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined

@@ -13,7 +13,7 @@
 安裝方式：
 
 1. 下載 `Grok-Build-Control-Center-Setup-0.3.2.exe`。
-2. 先核對 Release 裡的 SHA-256：`9A1892E2985A3FC72BA613754B92F1AA40D3F095101B63ED8FE0CBDABDADF6D8`。
+2. 先核對 Release 裡的 SHA-256：`A24D8CBE40C97D78F73DF930B39558F0E1A81BB130DC29D0DDF25AE64ED5A72F`。
 3. 目前是尚未簽章的社群測試版，所以 Windows 可能顯示 SmartScreen 警告。只有雜湊完全相同、而且下載來源是我提供的 GitHub Release 才繼續。
 4. 打開程式；第一次使用按「安裝 Grok CLI」，確認來源顯示 `https://x.ai/cli/install.ps1`。
 5. 接著按「開啟瀏覽器並重新登入」，在 x.ai 官方頁面登入。

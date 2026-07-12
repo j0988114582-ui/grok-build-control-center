@@ -2,16 +2,16 @@ import json
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
-OUTPUT = Path(r"C:\Users\111\Documents\Codex\2026-07-11\grok-build-cli-gui\outputs\grok-build-gui-preview.png")
+OUTPUT = Path(__file__).resolve().parent.parent / "outputs" / "grok-build-gui-preview.png"
 
 MOCK = r"""
 window.__emitEvent = () => {};
 window.__emitPermission = () => {};
 window.grokApi = {
-  getStatus: async () => ({ executable: 'C:\\Users\\111\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: true }),
+  getStatus: async () => ({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: true }),
   connect: async () => ({ loadSession: true, promptCapabilities: { image: false }, sessionCapabilities: {}, modes: [{ id: 'plan', name: 'Plan' }, { id: 'normal', name: 'Normal' }], commands: [{ name: 'compact', description: 'Compact context' }] }),
-  listSessions: async () => ([{ id: 's1', cwd: 'C:\\Users\\111\\Documents\\WORDPRESS-Workspace', title: 'Fix tests', updatedAt: '2026-07-11T08:00:00Z' }]),
-  getSettings: async () => ({ grokExecutable: 'C:\\Users\\111\\.grok\\bin\\grok.exe', theme: 'dark', fontSize: 15, lineHeight: 1.65, contentWidth: 920, shortcuts: [] }),
+  listSessions: async () => ([{ id: 's1', cwd: 'C:\\Users\\demo\\Documents\\Demo-Workspace', title: 'Fix tests', updatedAt: '2026-07-11T08:00:00Z' }]),
+  getSettings: async () => ({ grokExecutable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', theme: 'dark', fontSize: 15, lineHeight: 1.65, contentWidth: 920, shortcuts: [] }),
   saveSettings: async (x) => x,
   createSession: async () => ({ sessionId: 'new' }),
   loadSession: async () => ({ models: { currentModelId: 'grok-4.5', availableModels: [{ modelId: 'grok-4.5', name: 'Grok 4.5', currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'high', value: 'high', label: 'High Effort', default: true },{ id: 'low', value: 'low', label: 'Low Effort' }] }] } }),

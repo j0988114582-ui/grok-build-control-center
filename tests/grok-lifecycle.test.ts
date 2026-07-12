@@ -103,10 +103,10 @@ describe('Grok lifecycle', () => {
   it('runs the official OAuth reauthentication command without logging out or handling credentials itself', async () => {
     const executeFile = vi.fn().mockResolvedValue({ stdout: '', stderr: '' })
 
-    await reauthenticateGrok('C:\\Users\\111\\.grok\\bin\\grok.exe', executeFile)
+    await reauthenticateGrok('C:\\Users\\demo\\.grok\\bin\\grok.exe', executeFile)
 
     expect(executeFile).toHaveBeenCalledWith(
-      'C:\\Users\\111\\.grok\\bin\\grok.exe',
+      'C:\\Users\\demo\\.grok\\bin\\grok.exe',
       ['login', '--oauth'],
       expect.objectContaining({ timeout: 300_000, windowsHide: true })
     )
