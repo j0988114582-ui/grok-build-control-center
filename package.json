@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "build": "npm run typecheck && electron-vite build",
     "notices": "node scripts/generate-third-party-notices.mjs",
-    "package": "npm run notices && npm run test && npm run build && electron-builder --win nsis",
+    "package": "npm run notices && npm run test && npm run build && electron-builder --win nsis --publish never",
     "lint": "eslint . --max-warnings=0",
     "verify": "npm test && npm run lint && npm run typecheck && npm run build",
     "smoke:ui": "npm run build && node work/ui_feature_smoke.mjs"
