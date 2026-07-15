@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Test, lint, typecheck, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Test
+        shell: bash
+        run: npm test 2>&1 | tee test.log
+      - name: Lint
+        shell: bash
+        run: npm run lint 2>&1 | tee lint.log
+      - name: Typecheck
+        shell: bash
+        run: npm run typecheck 2>&1 | tee typecheck.log
+      - name: Build
+        shell: bash
+        run: npm run build 2>&1 | tee build.log
+      - name: Upload quality logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-logs-${{ github.run_id }}
+          path: |
+            test.log
+            lint.log
+            typecheck.log
+            build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-ui-smoke:
+    name: Windows Electron UI smoke
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build and run UI smoke test
+        shell: pwsh
+        run: |
+          npm run smoke:ui *>&1 | Tee-Object -FilePath ui-smoke.log
+          exit $LASTEXITCODE
+      - name: Upload UI smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-smoke-${{ github.run_id }}
+          path: |
+            ui-smoke.log
+            outputs/ui-smoke/
+          if-no-files-found: warn
+          retention-days: 14
+
+  release-metrics:
+    name: Release download metrics
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Query GitHub Release API
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/release-metrics.mjs > release-metrics.json
+      - name: Show metrics
+        run: cat release-metrics.json
+      - name: Upload metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metrics-${{ github.run_id }}
+          path: release-metrics.json
+          retention-days: 14

@@ -1,0 +1,88 @@
+name: Bug report
+about: Report a reproducible problem in Grok Build Control Center
+title: "[Bug]: "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Remove tokens, account details, project source code, and other private information before attaching logs or screenshots.
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      placeholder: v0.3.2
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2 x64
+    validations:
+      required: true
+  - type: input
+    id: grok-cli-version
+    attributes:
+      label: Grok CLI version
+      description: Enter Unknown if the app cannot detect it.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open...
+        2. Select...
+        3. Click...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Reproducibility
+      options:
+        - Every time
+        - Sometimes
+        - Once
+    validations:
+      required: true
+  - type: checkboxes
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - label: Installation or update
+        - label: Grok CLI detection or launch
+        - label: Sign-in or account switching
+        - label: Session streaming or tool cards
+        - label: Permission confirmation
+        - label: Model or mode selection
+        - label: Quota display
+        - label: Accessibility or reduced motion
+        - label: Shutdown, crash, or data persistence
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized logs, screenshots, or screen recording
+      description: Do not include tokens, auth files, prompts, private project content, or personal data.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed credentials, account information, private source code, and other sensitive data.
+          required: true
