@@ -46,7 +46,7 @@ try {
   await page.screenshot({ path: shortcutPath })
   result.screenshots.push(shortcutPath)
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: /Connect/ }).click()
+  await page.getByRole('button', { name: '連接本機 Grok' }).click()
   await page.locator('[aria-label^="總額度已使用"]').waitFor()
   result.quota = await page.getByText(/重置/).first().isVisible()
   result.quotaProducts = (await Promise.all(['Build', 'Imagine', 'API'].map(async (label) => page.locator(`[data-testid="quota-summary"] [aria-label^="${label} "]`).isVisible()))).every(Boolean)
