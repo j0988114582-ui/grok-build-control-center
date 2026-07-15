@@ -49,7 +49,7 @@ export function createGrokInstallerEnvironment(source: NodeJS.ProcessEnv): NodeJ
 
 export async function installGrokCli(homeDir: string, dependencies: GrokInstallDependencies): Promise<InstalledGrok> {
   const tempDirectory = await dependencies.makeTempDirectory()
-  const installer = path.join(tempDirectory, 'install.ps1')
+  const installer = path.win32.join(tempDirectory, 'install.ps1')
   try {
     const source = await dependencies.downloadText(GROK_INSTALLER_URL)
     if (!validInstaller(source)) throw new Error('官方 Grok 安裝程式內容無效，已停止執行')
@@ -63,7 +63,7 @@ export async function installGrokCli(homeDir: string, dependencies: GrokInstallD
       env: dependencies.environment
     })
 
-    const executable = path.join(homeDir, '.grok', 'bin', 'grok.exe')
+    const executable = path.win32.join(homeDir, '.grok', 'bin', 'grok.exe')
     await dependencies.assertFileExists(executable)
     const { stdout } = await dependencies.executeFile(executable, ['--version'], { windowsHide: true, timeout: 10_000 })
     const parsed = parseGrokVersion(stdout)
