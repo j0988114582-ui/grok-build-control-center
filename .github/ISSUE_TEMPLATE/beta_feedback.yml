@@ -1,0 +1,48 @@
+name: Windows beta feedback
+about: Record a completed Windows beta test, including successful paths
+labels: [beta-feedback, needs-triage]
+body:
+  - type: input
+    id: app-version
+    attributes:
+      label: App version tested
+      placeholder: v0.3.2
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version and architecture
+      placeholder: Windows 11 24H2 x64
+    validations:
+      required: true
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Test checklist
+      options:
+        - label: Installer checksum matched SHA256SUMS.txt
+        - label: Installation completed without administrator access
+        - label: Grok CLI detection or installation worked
+        - label: Browser sign-in completed
+        - label: Project selection worked
+        - label: Session streaming worked
+        - label: Permission prompts were understandable
+        - label: Model and mode controls worked
+        - label: Closing and reopening preserved expected local state
+        - label: Uninstall completed
+  - type: textarea
+    id: problems
+    attributes:
+      label: Problems or confusing moments
+  - type: textarea
+    id: improvements
+    attributes:
+      label: Most valuable improvement
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed tokens, account details, private prompts, project content, and other sensitive information.
+          required: true
