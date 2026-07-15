@@ -1,10 +1,11 @@
-# Grok Build GUI — agent notes
+﻿# Grok Build GUI — agent notes
 
 狀態（2026-07-12，v0.3.2 已發布）：官方 OAuth 重新登入、確認後一鍵安裝 Grok CLI、真實產品額度列已完成；第三輪終審後推上 GitHub（repo + Release，見下方終審紀錄）。全套測試、live CLI、UI/a11y smoke、打包實跑皆通過；installer 仍為未簽章測試版。
 
 狀態補充（2026-07-12）：啟動／連線競態、快捷鍵、Esc 優先序、prompt 失敗復原、額度提醒、task 合併與視窗導覽已完成審查加固。
 
-**下一輪升級 backlog（2026-07-15，僅記錄未實作）**：`docs/backlog/2026-07-15-next-upgrade.md`  
+**下一輪升級 backlog（2026-07-15，僅記錄未實作）**：`docs/backlog/2026-07-15-next-upgrade.md`
+**v0.4 計畫（2026-07-16，待拍板）**：`docs/plans/2026-07-16-v0.4-upgrade-plan.md`  
 P0 側欄主頁無法重開、composer 固定高度；P1 專案標題層級、批次刪除；P2 ACP 貼圖／多模態（本機 0.2.101 實測 `image:false`/`audio:false`/`embeddedContext:true`）。
 
 ## 發布前第二輪複審（2026-07-12，Claude 雙 agent 對抗式審查）
