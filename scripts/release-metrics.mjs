@@ -10,7 +10,7 @@ const headers = {
 }
 if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
 
-const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases?per_page=100`, { headers })
+const response = await globalThis.fetch(`https://api.github.com/repos/${owner}/${repo}/releases?per_page=100`, { headers })
 if (!response.ok) throw new Error(`GitHub API failed: ${response.status} ${await response.text()}`)
 
 const releases = await response.json()
@@ -33,4 +33,4 @@ const report = {
   }))
 }
 
-console.log(JSON.stringify(report, null, 2))
+process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
