@@ -29,13 +29,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Test
-        run: npm test
+        run: npm test 2>&1 | tee test.log
       - name: Lint
-        run: npm run lint
+        run: npm run lint 2>&1 | tee lint.log
       - name: Typecheck
-        run: npm run typecheck
+        run: npm run typecheck 2>&1 | tee typecheck.log
       - name: Build
-        run: npm run build
+        run: npm run build 2>&1 | tee build.log
+      - name: Upload quality logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-logs-${{ github.run_id }}
+          path: |
+            test.log
+            lint.log
+            typecheck.log
+            build.log
+          if-no-files-found: warn
+          retention-days: 14
 
   windows-ui-smoke:
     name: Windows Electron UI smoke
