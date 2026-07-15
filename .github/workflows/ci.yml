@@ -68,13 +68,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Build and run UI smoke test
-        run: npm run smoke:ui
+        shell: pwsh
+        run: |
+          npm run smoke:ui *>&1 | Tee-Object -FilePath ui-smoke.log
+          exit $LASTEXITCODE
       - name: Upload UI smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ui-smoke-${{ github.run_id }}
-          path: outputs/ui-smoke/
+          path: |
+            ui-smoke.log
+            outputs/ui-smoke/
           if-no-files-found: warn
           retention-days: 14
 
