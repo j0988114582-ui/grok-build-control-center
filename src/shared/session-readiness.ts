@@ -23,6 +23,20 @@ export function markSessionReady(
   return { ...ready, [sessionId]: generation }
 }
 
+/**
+ * Only mark ready if the generation captured at operation start still matches
+ * the live generation (prevents stale create/load after disconnect).
+ */
+export function markSessionReadyIfCurrent(
+  ready: SessionReadyMap,
+  sessionId: string,
+  generationAtStart: number,
+  liveGeneration: number
+): SessionReadyMap {
+  if (generationAtStart !== liveGeneration) return ready
+  return markSessionReady(ready, sessionId, liveGeneration)
+}
+
 export function clearSessionReady(ready: SessionReadyMap, sessionId: string): SessionReadyMap {
   if (!(sessionId in ready)) return ready
   const next = { ...ready }

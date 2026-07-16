@@ -13,6 +13,24 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
 
+## [0.6.1] - 2026-07-16
+
+### Added
+
+- **T5 readiness**：ACP connection generation；create/load 後才可送訊；handler + UI 雙重閘門。
+- **T6 team reconnect**：權限重連保 slots／active／focus。
+- **F1** 匯出後 `revealExport`（僅 allowlist 絕對路徑）。
+- **F2** 跨專案搜尋（title／本地標題／cwd／draft haystack）。
+- **F3** 有界 session capability 矩陣（功能抽屜）。
+- **T1** Agents Team 格內 Prompt 範本。
+- Galaxy token／拖放區視覺微調（AGY）。
+
+### Notes
+
+- 計畫：`docs/plans/2026-07-16-v0.6.1-one-shot-completion.md`
+- T4 重疊 live smoke：見 `docs/plans/v061-t4-live-smoke.md`（手冊／結果欄）
+- 視覺對齊：`docs/plans/v061-agy-alignment-checklist.md`（部分 partial 已知）
+
 ## [0.6.0] - 2026-07-16
 
 ### Added

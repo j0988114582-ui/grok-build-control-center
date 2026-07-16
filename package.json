@@ -1,6 +1,6 @@
 {
   "name": "grok-build-gui",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Unofficial Windows-first control center for Grok Build CLI",
   "author": "Grok Build Control Center contributors",

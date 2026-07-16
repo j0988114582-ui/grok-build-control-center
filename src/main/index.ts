@@ -32,6 +32,7 @@ import {
 } from '../shared/paste-image'
 import type { AppSettings, CliStatus, PromptBlock } from '../shared/types'
 import { assertRevealAllowed, ExportPathAllowlist } from '../shared/export-reveal'
+import { SessionReadyGate } from './session-ready-gate'
 
 const pasteImageDirectory = (): string => path.join(tmpdir(), PASTE_IMAGE_DIR_NAME)
 
@@ -86,6 +87,8 @@ const executeLifecycleFile: ExecuteFile = async (executable, args, options) => {
   return { stdout: String(stdout), stderr: String(stderr) }
 }
 
+const sessionReadyGate = new SessionReadyGate()
+
 function disconnectAcp(): void {
   const current = acpConnection.current
   const connecting = acpConnecting?.client
@@ -93,6 +96,7 @@ function disconnectAcp(): void {
   connectedExecutable = ''
   acpConnecting = null
   billingCache.clear()
+  sessionReadyGate.invalidate()
   // Fire-and-forget during normal disconnect; quit path awaits stopAllAcpClients.
   void current?.stop()
   void connecting?.stop()
@@ -139,6 +143,7 @@ async function connectAcp(): Promise<GrokAcpClient> {
     onExit: (message) => {
       if (!acpConnection.release(client)) return
       connectedExecutable = ''
+      sessionReadyGate.invalidate()
       send('grok:status-update', { connected: false, message })
     }
   }, app.getVersion(), agentPermissionMode === 'always-approve')
@@ -149,6 +154,7 @@ async function connectAcp(): Promise<GrokAcpClient> {
       throw new Error('Grok 執行檔設定已變更,請重新連線')
     }
     connectedExecutable = executable
+    sessionReadyGate.beginConnection()
     send('grok:status-update', { connected: true })
     return client
   })()
@@ -230,13 +236,39 @@ function registerIpc(): void {
     }
     return next
   })
-  ipcMain.handle('grok:session:create', async (_event, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => (await connectAcp()).createSession(cwd)))
-  ipcMain.handle('grok:session:load', async (_event, sessionId: string, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => (await connectAcp()).loadSession(sessionId, cwd)))
-  ipcMain.handle('grok:prompt', async (_event, sessionId: string, blocks: PromptBlock[]) => lifecycleOperation.runShared('Grok 工作', async () => (await connectAcp()).prompt(sessionId, blocks)))
+  ipcMain.handle('grok:session:create', async (_event, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => {
+    const client = await connectAcp()
+    const result = await client.createSession(cwd)
+    const sessionId = typeof result?.sessionId === 'string' ? result.sessionId : undefined
+    if (sessionId) sessionReadyGate.markReady(sessionId)
+    return result
+  }))
+  ipcMain.handle('grok:session:load', async (_event, sessionId: string, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => {
+    if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) throw new Error('Invalid session id')
+    const client = await connectAcp()
+    try {
+      const result = await client.loadSession(sessionId, cwd)
+      sessionReadyGate.markReady(sessionId)
+      return result
+    } catch (error) {
+      sessionReadyGate.clear(sessionId)
+      throw error
+    }
+  }))
+  ipcMain.handle('grok:prompt', async (_event, sessionId: string, blocks: PromptBlock[]) => lifecycleOperation.runShared('Grok 工作', async () => {
+    sessionReadyGate.assertReady(sessionId)
+    return (await connectAcp()).prompt(sessionId, blocks)
+  }))
   // Interject must share the lifecycle pool so it can run while a prompt is in-flight; it never cancels.
   ipcMain.handle('grok:interject', async (_event, sessionId: string, text: string, options?: { interjectionId?: string; content?: unknown[] }) =>
-    lifecycleOperation.runShared('Grok 工作', async () => (await connectAcp()).interject(sessionId, text, options)))
-  ipcMain.handle('grok:cancel', async (_event, sessionId: string) => lifecycleOperation.runShared('Grok 工作', async () => (await connectAcp()).cancel(sessionId)))
+    lifecycleOperation.runShared('Grok 工作', async () => {
+      sessionReadyGate.assertReady(sessionId)
+      return (await connectAcp()).interject(sessionId, text, options)
+    }))
+  ipcMain.handle('grok:cancel', async (_event, sessionId: string) => lifecycleOperation.runShared('Grok 工作', async () => {
+    sessionReadyGate.assertReady(sessionId)
+    return (await connectAcp()).cancel(sessionId)
+  }))
   ipcMain.handle('grok:mode', async (_event, sessionId: string, modeId: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setMode(sessionId, modeId)))
   ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort)))
   ipcMain.handle('grok:config', async (_event, sessionId: string, configId: string, value: string | boolean) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setConfigOption(sessionId, configId, value)))

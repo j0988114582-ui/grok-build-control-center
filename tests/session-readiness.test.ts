@@ -5,6 +5,7 @@ import {
   invalidateAllReadiness,
   isSessionReady,
   markSessionReady,
+  markSessionReadyIfCurrent,
   sessionActionAllowed
 } from '../src/shared/session-readiness'
 
@@ -36,5 +37,10 @@ describe('session-readiness', () => {
     ready = clearSessionReady(ready, 'a')
     expect(isSessionReady(ready, 'a', 1)).toBe(false)
     expect(isSessionReady(ready, 'b', 1)).toBe(true)
+  })
+
+  it('refuses mark when generation drifted after disconnect', () => {
+    const ready = markSessionReadyIfCurrent({}, 'stale', 1, 2)
+    expect(ready).toEqual({})
   })
 })

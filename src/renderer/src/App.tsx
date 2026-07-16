@@ -55,6 +55,26 @@ import {
   sessionDisplayTitle
 } from './components/session-groups'
 import { pruneOrphanSessionLocalData, removeSessionLocalData, togglePinnedSession } from '../../shared/session-local-state'
+import {
+  bumpConnectionGeneration,
+  markSessionReadyIfCurrent,
+  clearSessionReady,
+  invalidateAllReadiness,
+  isSessionReady,
+  sessionActionAllowed,
+  type SessionReadyMap
+} from '../../shared/session-readiness'
+import {
+  snapshotTeamReconnect,
+  restoreTeamAfterReconnect
+} from '../../shared/team-reconnect'
+import {
+  buildSessionSearchIndex,
+  filterSessionsBySearch
+} from '../../shared/session-search'
+import {
+  probeSessionCapabilities
+} from '../../shared/session-capabilities'
 import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock,
   SessionSummary, SessionUsage, UiSessionEvent
@@ -196,6 +216,13 @@ export function App(): React.JSX.Element {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [attachmentsBySession, setAttachmentsBySession] = useState<Record<string, PromptBlock[]>>({})
   const [sessionQuery, setSessionQuery] = useState('')
+  const [connectionGeneration, setConnectionGeneration] = useState<number>(0)
+  const connectionGenerationRef = useRef<number>(0)
+  const [sessionReady, setSessionReady] = useState<SessionReadyMap>({})
+  const [reconnecting, setReconnecting] = useState<boolean>(false)
+  const [lastExportedPath, setLastExportedPath] = useState<string | null>(null)
+  const [exportedPaths, setExportedPaths] = useState<Record<string, string>>({})
+  const activeReady = active ? isSessionReady(sessionReady, active.id, connectionGeneration) : false
   const [transcriptQuery, setTranscriptQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [panel, setPanel] = useState<Panel>('none')
@@ -249,6 +276,11 @@ export function App(): React.JSX.Element {
   const cancelActiveTurnRef = useRef<(sessionId: string) => Promise<void>>(async () => {})
   followTailRef.current = followTail
   activeIdRef.current = active?.id ?? null
+
+  const updateConnectionGeneration = (newGen: number): void => {
+    connectionGenerationRef.current = newGen
+    setConnectionGeneration(newGen)
+  }
 
   const refreshUsage = async (sessionId: string): Promise<void> => {
     try {
@@ -404,6 +436,11 @@ export function App(): React.JSX.Element {
         billingRef.current = null
         setBilling(null)
         setBillingUnavailable(false)
+        // Bump generation so in-flight create/load cannot mark stale ready.
+        const nextGen = bumpConnectionGeneration(connectionGenerationRef.current)
+        connectionGenerationRef.current = nextGen
+        setConnectionGeneration(nextGen)
+        setSessionReady(invalidateAllReadiness())
       }
       if (next.stderr) console.warn('[grok stderr]', next.stderr)
       if (next.message) setNotice(next.message)
@@ -469,7 +506,13 @@ export function App(): React.JSX.Element {
   const searchHits = useMemo(() => transcriptQuery ? activeEvents.filter((event) => eventText(event).toLocaleLowerCase().includes(transcriptQuery.toLocaleLowerCase())).length : 0, [activeEvents, transcriptQuery])
   const shortcutFor = (command: string): string => settings.shortcuts.find((binding) => binding.command === command)?.accelerator ?? ''
   const shortcutLabel = (command: string): string => shortcutFor(command).replaceAll('+', ' + ')
-  const filteredSessions = useMemo(() => sessions.filter((session) => `${sessionDisplayTitle(session, settings.sessionTitles)} ${session.cwd}`.toLocaleLowerCase().includes(sessionQuery.toLocaleLowerCase())), [sessions, sessionQuery, settings.sessionTitles])
+  const sessionSearchIndex = useMemo(() => {
+    return buildSessionSearchIndex(sessions, { titleOverrides: settings.sessionTitles, drafts })
+  }, [sessions, settings.sessionTitles, drafts])
+
+  const filteredSessions = useMemo(() => {
+    return filterSessionsBySearch(sessions, sessionSearchIndex, sessionQuery)
+  }, [sessions, sessionSearchIndex, sessionQuery])
   const { pinned, unpinned } = useMemo(
     () => partitionPinnedSessions(filteredSessions, settings.pinnedSessions),
     [filteredSessions, settings.pinnedSessions]
@@ -553,31 +596,60 @@ export function App(): React.JSX.Element {
       const nextMode = await window.grokApi.setPermissionMode(mode)
       setPermissionMode(nextMode)
       setNotice(nextMode === 'always-approve' ? '⚠️ 已切換到 YOLO 模式（本次啟動有效）' : '權限模式已切換為每次詢問')
-      // Main process already reconnects ACP with new flags. Reload active session so prompts still work.
-      if (wasConnected && activeSession) {
+      if (wasConnected) {
+        setReconnecting(true)
         try {
+          const snap = snapshotTeamReconnect(team, activeSession ? activeSession.id : null, teamEnabled)
+          setSessionReady(invalidateAllReadiness())
           const value = await window.grokApi.connect()
           setCaps(value)
           setModels(value.modelState)
           setStatus((current) => ({ ...current, connected: true }))
-          await loadSession(activeSession)
-          // Reload other Agents Team slots so panes stay valid after ACP reconnect.
-          const peerIds = team.slots.filter((id) => id !== activeSession.id)
-          for (const peerId of peerIds) {
-            const peer = sessions.find((item) => item.id === peerId)
-            if (peer) await loadSession(peer)
+          const nextGen = bumpConnectionGeneration(connectionGenerationRef.current)
+          updateConnectionGeneration(nextGen)
+          const slotsToReload = teamEnabled ? snap.slots : (activeSession ? [activeSession.id] : [])
+          const loadedData: Record<string, { models: any; modes: any }> = {}
+          const reloadSessionBackground = async (session: SessionSummary, gen: number): Promise<boolean> => {
+            if (loadingSessionsRef.current.has(session.id)) return false
+            loadingSessionsRef.current.add(session.id)
+            setLoadingSessionIds((current) => current.includes(session.id) ? current : [...current, session.id])
+            try {
+              setEvents((current) => ({ ...current, [session.id]: [] }))
+              const response = await window.grokApi.loadSession(session.id, session.cwd)
+              loadedData[session.id] = { models: response.models, modes: response.modes }
+              setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, gen, connectionGenerationRef.current))
+              window.setTimeout(() => { void refreshUsageRef.current(session.id) }, 0)
+              return true
+            } catch {
+              setSessionReady((current) => clearSessionReady(current, session.id))
+              return false
+            } finally {
+              loadingSessionsRef.current.delete(session.id)
+              setLoadingSessionIds((current) => current.filter((id) => id !== session.id))
+            }
+          }
+          const reloadPromises = slotsToReload.map(async (slotId) => {
+            const sessionToLoad = sessions.find((s) => s.id === slotId)
+            if (!sessionToLoad) return null
+            const success = await reloadSessionBackground(sessionToLoad, nextGen)
+            return success ? slotId : null
+          })
+          const results = await Promise.all(reloadPromises)
+          const stillReadyIds = results.filter((id): id is string => id !== null)
+          const restored = restoreTeamAfterReconnect(snap, stillReadyIds)
+          setTeam(restored.team)
+          const nextActive = sessions.find((s) => s.id === restored.activeId) ?? null
+          setActive(nextActive)
+          activeIdRef.current = restored.activeId
+          const activeId = restored.activeId
+          if (activeId && loadedData[activeId]) {
+            setModels((current) => loadedData[activeId].models ?? current ?? value.modelState)
+            applySessionModes(loadedData[activeId].modes)
           }
         } catch (error) {
           setNotice(error instanceof Error ? error.message : String(error))
-        }
-      } else if (wasConnected) {
-        try {
-          const value = await window.grokApi.connect()
-          setCaps(value)
-          setModels(value.modelState)
-          setStatus((current) => ({ ...current, connected: true }))
-        } catch (error) {
-          setNotice(error instanceof Error ? error.message : String(error))
+        } finally {
+          setReconnecting(false)
         }
       }
     } catch (error) {
@@ -587,6 +659,7 @@ export function App(): React.JSX.Element {
   const connect = async (): Promise<AgentCapabilities | null> => {
     if (lifecycleBusy) return null
     setNotice('正在連接 Grok ACP…')
+    const wasConnected = status.connected
     try {
       const value = await window.grokApi.connect()
       setCaps(value)
@@ -594,6 +667,11 @@ export function App(): React.JSX.Element {
       setStatus((current) => ({ ...current, connected: true }))
       setNotice('ACP 已連線')
       void refreshBillingRef.current()
+      if (!wasConnected || connectionGenerationRef.current === 0) {
+        const nextGen = bumpConnectionGeneration(connectionGenerationRef.current)
+        updateConnectionGeneration(nextGen)
+        setSessionReady(invalidateAllReadiness())
+      }
       return value
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error))
@@ -635,6 +713,9 @@ export function App(): React.JSX.Element {
       setStatus((current) => ({ ...current, found: true, connected: true }))
       setSetupDialog(null)
       setNotice('Grok 帳號已重新登入')
+      const nextGen = bumpConnectionGeneration(connectionGenerationRef.current)
+      updateConnectionGeneration(nextGen)
+      setSessionReady(invalidateAllReadiness())
       void refreshSessionsRef.current()
       void refreshBillingRef.current()
     } catch (error) {
@@ -670,12 +751,15 @@ export function App(): React.JSX.Element {
       const capsValue = await connect()
       if (!capsValue) return
       const response = await window.grokApi.createSession(cwd)
-      if (!response.sessionId) return
+      const newSessionId = response.sessionId
+      if (!newSessionId) return
       setModels(response.models ?? capsValue.modelState)
       applySessionModes(response.modes)
-      const summary = { id: response.sessionId, cwd, title: 'New session', updatedAt: new Date().toISOString() }
+      const summary = { id: newSessionId, cwd, title: 'New session', updatedAt: new Date().toISOString() }
       setSessions((current) => [summary, ...current])
       setActive(summary)
+      const genAtCreate = connectionGenerationRef.current
+      setSessionReady((current) => markSessionReadyIfCurrent(current, newSessionId, genAtCreate, connectionGenerationRef.current))
       if (teamEnabled) {
         setTeam((current) => {
           if (isInTeam(current, summary.id)) return setTeamFocus(current, summary.id)
@@ -686,7 +770,7 @@ export function App(): React.JSX.Element {
       setUsage(null)
       setFollowTail(true)
       setUnread(0)
-      void refreshUsage(response.sessionId)
+      void refreshUsage(newSessionId)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error))
     }
@@ -697,7 +781,11 @@ export function App(): React.JSX.Element {
     setLoadingSessionIds((current) => current.includes(session.id) ? current : [...current, session.id])
     try {
       const capsValue = await connect()
-      if (!capsValue) return
+      if (!capsValue) {
+        setSessionReady((current) => clearSessionReady(current, session.id))
+        return
+      }
+      const currentGen = connectionGenerationRef.current
       const previousActive = active
       const previousUsage = usage
       const previousEvents = events[session.id]
@@ -721,8 +809,10 @@ export function App(): React.JSX.Element {
           setModels((current) => response.models ?? current ?? capsValue.modelState)
           applySessionModes(response.modes)
         }
+        setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, currentGen, connectionGenerationRef.current))
         window.setTimeout(() => { void refreshUsageRef.current(session.id) }, 0)
       } catch (error) {
+        setSessionReady((current) => clearSessionReady(current, session.id))
         setActive((current) => current?.id === session.id ? previousActive : current)
         if (activeIdRef.current === session.id || activeIdRef.current === previousActive?.id) setUsage(previousUsage)
         setEvents((current) => {
@@ -735,6 +825,9 @@ export function App(): React.JSX.Element {
         setTeam((current) => isInTeam(current, session.id) ? toggleTeamSlot(current, session.id) : current)
         setNotice(error instanceof Error ? error.message : String(error))
       }
+    } catch (err) {
+      setSessionReady((current) => clearSessionReady(current, session.id))
+      setNotice(err instanceof Error ? err.message : String(err))
     } finally {
       loadingSessionsRef.current.delete(session.id)
       setLoadingSessionIds((current) => current.filter((id) => id !== session.id))
@@ -836,6 +929,14 @@ export function App(): React.JSX.Element {
   }
 
   const cancelActiveTurn = async (sessionId: string): Promise<void> => {
+    const check = sessionActionAllowed(sessionReady, sessionId, connectionGenerationRef.current, {
+      loading: loadingSessionIds.includes(sessionId),
+      reconnecting
+    })
+    if (!check.ok) {
+      setNotice(check.notice)
+      return
+    }
     // Cancel discards any buffered interjection on the agent side; clear local "queued" claim.
     discardQueuedInterject(sessionId)
     await window.grokApi.cancel(sessionId)
@@ -859,6 +960,14 @@ export function App(): React.JSX.Element {
   }
 
   const sendPromptFor = async (sessionId: string): Promise<void> => {
+    const check = sessionActionAllowed(sessionReady, sessionId, connectionGenerationRef.current, {
+      loading: loadingSessionIds.includes(sessionId),
+      reconnecting
+    })
+    if (!check.ok) {
+      setNotice(check.notice)
+      return
+    }
     if (runningMap[sessionId]) return
     const text = drafts[sessionId]?.trim()
     const pending = attachmentsBySession[sessionId] ?? []
@@ -873,6 +982,14 @@ export function App(): React.JSX.Element {
 
   /** F-INT-2: queue mid-turn guidance without cancelling. */
   const sendInterjectFor = async (sessionId: string): Promise<void> => {
+    const check = sessionActionAllowed(sessionReady, sessionId, connectionGenerationRef.current, {
+      loading: loadingSessionIds.includes(sessionId),
+      reconnecting
+    })
+    if (!check.ok) {
+      setNotice(check.notice)
+      return
+    }
     if (!runningMap[sessionId] || interjectBusy) return
     const text = drafts[sessionId]?.trim()
     if (!text) return
@@ -900,6 +1017,14 @@ export function App(): React.JSX.Element {
 
   /** F-INT-3: cancel active turn then send a fresh prompt (separate control from interject). */
   const doThisNowFor = async (sessionId: string): Promise<void> => {
+    const check = sessionActionAllowed(sessionReady, sessionId, connectionGenerationRef.current, {
+      loading: loadingSessionIds.includes(sessionId),
+      reconnecting
+    })
+    if (!check.ok) {
+      setNotice(check.notice)
+      return
+    }
     if (!runningMap[sessionId] || interjectBusy) return
     const text = drafts[sessionId]?.trim()
     const pendingAttachments = attachmentsBySession[sessionId] ?? []
@@ -1238,6 +1363,7 @@ export function App(): React.JSX.Element {
               running={runningMap[sessionId] === true}
               focused={focused}
               EventCard={MemoEventCard}
+              ready={isSessionReady(sessionReady, sessionId, connectionGeneration)}
               onFocus={() => {
                 setTeam((current) => setTeamFocus(current, sessionId))
                 setActive(session)
@@ -1252,7 +1378,7 @@ export function App(): React.JSX.Element {
             />
           })}
         </section> : active ? <>
-          <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION · PROJECT</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) setNotice(`已匯出：${path}（可在檔案總管開啟該路徑）`) }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
+          <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION · PROJECT</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) { setNotice(`已匯出：${path}（可在檔案總管開啟該路徑）`); setExportedPaths((current) => ({ ...current, [active.id]: path })); setLastExportedPath(path); } }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button>{exportedPaths[active.id] && <button className="icon-button" title="在檔案總管開啟匯出檔案" onClick={() => void window.grokApi.revealExport(exportedPaths[active.id]).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><FolderOpen /></button>}<button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
           <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
           <footer className="composer-wrap" onDragOver={onComposerDragOver} onDrop={onComposerDrop}>
@@ -1273,33 +1399,75 @@ export function App(): React.JSX.Element {
                   type="button"
                   className="template-chip"
                   title={item.description}
+                  disabled={!activeReady}
                   onClick={() => setDrafts((current) => ({ ...current, [active.id]: `${current[active.id] ?? ''}${current[active.id] ? '\n' : ''}${item.body}` }))}
                 >{item.label}</button>
               ))}
             </div>}
             <div className="composer">
-              <button className="attach-button" aria-label="加入檔案" onClick={() => void chooseFiles()}><Paperclip /></button>
+              <button className="attach-button" aria-label="加入檔案" disabled={!activeReady} onClick={() => void chooseFiles()}><Paperclip /></button>
               <textarea
                 value={drafts[active.id] ?? ''}
+                disabled={!activeReady}
                 onChange={(event) => setDrafts((current) => ({ ...current, [active.id]: event.target.value }))}
                 onKeyDown={composerKey}
                 onPaste={paste}
-                placeholder={running ? '回合進行中可插話、排隊下一輪，或立刻改做…' : '交給 Grok 一個任務，或貼上／拖放圖片與檔案路徑…'}
+                placeholder={!activeReady ? '此對話尚未在目前連線就緒（載入中、失敗或已斷線）' : running ? '回合進行中可插話、排隊下一輪，或立刻改做…' : '交給 Grok 一個任務，或貼上／拖放圖片與檔案路徑…'}
                 rows={3}
               />
               {running ? <div className="composer-actions running command-rail" data-testid="command-rail">
-                <button type="button" className="interject-button" data-testid="interject-button" title="在下一個安全點插入指示（不取消目前回合）" disabled={interjectBusy || !(drafts[active.id] ?? '').trim()} onClick={() => void sendInterject()}><MessageSquare />插話</button>
-                <button type="button" className="queue-next-button" data-testid="queue-next-button" title="目前回合結束後自動送出（本機排隊，非官方 queue API）" disabled={interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => queueNextTurn()}><ListTodo />排隊下一輪</button>
+                <button type="button" className="interject-button" data-testid="interject-button" title="在下一個安全點插入指示（不取消目前回合）" disabled={!activeReady || interjectBusy || !(drafts[active.id] ?? '').trim()} onClick={() => void sendInterject()}><MessageSquare />插話</button>
+                <button type="button" className="queue-next-button" data-testid="queue-next-button" title="目前回合結束後自動送出（本機排隊，非官方 queue API）" disabled={!activeReady || interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => queueNextTurn()}><ListTodo />排隊下一輪</button>
                 {localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue) ? <button type="button" className="queue-clear-button" data-testid="queue-clear-button" title="取消已排隊的下一輪" onClick={() => clearLocalQueue()}><X />取消排隊</button> : null}
-                <button type="button" className="do-now-button" data-testid="do-this-now-button" title="取消目前回合並立刻送出新指示" disabled={interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => void doThisNow()}><Zap />立刻改做</button>
-                <button type="button" className="stop-button" data-nova-tone="danger" data-testid="stop-button" onClick={() => void cancelActiveTurn(active.id).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Square />停止</button>
-              </div> : <button className="send-button" data-magnetic data-nova-tone="primary" onClick={() => void sendPrompt()}><Send />送出</button>}
+                <button type="button" className="do-now-button" data-testid="do-this-now-button" title="取消目前回合並立刻送出新指示" disabled={!activeReady || interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => void doThisNow()}><Zap />立刻改做</button>
+                <button type="button" className="stop-button" data-nova-tone="danger" data-testid="stop-button" disabled={!activeReady} onClick={() => void cancelActiveTurn(active.id).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Square />停止</button>
+              </div> : <button className="send-button" data-magnetic data-nova-tone="primary" disabled={!activeReady || (!(drafts[active.id] ?? '').trim() && !attachments.length)} onClick={() => void sendPrompt()}><Send />送出</button>}
             </div>
           </footer>
         </> : null}
       </main>
       {panel === 'settings' && <SettingsPanel settings={settings} cliVersion={status.version} onClose={() => setPanel('none')} onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none') })} />}
-      {panel === 'features' && <aside className="drawer"><div className="drawer-head"><div><span className="eyebrow">CAPABILITY ROUTER</span><h2>功能矩陣</h2></div><button className="icon-button" onClick={() => setPanel('none')}><X /></button></div><p className="drawer-intro">有結構化 ACP 介面才在 GUI 原生操作；其餘明確回到 TUI，不模擬終端按鍵。</p><div className="feature-list">{FEATURES.map(([name, route, state]) => <div key={name}><span className={state}>{state === 'native' ? <Check /> : state === 'conditional' ? <Cpu /> : <TerminalSquare />}</span><strong>{name}</strong><small>{route}</small></div>)}</div>{active && <button className="secondary wide" onClick={() => openTui(active.cwd)}><TerminalSquare />在 GROK TUI 開啟</button>}</aside>}
+      {panel === 'features' && (
+        <aside className="drawer">
+          <div className="drawer-head">
+            <div>
+              <span className="eyebrow">CAPABILITY ROUTER</span>
+              <h2>功能矩陣</h2>
+            </div>
+            <button className="icon-button" onClick={() => setPanel('none')}><X /></button>
+          </div>
+          <p className="drawer-intro">有結構化 ACP 介面才在 GUI 原生操作；其餘明確回到 TUI，不模擬終端按鍵。</p>
+          <div className="feature-list">
+            {FEATURES.map(([name, route, state]) => (
+              <div key={name}>
+                <span className={state}>{state === 'native' ? <Check /> : state === 'conditional' ? <Cpu /> : <TerminalSquare />}</span>
+                <strong>{name}</strong>
+                <small>{route}</small>
+              </div>
+            ))}
+          </div>
+          <div className="settings-section" style={{ borderTop: '1px dashed var(--line)', paddingTop: '15px' }}>
+            <div className="section-title">
+              <h3>對話能力矩陣 (Session Capabilities)</h3>
+            </div>
+            <div className="feature-list" style={{ margin: '10px 0 20px' }}>
+              {probeSessionCapabilities(caps).matrix.map((row) => {
+                const stateClass = row.available ? 'native' : 'fallback'
+                return (
+                  <div key={row.id} data-testid={`capability-row-${row.id}`}>
+                    <span className={stateClass}>
+                      {row.available ? <Check /> : <TerminalSquare />}
+                    </span>
+                    <strong>{row.id}</strong>
+                    <small>{row.route === 'native' ? 'ACP 原生 (native)' : row.route === 'tui' ? '降級 TUI (tui)' : '不可用 (unavailable)'}</small>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+          {active && <button className="secondary wide" onClick={() => openTui(active.cwd)}><TerminalSquare />在 GROK TUI 開啟</button>}
+        </aside>
+      )}
     </div>
     {panel === 'commands' && <CommandPalette commands={paletteCommands} recentIds={settings.recentCommands} onUse={rememberCommand} onClose={() => setPanel('none')} />}
     {panel === 'shortcuts' && <div className="modal-backdrop"><section className="shortcut-overlay" role="dialog" aria-modal="true" aria-label="快捷鍵一覽"><header><div><span className="eyebrow">KEYBOARD HELP</span><h2>快捷鍵一覽</h2></div><button className="icon-button" aria-label="關閉快捷鍵" onClick={() => setPanel('none')}><X /></button></header><div>{[
@@ -1312,6 +1480,48 @@ export function App(): React.JSX.Element {
     {deleteTarget && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="刪除對話確認"><div className="permission-icon danger"><Trash2 /></div><span className="eyebrow">DELETE SESSION</span><h2>刪除這則對話？</h2><p>「{sessionDisplayTitle(deleteTarget, settings.sessionTitles)}」（{deleteTarget.cwd}）將從本機 session 歷史永久刪除，無法復原。</p><div><button className="danger-option" onClick={() => void deleteSession()}><Trash2 /><span><strong>永久刪除</strong><small>grok sessions delete</small></span></button><button autoFocus onClick={() => setDeleteTarget(null)}><X /><span><strong>取消</strong><small>保留這則對話</small></span></button></div></section></div>}
     {batchDeleteTargets && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="批次刪除確認"><div className="permission-icon danger"><Trash2 /></div><span className="eyebrow">DELETE SESSION</span><h2>刪除所選對話</h2><p>將刪除 {batchDeleteTargets.length} 則對話，請確認。這些資料將從本機 session 歷史永久移除，無法復原。</p><div><button className="danger-option" onClick={() => void deleteSessions(batchDeleteTargets)}><Trash2 /><span><strong>永久刪除</strong><small>grok sessions delete</small></span></button><button autoFocus onClick={() => setBatchDeleteTargets(null)}><X /><span><strong>取消</strong><small>保留全部對話</small></span></button></div></section></div>}
     {renameTarget && <div className="modal-backdrop"><section className="permission-modal rename-modal" role="dialog" aria-modal="true" aria-label="重新命名對話"><div className="permission-icon"><Pencil /></div><span className="eyebrow">LOCAL TITLE</span><h2>替這則對話取一個好找的名稱</h2><p>只改這台電腦上的顯示名稱，不會修改 Grok CLI 的原始紀錄。</p><label>對話名稱<input aria-label="對話名稱" autoFocus value={renameDraft} maxLength={80} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; if (event.key === 'Enter') void saveSessionTitle(); if (event.key === 'Escape') { event.stopPropagation(); setRenameTarget(null) } }} /></label><div><button onClick={() => void saveSessionTitle()}><Check /><span><strong>儲存名稱</strong><small>保存在本機設定</small></span></button><button onClick={() => setRenameTarget(null)}><X /><span><strong>取消</strong></span></button></div></section></div>}
-    {notice && <button className="notice" aria-live="polite" onClick={() => setNotice('')}><Zap />{notice}<X /></button>}
+    {notice && (
+      <div className="notice" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <Zap />
+        <span>{notice}</span>
+        {lastExportedPath && notice.includes(lastExportedPath) && (
+          <button
+            type="button"
+            className="text-button"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--accent)',
+              textDecoration: 'underline',
+              cursor: 'pointer',
+              fontSize: '11px',
+              padding: '0 4px',
+              fontWeight: 'bold'
+            }}
+            onClick={async (e) => {
+              e.stopPropagation()
+              try {
+                await window.grokApi.revealExport(lastExportedPath)
+              } catch (err) {
+                setNotice(err instanceof Error ? err.message : String(err))
+              }
+            }}
+          >
+            開啟檔案
+          </button>
+        )}
+        <button
+          type="button"
+          aria-label="關閉通知"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', marginLeft: 'auto', padding: 0, display: 'flex', alignItems: 'center' }}
+          onClick={() => {
+            setNotice('')
+            setLastExportedPath(null)
+          }}
+        >
+          <X size={14} />
+        </button>
+      </div>
+    )}
   </div>
 }
