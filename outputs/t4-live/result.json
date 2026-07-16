@@ -1,0 +1,20 @@
+{
+  "startedAt": "2026-07-16T14:46:49.969Z",
+  "finishedAt": "2026-07-16T14:46:56.077Z",
+  "executable": "C:\\Users\\111\\.grok\\bin\\grok.exe",
+  "sessionA": "019f6b65-0618-7a93-8bc3-b452d8555f64",
+  "sessionB": "019f6b65-07d6-7f70-a844-e13ada46416c",
+  "aRunning": true,
+  "bRunning": true,
+  "aAlreadyDoneBeforeCancel": false,
+  "aFinalStatus": "cancelled",
+  "bFinalStatus": "completed",
+  "aStopReason": "cancelled",
+  "bStopReason": "end_turn",
+  "pA": "fulfilled",
+  "pB": "fulfilled",
+  "pass": true,
+  "strongCancel": true,
+  "independence": true,
+  "notes": "STRONG: A cancelled while B completed independently on one ACP connection."
+}

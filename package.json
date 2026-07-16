@@ -17,7 +17,8 @@
     "package": "npm run notices && npm run test && npm run build && electron-builder --win nsis --publish never",
     "lint": "eslint . --max-warnings=0",
     "verify": "npm test && npm run lint && npm run typecheck && npm run build",
-    "smoke:ui": "npm run build && node work/ui_feature_smoke.mjs"
+    "smoke:ui": "npm run build && node work/ui_feature_smoke.mjs",
+    "smoke:t4-live": "npx --yes tsx scripts/t4-live-dual-prompt.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.2.1",
