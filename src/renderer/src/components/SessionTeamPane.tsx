@@ -47,6 +47,8 @@ export function SessionTeamPane({
       data-session-id={session.id}
       data-focused={focused ? 'true' : 'false'}
       onClick={onFocus}
+      onFocusCapture={onFocus}
+      onPointerDownCapture={onFocus}
     >
       <header className="team-pane-head">
         <div>
@@ -71,11 +73,12 @@ export function SessionTeamPane({
           )}
         />
       </div>
-      <footer className="team-pane-composer" onClick={(e) => e.stopPropagation()}>
+      <footer className="team-pane-composer">
         <textarea
           value={draft}
-          rows={2}
+          rows={3}
           placeholder={running ? '對此 agent 插話…' : '對此 agent 下指令…'}
+          onFocus={onFocus}
           onChange={(e) => onDraftChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return

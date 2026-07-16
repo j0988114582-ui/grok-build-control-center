@@ -76,16 +76,8 @@ export function StatusOrb({
   const dpr = useMemo(() => (typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1), [])
   const useGl = useMemo(() => canUseWebGL(), [])
 
-  return (
-    <button
-      type="button"
-      className={`status-orb ${className ?? ''} mode-${mode}`}
-      data-testid="status-orb"
-      data-mode={mode}
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-    >
+  const body = (
+    <>
       <span className="status-orb-canvas" aria-hidden>
         {useGl ? (
           <Canvas dpr={dpr} camera={{ position: [0, 0, 2.6], fov: 42 }} gl={{ antialias: true, alpha: true }}>
@@ -96,7 +88,34 @@ export function StatusOrb({
         )}
       </span>
       <span className="status-orb-label">{title}</span>
-    </button>
+    </>
+  )
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={`status-orb ${className ?? ''} mode-${mode}`}
+        data-testid="status-orb"
+        data-mode={mode}
+        title={title}
+        aria-label={title}
+        onClick={onClick}
+      >
+        {body}
+      </button>
+    )
+  }
+  return (
+    <div
+      className={`status-orb ${className ?? ''} mode-${mode}`}
+      data-testid="status-orb"
+      data-mode={mode}
+      title={title}
+      aria-label={title}
+      role="status"
+    >
+      {body}
+    </div>
   )
 }
 
