@@ -73,6 +73,7 @@ export function StatusOrb({
   className?: string
 }): React.JSX.Element {
   const title = label ?? (mode === 'running' ? 'L2: 執行中' : mode === 'error' ? 'L2: 錯誤' : mode === 'offline' ? 'L2: 離線' : 'L2: 待命')
+  const displayLabel = label ?? (mode === 'running' ? '執行中' : mode === 'error' ? '錯誤' : mode === 'offline' ? '離線' : '待命')
   const dpr = useMemo(() => (typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1), [])
   const useGl = useMemo(() => canUseWebGL(), [])
 
@@ -87,7 +88,7 @@ export function StatusOrb({
           <StatusOrbCanvasFallback mode={mode} reducedMotion={reducedMotion} />
         )}
       </span>
-      <span className="status-orb-label">{title}</span>
+      <span className="status-orb-label">{displayLabel}</span>
     </>
   )
   if (onClick) {

@@ -1032,6 +1032,91 @@ describe('App', () => {
     expect(screen.getAllByTestId('team-pane')).toHaveLength(2)
   })
 
+  /** T4 proxy: dual panes keep independent drafts and only cancel the focused running session. */
+  it('T4: team panes isolate drafts; cancel only hits focused running session', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.listSessions = vi.fn().mockResolvedValue([
+      { id: 's1', cwd: 'C:\\repo-a', title: 'Agent Alpha', updatedAt: '2026-07-11T00:00:00Z' },
+      { id: 's2', cwd: 'C:\\repo-b', title: 'Agent Beta', updatedAt: '2026-07-11T01:00:00Z' }
+    ])
+    api.loadSession = vi.fn().mockImplementation(async (sessionId: string) => ({ sessionId }))
+    api.cancel = vi.fn().mockResolvedValue(undefined)
+    api.sendPrompt = vi.fn().mockResolvedValue(undefined)
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByTestId('agents-team-toggle'))
+    await user.click(screen.getByText('Agent Alpha'))
+    await waitFor(() => expect(api.loadSession).toHaveBeenCalledWith('s1', 'C:\\repo-a'))
+    await user.click(screen.getByText('Agent Beta'))
+    await waitFor(() => expect(api.loadSession).toHaveBeenCalledWith('s2', 'C:\\repo-b'))
+    expect(screen.getAllByTestId('team-pane')).toHaveLength(2)
+
+    const panes = screen.getAllByTestId('team-pane')
+    const areaA = panes[0].querySelector('textarea')
+    const areaB = panes[1].querySelector('textarea')
+    expect(areaA).toBeTruthy()
+    expect(areaB).toBeTruthy()
+    await user.type(areaA!, '任務A草稿')
+    await user.type(areaB!, '任務B草稿')
+    expect(areaA).toHaveValue('任務A草稿')
+    expect(areaB).toHaveValue('任務B草稿')
+
+    // Both turns running (overlap).
+    act(() => {
+      onEvent?.({ id: 't1', sessionId: 's1', kind: 'turn', status: 'running' })
+      onEvent?.({ id: 't2', sessionId: 's2', kind: 'turn', status: 'running' })
+    })
+
+    // Focus A, stop only A.
+    await user.click(panes[0])
+    const stopButtons = screen.getAllByRole('button', { name: /停止/ })
+    expect(stopButtons.length).toBeGreaterThanOrEqual(1)
+    // Team pane stop is labeled 停止
+    const paneAStop = panes[0].querySelector('button.stop-button') as HTMLButtonElement | null
+    expect(paneAStop).toBeTruthy()
+    await user.click(paneAStop!)
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith('s1'))
+    expect(api.cancel).not.toHaveBeenCalledWith('s2')
+
+    // B can still complete independently.
+    act(() => {
+      onEvent?.({ id: 't2-done', sessionId: 's2', kind: 'turn', status: 'completed' })
+    })
+    expect(api.cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('T4: sendPrompt routes to the pane session id after both are ready', async () => {
+    const api = createApiMock()
+    api.listSessions = vi.fn().mockResolvedValue([
+      { id: 's1', cwd: 'C:\\repo-a', title: 'Agent Alpha', updatedAt: '2026-07-11T00:00:00Z' },
+      { id: 's2', cwd: 'C:\\repo-b', title: 'Agent Beta', updatedAt: '2026-07-11T01:00:00Z' }
+    ])
+    api.loadSession = vi.fn().mockImplementation(async (sessionId: string) => ({ sessionId }))
+    api.sendPrompt = vi.fn().mockResolvedValue(undefined)
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByTestId('agents-team-toggle'))
+    await user.click(screen.getByText('Agent Alpha'))
+    await waitFor(() => expect(api.loadSession).toHaveBeenCalledWith('s1', 'C:\\repo-a'))
+    await user.click(screen.getByText('Agent Beta'))
+    await waitFor(() => expect(api.loadSession).toHaveBeenCalledWith('s2', 'C:\\repo-b'))
+
+    const panes = screen.getAllByTestId('team-pane')
+    const areaB = panes[1].querySelector('textarea')!
+    await user.clear(areaB)
+    await user.type(areaB, '只給B')
+    const sendB = panes[1].querySelector('button.send-button') as HTMLButtonElement
+    await user.click(sendB)
+    await waitFor(() => expect(api.sendPrompt).toHaveBeenCalledWith('s2', [{ type: 'text', text: '只給B' }]))
+    expect(api.sendPrompt).not.toHaveBeenCalledWith('s1', expect.anything())
+  })
+
   it('F-RT-5: command palette lists all availableCommands entries', async () => {
     const api = createApiMock()
     api.connect = vi.fn().mockResolvedValue({
