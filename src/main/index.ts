@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { execFile, spawn } from 'node:child_process'
-import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -22,6 +22,7 @@ import {
 import { listLocalSessions, readSessionUsage } from './session-index'
 import { createDefaultSettings, normalizeSettings } from '../shared/settings'
 import { normalizeBilling } from '../shared/billing'
+import { extensionForImageMime, PASTE_IMAGE_MAX_BYTES } from '../shared/paste-image'
 import type { AppSettings, CliStatus, PromptBlock } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
@@ -228,10 +229,32 @@ function registerIpc(): void {
       let data: string | undefined
       if (mimeType) {
         const info = await stat(file)
-        if (info.size <= 20 * 1024 * 1024) data = (await readFile(file)).toString('base64')
+        if (info.size <= PASTE_IMAGE_MAX_BYTES) data = (await readFile(file)).toString('base64')
       }
       return { path: file, name: path.basename(file), mimeType: data ? mimeType : undefined, data }
     }))
+  })
+  ipcMain.handle('paste:save-image', async (_event, payload: { mimeType?: unknown; data?: unknown }) => {
+    if (!payload || typeof payload.mimeType !== 'string' || typeof payload.data !== 'string') {
+      throw new Error('無效的貼圖資料')
+    }
+    const ext = extensionForImageMime(payload.mimeType)
+    if (!ext) throw new Error(`不支援的圖片格式：${payload.mimeType}`)
+    // Strip accidental data-URL prefix if a caller ever forwards one.
+    const raw = payload.data.includes(',') ? payload.data.slice(payload.data.indexOf(',') + 1) : payload.data
+    let buffer: Buffer
+    try {
+      buffer = Buffer.from(raw, 'base64')
+    } catch {
+      throw new Error('貼圖資料解碼失敗')
+    }
+    if (!buffer.length) throw new Error('貼圖資料為空')
+    if (buffer.length > PASTE_IMAGE_MAX_BYTES) throw new Error('貼圖超過 20MB 上限')
+    const directory = path.join(tmpdir(), 'grok-build-gui-paste')
+    await mkdir(directory, { recursive: true })
+    const filePath = path.join(directory, `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`)
+    await writeFile(filePath, buffer)
+    return { path: filePath }
   })
   ipcMain.handle('grok:export', async (_event, sessionId: string) => {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) throw new Error('Invalid session id')

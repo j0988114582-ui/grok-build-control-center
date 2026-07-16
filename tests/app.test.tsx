@@ -34,7 +34,9 @@ const createApiMock = (): GrokBridgeApi => ({
     billingPeriodEnd: '2026-07-17T02:38:18Z',
     productUsage: [{ product: 'GrokBuild', usagePercent: 50 }]
   }),
-  respondPermission: vi.fn(), chooseDirectory: vi.fn(), chooseFiles: vi.fn(), exportSession: vi.fn(), openTui: vi.fn(), openExternal: vi.fn(),
+  respondPermission: vi.fn(), chooseDirectory: vi.fn(), chooseFiles: vi.fn(),
+  savePasteImage: vi.fn().mockResolvedValue({ path: 'C:\\Users\\demo\\AppData\\Local\\Temp\\grok-build-gui-paste\\paste-1.png' }),
+  exportSession: vi.fn(), openTui: vi.fn(), openExternal: vi.fn(),
   onEvent: vi.fn().mockReturnValue(() => {}), onPermission: vi.fn().mockReturnValue(() => {}), onStatus: vi.fn().mockReturnValue(() => {})
 } as unknown as GrokBridgeApi)
 
@@ -593,5 +595,196 @@ describe('App', () => {
     expect(api.cancel).not.toHaveBeenCalled()
     await user.keyboard('{Control>}x{/Control}')
     expect(api.cancel).toHaveBeenCalledWith('s1')
+  })
+
+  // --- v0.4.1 regression locks (T1–T8) ---
+
+  it('T1 disables the permission-mode select while a turn is running or a session is loading', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    let resolveLoad: ((value: { sessionId: string }) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.loadSession = vi.fn(() => new Promise<{ sessionId: string }>((resolve) => { resolveLoad = resolve }))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    const select = await screen.findByRole('combobox', { name: '權限模式' })
+    expect(select).not.toBeDisabled()
+
+    await user.click(await screen.findByText('Fix tests'))
+    expect(select).toBeDisabled()
+    act(() => { resolveLoad?.({ sessionId: 's1' }) })
+    await waitFor(() => expect(select).not.toBeDisabled())
+
+    act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
+    expect(select).toBeDisabled()
+    act(() => { onEvent?.({ id: 'turn-done', sessionId: 's1', kind: 'turn', status: 'completed' }) })
+    await waitFor(() => expect(select).not.toBeDisabled())
+  })
+
+  it('T2 guards YOLO confirm against double-click and shows the YOLO banner after success', async () => {
+    const api = createApiMock()
+    let resolveMode: ((mode: 'always-approve') => void) | undefined
+    let calls = 0
+    api.setPermissionMode = vi.fn(() => {
+      calls += 1
+      return new Promise<'always-approve'>((resolve) => { resolveMode = resolve })
+    })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    const select = await screen.findByRole('combobox', { name: '權限模式' })
+    await user.selectOptions(select, 'always-approve')
+    const confirm = await screen.findByRole('button', { name: /我了解風險，啟用 YOLO/ })
+    await user.click(confirm)
+    expect(confirm).toBeDisabled()
+    await user.click(confirm)
+    expect(calls).toBe(1)
+
+    await act(async () => { resolveMode?.('always-approve') })
+    expect(await screen.findByText(/已切換到 YOLO 模式/)).toBeInTheDocument()
+    expect(document.querySelector('.yolo-banner')).toBeInTheDocument()
+    expect(api.setPermissionMode).toHaveBeenCalledWith('always-approve')
+  })
+
+  it('T3 starts permission mode as ask on every launch', async () => {
+    const api = createApiMock()
+    api.getPermissionMode = vi.fn().mockResolvedValue('ask' as const)
+    window.grokApi = api
+    render(<App />)
+
+    const select = await screen.findByRole('combobox', { name: '權限模式' })
+    expect(select).toHaveValue('ask')
+    expect(api.getPermissionMode).toHaveBeenCalled()
+    expect(screen.queryByText(/YOLO 模式：已啟用一律核准/)).not.toBeInTheDocument()
+  })
+
+  it('T4 closes the batch-delete modal on confirm and blocks re-entry while deleting', async () => {
+    const api = createApiMock()
+    api.listSessions = vi.fn().mockResolvedValue([
+      { id: 's1', cwd: 'C:\\repo', title: 'Fix tests', updatedAt: '2026-07-11T00:00:00Z' },
+      { id: 's2', cwd: 'C:\\repo', title: 'Other task', updatedAt: '2026-07-10T00:00:00Z' }
+    ])
+    let resolveDelete: ((value: boolean) => void) | undefined
+    let deleteCalls = 0
+    api.deleteSession = vi.fn(() => {
+      deleteCalls += 1
+      return new Promise<boolean>((resolve) => { resolveDelete = resolve })
+    })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('Fix tests')
+    await user.click(screen.getByRole('button', { name: '多選' }))
+    await user.click(screen.getByRole('checkbox', { name: '選擇對話 Fix tests' }))
+    await user.click(screen.getByRole('checkbox', { name: '選擇對話 Other task' }))
+    await user.click(screen.getByRole('button', { name: /刪除所選/ }))
+    expect(screen.getByRole('dialog', { name: '批次刪除確認' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /永久刪除/ }))
+    expect(screen.queryByRole('dialog', { name: '批次刪除確認' })).not.toBeInTheDocument()
+    expect(deleteCalls).toBe(1)
+
+    // While the first batch is still in flight, re-open confirm and submit again.
+    // Modal may open (selection still present), but the re-entry lock must not call deleteSession again.
+    await user.click(screen.getByRole('button', { name: /刪除所選/ }))
+    expect(screen.getByRole('dialog', { name: '批次刪除確認' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /永久刪除/ }))
+    expect(screen.queryByRole('dialog', { name: '批次刪除確認' })).not.toBeInTheDocument()
+    expect(deleteCalls).toBe(1)
+
+    await act(async () => { resolveDelete?.(true) })
+    await waitFor(() => expect(api.deleteSession).toHaveBeenCalled())
+  })
+
+  it('T5 moves a pinned session into the 已釘選 group', async () => {
+    const api = createApiMock()
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('Fix tests')
+    expect(screen.queryByText('已釘選')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '釘選 Fix tests' }))
+    expect(await screen.findByText('已釘選')).toBeInTheDocument()
+    expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ pinnedSessions: ['s1'] }))
+  })
+
+  it('T6 can reopen the sidebar after collapsing it on the empty home state', async () => {
+    window.grokApi = createApiMock()
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('Fix tests')
+    expect(screen.getByRole('button', { name: '選擇專案開始' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '收合側欄' }))
+    expect(document.querySelector('.workspace')).toHaveClass('sidebar-collapsed')
+    // Prefer the float control that sits on the empty home state.
+    const expand = document.querySelector('.sidebar-expand-float') as HTMLButtonElement | null
+    expect(expand).not.toBeNull()
+    await user.click(expand!)
+    expect(document.querySelector('.workspace')).not.toHaveClass('sidebar-collapsed')
+  })
+
+  it('T7 saves a pasted image as a local path when ACP image capability is false', async () => {
+    const api = createApiMock()
+    const savedPath = 'C:\\Users\\demo\\AppData\\Local\\Temp\\grok-build-gui-paste\\paste-9.png'
+    api.savePasteImage = vi.fn().mockResolvedValue({ path: savedPath })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    const composer = screen.getByPlaceholderText(/交給 Grok 一個任務/) as HTMLTextAreaElement
+    expect(composer).toHaveValue('')
+
+    const file = new File([Uint8Array.from([137, 80, 78, 71])], 'clip.png', { type: 'image/png' })
+    await act(async () => {
+      fireEvent.paste(composer, {
+        clipboardData: {
+          files: [file],
+          items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+          types: ['Files']
+        }
+      })
+    })
+
+    await waitFor(() => expect(api.savePasteImage).toHaveBeenCalledTimes(1))
+    expect(api.savePasteImage).toHaveBeenCalledWith(expect.objectContaining({ mimeType: 'image/png', data: expect.any(String) }))
+    await waitFor(() => expect(composer).toHaveValue(savedPath))
+    expect(screen.getByText(/已改以本機路徑附上/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /移除附件/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '移除貼圖路徑' })).toBeInTheDocument()
+  })
+
+  it('T8 leaves the draft unchanged and shows a notice when paste save fails', async () => {
+    const api = createApiMock()
+    api.savePasteImage = vi.fn().mockRejectedValue(new Error('磁碟已滿'))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    const composer = screen.getByPlaceholderText(/交給 Grok 一個任務/) as HTMLTextAreaElement
+    await user.type(composer, '保留這段')
+
+    const file = new File([Uint8Array.from([1, 2, 3])], 'clip.png', { type: 'image/png' })
+    await act(async () => {
+      fireEvent.paste(composer, {
+        clipboardData: {
+          files: [file],
+          items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+          types: ['Files']
+        }
+      })
+    })
+
+    await waitFor(() => expect(api.savePasteImage).toHaveBeenCalled())
+    expect(await screen.findByText(/貼圖儲存失敗/)).toBeInTheDocument()
+    expect(composer).toHaveValue('保留這段')
+    expect(screen.queryByRole('button', { name: '移除貼圖路徑' })).not.toBeInTheDocument()
   })
 })

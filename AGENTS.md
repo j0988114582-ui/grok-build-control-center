@@ -7,6 +7,8 @@
 **v0.4.0（2026-07-16）**：側欄可重開、composer 固定高、專案標題層級、全域 pin、YOLO 權限模式（每次啟動重置為每次詢問）、批次刪除、orphan 清理、Ctrl+B。計畫見 `docs/plans/2026-07-16-v0.4-upgrade-plan.md`；舊 backlog `docs/backlog/2026-07-15-next-upgrade.md`。  
 P0 側欄主頁無法重開、composer 固定高度；P1 專案標題層級、批次刪除；P2 ACP 貼圖／多模態（本機 0.2.101 實測 `image:false`/`audio:false`/`embeddedContext:true`）。
 
+**v0.4.1（2026-07-16）**：品質收斂（session loading 鎖權限下拉、YOLO 防連點、busy 文案分流、checkbox 合法 HTML）＋貼圖路徑降級（`%TEMP%\grok-build-gui-paste\` 只插絕對路徑）＋ T1–T8 UI 回歸測試。計畫 `docs/plans/2026-07-16-v0.4.1-paste-path-quality.md`。
+
 ## 發布前第二輪複審（2026-07-12，Claude 雙 agent 對抗式審查）
 
 - 修正 24 項:IME isComposing 防護（composer/改名/命令面板/全域鍵盤）、send() 對已銷毀視窗防護＋closed 清 null、electron-store clearInvalidConfig（settings.json 損壞不再變磚）、loadSession 重入鎖＋過期回應防護、formatDate 壞日期防白屏、Virtuoso computeItemKey=event.id（reducer 合併保留原 id）、回合結束/斷線清 pending 權限 modal、切 session 重置 followTail/unread、connect() caps 合併不再清空 commands/mode、load/create 回應的 modes 套用、EventCard memo＋搜尋計數 useMemo、靜態星空 resize 重繪、WebGL context lost/restored 處理、星空時間精度 wrap、respondPermission 先驗證再刪、export/usage sessionId 驗證、打包版忽略 ELECTRON_RENDERER_URL、asar 排除 node_modules（-49MB）、退出時停掉連線中 client、附件圖 20MB 上限、刪除運行中 session 先取消、ModelPicker 空清單防護、setMode/export/setModel 失敗回饋、SettingsPanel 儲存合併 live drafts。測試 83→85。

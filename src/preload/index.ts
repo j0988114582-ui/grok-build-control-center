@@ -25,6 +25,7 @@ const api: GrokBridgeApi = {
   setPermissionMode: (mode) => ipcRenderer.invoke('grok:permission-mode:set', mode),
   chooseDirectory: () => ipcRenderer.invoke('dialog:directory'),
   chooseFiles: () => ipcRenderer.invoke('dialog:files'),
+  savePasteImage: (payload) => ipcRenderer.invoke('paste:save-image', payload),
   exportSession: (sessionId) => ipcRenderer.invoke('grok:export', sessionId),
   openTui: (cwd) => ipcRenderer.invoke('grok:tui', cwd),
   openExternal: (url) => ipcRenderer.invoke('shell:external', url),

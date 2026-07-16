@@ -6,6 +6,8 @@ export type CliStatusUpdate = Partial<CliStatus> & { message?: string; stderr?: 
 
 export type SelectedFile = { path: string; name: string; mimeType?: string; data?: string }
 export type SessionFeatures = { sessionId?: string; modes?: unknown; configOptions?: unknown; models?: ModelState }
+export type SavePasteImageRequest = { mimeType: string; data: string }
+export type SavePasteImageResult = { path: string }
 
 export interface GrokBridgeApi {
   getStatus(): Promise<CliStatus>
@@ -30,6 +32,8 @@ export interface GrokBridgeApi {
   setPermissionMode(mode: AgentPermissionMode): Promise<AgentPermissionMode>
   chooseDirectory(): Promise<string | null>
   chooseFiles(): Promise<SelectedFile[]>
+  /** Save a clipboard image into %TEMP%/grok-build-gui-paste and return its absolute path. */
+  savePasteImage(payload: SavePasteImageRequest): Promise<SavePasteImageResult>
   exportSession(sessionId: string): Promise<string | null>
   openTui(cwd: string): Promise<void>
   openExternal(url: string): Promise<void>

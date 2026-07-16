@@ -13,6 +13,24 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
 
+## [0.4.1] - 2026-07-16
+
+### Added
+
+- Clipboard paste fallback when ACP does not advertise image support: save to `%TEMP%\grok-build-gui-paste\` and insert the absolute path into the draft (path chip + notice; no auto “請讀取此圖” phrase).
+- UI regression locks for permission-mode busy states, YOLO confirm, pin group, batch delete, sidebar reopen, and paste-path behavior.
+
+### Changed
+
+- Permission-mode select also disables while a session is loading (React state, not only a ref).
+- Composer busy copy distinguishes an active turn from lifecycle/session-loading busy.
+- Session multi-select checkbox is no longer nested inside the session open button (valid HTML).
+
+### Fixed
+
+- YOLO confirm button is disabled while the mode switch is in flight to prevent double-submit.
+- Permission-mode tooltips distinguish “stop the turn” vs “system busy”.
+
 ## [0.4.0] - 2026-07-16
 
 ### Added

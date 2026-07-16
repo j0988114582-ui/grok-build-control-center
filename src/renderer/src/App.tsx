@@ -172,6 +172,9 @@ export function App(): React.JSX.Element {
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('ask')
   const [runningMap, setRunningMap] = useState<Record<string, boolean>>({})
   const [yoloConfirm, setYoloConfirm] = useState(false)
+  const [yoloBusy, setYoloBusy] = useState(false)
+  const [loadingSessionIds, setLoadingSessionIds] = useState<string[]>([])
+  const [pastePathChip, setPastePathChip] = useState<string | null>(null)
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [usage, setUsage] = useState<SessionUsage | null>(null)
@@ -255,7 +258,14 @@ export function App(): React.JSX.Element {
   const permission = permissions[0] ?? null
   const safePermissionOptionId = permission?.options.find((option) => option.kind.includes('reject'))?.optionId
   const running = active ? runningMap[active.id] === true : false
+  const sessionLoading = loadingSessionIds.length > 0
+  const permissionControlsLocked = lifecycleBusy || running || sessionLoading || yoloBusy
   const attachments = active ? attachmentsBySession[active.id] ?? [] : []
+  const permissionModeTitle = running
+    ? '請先停止目前執行中的回合'
+    : lifecycleBusy || sessionLoading
+      ? '系統忙碌中，請稍候再切換權限模式'
+      : '工具權限模式（每次啟動重置為每次詢問）'
 
   useEffect(() => {
     if (permission) return
@@ -402,14 +412,16 @@ export function App(): React.JSX.Element {
     const isPinned = settings.pinnedSessions.includes(session.id)
     const isSelected = selectedIds.has(session.id)
     return <div key={session.id} className={`session-row ${active?.id === session.id ? 'active' : ''} ${collapsingSessionId === session.id ? 'collapsing' : ''} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''}`}>
-      <button className="session-open" disabled={lifecycleBusy} onClick={() => void loadSession(session)}>
+      {selectMode && <input className="session-check" type="checkbox" aria-label={`選擇對話 ${title}`} checked={isSelected} onChange={(event) => toggleSessionSelection(session.id, event.currentTarget.checked)} />}
+      <button className="session-open" disabled={lifecycleBusy || loadingSessionIds.includes(session.id)} onClick={() => void loadSession(session)}>
         <span className="session-dot" />
-        {selectMode && <input className="session-check" type="checkbox" aria-label={`選擇對話 ${title}`} checked={isSelected} onClick={(event) => event.stopPropagation()} onChange={(event) => toggleSessionSelection(session.id, event.currentTarget.checked)} />}
         <div><strong>{title}</strong><small>{session.cwd}</small><time>{formatDate(session.updatedAt)}</time></div>
       </button>
-      <button className={`session-pin ${isPinned ? 'pinned' : ''}`} title={isPinned ? '取消釘選' : '釘選'} aria-label={isPinned ? `取消釘選 ${title}` : `釘選 ${title}`} onClick={() => togglePinned(session)}><Pin /></button>
-      <button className="session-rename" title="重新命名" aria-label={`重新命名 ${title}`} onClick={() => { setRenameTarget(session); setRenameDraft(title) }}><Pencil /></button>
-      <button className="session-delete" data-nova-tone="danger" title="刪除對話" aria-label={`刪除對話 ${title}`} onClick={() => setDeleteTarget(session)}><Trash2 /></button>
+      {!selectMode && <>
+        <button className={`session-pin ${isPinned ? 'pinned' : ''}`} title={isPinned ? '取消釘選' : '釘選'} aria-label={isPinned ? `取消釘選 ${title}` : `釘選 ${title}`} onClick={() => togglePinned(session)}><Pin /></button>
+        <button className="session-rename" title="重新命名" aria-label={`重新命名 ${title}`} onClick={() => { setRenameTarget(session); setRenameDraft(title) }}><Pencil /></button>
+        <button className="session-delete" data-nova-tone="danger" title="刪除對話" aria-label={`刪除對話 ${title}`} onClick={() => setDeleteTarget(session)}><Trash2 /></button>
+      </>}
     </div>
   }
   const togglePinned = (session: SessionSummary): void => {
@@ -437,16 +449,22 @@ export function App(): React.JSX.Element {
     setSelectedIds(new Set())
   }
   const confirmPermissionMode = async (): Promise<void> => {
-    if (lifecycleBusy || running) {
+    if (yoloBusy) return
+    if (lifecycleBusy || running || sessionLoading) {
       setYoloConfirm(false)
-      setNotice('請先停止目前執行中的回合，再切換權限模式')
+      setNotice(running ? '請先停止目前執行中的回合，再切換權限模式' : '系統忙碌中，請稍候再切換權限模式')
       return
     }
-    setYoloConfirm(false)
-    await setPermissionModeWithBackend('always-approve')
+    setYoloBusy(true)
+    try {
+      await setPermissionModeWithBackend('always-approve')
+      setYoloConfirm(false)
+    } finally {
+      setYoloBusy(false)
+    }
   }
   const requestPermissionMode = (mode: AgentPermissionMode): void => {
-    if (mode === permissionMode || lifecycleBusy || running) return
+    if (mode === permissionMode || permissionControlsLocked) return
     if (mode === 'always-approve') setYoloConfirm(true)
     else void setPermissionModeWithBackend('ask')
   }
@@ -572,6 +590,7 @@ export function App(): React.JSX.Element {
       const summary = { id: response.sessionId, cwd, title: 'New session', updatedAt: new Date().toISOString() }
       setSessions((current) => [summary, ...current])
       setActive(summary)
+      setPastePathChip(null)
       setUsage(null)
       setFollowTail(true)
       setUnread(0)
@@ -583,6 +602,7 @@ export function App(): React.JSX.Element {
   const loadSession = async (session: SessionSummary): Promise<void> => {
     if (lifecycleBusy || loadingSessionsRef.current.has(session.id)) return
     loadingSessionsRef.current.add(session.id)
+    setLoadingSessionIds((current) => current.includes(session.id) ? current : [...current, session.id])
     try {
       const capsValue = await connect()
       if (!capsValue) return
@@ -590,6 +610,7 @@ export function App(): React.JSX.Element {
       const previousUsage = usage
       const previousEvents = events[session.id]
       setActive(session)
+      setPastePathChip(null)
       setUsage(null)
       setFollowTail(true)
       setUnread(0)
@@ -614,6 +635,7 @@ export function App(): React.JSX.Element {
       }
     } finally {
       loadingSessionsRef.current.delete(session.id)
+      setLoadingSessionIds((current) => current.filter((id) => id !== session.id))
     }
   }
   const deleteSession = async (): Promise<void> => {
@@ -622,11 +644,12 @@ export function App(): React.JSX.Element {
     await deleteSessions([deleteTarget])
   }
   const deleteSessions = async (targets: SessionSummary[]): Promise<void> => {
-    if (!targets.length || deletingSessionsRef.current) return
-    deletingSessionsRef.current = true
-    // Close confirm modals before the async loop so the action cannot be re-entered.
+    if (!targets.length) return
+    // Always dismiss confirm UI first so a second confirm while busy cannot leave a stuck modal.
     setBatchDeleteTargets(null)
     setDeleteTarget(null)
+    if (deletingSessionsRef.current) return
+    deletingSessionsRef.current = true
     const succeeded: string[] = []
     const failed: string[] = []
     const ids = targets.map((target) => target.id)
@@ -770,7 +793,80 @@ export function App(): React.JSX.Element {
     setSettings(next)
     void window.grokApi.saveSettings(next).then(setSettings)
   }
-  const paste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => { const files = [...event.clipboardData.files]; if (!files.length || !active) return; const sessionId = active.id; event.preventDefault(); if (caps.promptCapabilities.image !== true) { setNotice('目前 GROK ACP 未宣告圖片支援；請先把圖片存檔，再用迴紋針加入絕對路徑。'); return } void Promise.all(files.map((file) => new Promise<PromptBlock | null>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve({ type: 'image', data: String(reader.result).split(',')[1], mimeType: file.type || 'image/png', name: file.name }); reader.onerror = () => resolve(null); reader.onabort = () => resolve(null); reader.readAsDataURL(file) }))).then((blocks) => { const usable = blocks.filter((block): block is PromptBlock => block !== null); if (usable.length < blocks.length) setNotice('部分圖片讀取失敗，未加入附件'); if (usable.length) setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), ...usable] })) }) }
+  const readClipboardImage = (file: File): Promise<{ data: string; mimeType: string } | null> => new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result ?? '')
+      const data = result.includes(',') ? result.split(',')[1] : result
+      if (!data) { resolve(null); return }
+      resolve({ data, mimeType: file.type || 'image/png' })
+    }
+    reader.onerror = () => resolve(null)
+    reader.onabort = () => resolve(null)
+    reader.readAsDataURL(file)
+  })
+  const paste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = [...event.clipboardData.files]
+    if (!files.length || !active) return
+    const sessionId = active.id
+    event.preventDefault()
+    // Future-compatible: when ACP advertises image support, keep embedded image blocks.
+    if (caps.promptCapabilities.image === true) {
+      void Promise.all(files.map(async (file): Promise<PromptBlock | null> => {
+        const image = await readClipboardImage(file)
+        if (!image) return null
+        return { type: 'image', data: image.data, mimeType: image.mimeType, name: file.name || undefined }
+      })).then((blocks) => {
+        const usable = blocks.filter((block): block is PromptBlock => block !== null)
+        if (usable.length < blocks.length) setNotice('部分圖片讀取失敗，未加入附件')
+        if (usable.length) setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), ...usable] }))
+      })
+      return
+    }
+    // Default path (image:false): save to %TEMP%\grok-build-gui-paste and insert absolute path only.
+    void (async () => {
+      const paths: string[] = []
+      let failed = 0
+      for (const file of files) {
+        const image = await readClipboardImage(file)
+        if (!image) { failed += 1; continue }
+        try {
+          const saved = await window.grokApi.savePasteImage(image)
+          paths.push(saved.path)
+        } catch {
+          failed += 1
+        }
+      }
+      if (!paths.length) {
+        setNotice(failed ? '貼圖儲存失敗，草稿未變更' : '無法讀取剪貼簿圖片')
+        return
+      }
+      setDrafts((current) => {
+        const previous = current[sessionId] ?? ''
+        const joined = paths.join('\n')
+        return { ...current, [sessionId]: previous ? `${previous}\n${joined}` : joined }
+      })
+      setPastePathChip(paths[paths.length - 1] ?? null)
+      setNotice(failed
+        ? `已改以本機路徑附上（ACP 目前不支援內嵌圖片）；${failed} 張失敗`
+        : '已改以本機路徑附上（ACP 目前不支援內嵌圖片）')
+    })()
+  }
+  const dismissPastePathChip = (): void => {
+    if (!active || !pastePathChip) { setPastePathChip(null); return }
+    const sessionId = active.id
+    const path = pastePathChip
+    setPastePathChip(null)
+    setDrafts((current) => {
+      const previous = current[sessionId] ?? ''
+      if (!previous.includes(path)) return current
+      const next = previous
+        .split('\n')
+        .filter((line) => line !== path)
+        .join('\n')
+      return { ...current, [sessionId]: next }
+    })
+  }
 
   const activeModel = models?.availableModels.find((model) => model.modelId === models.currentModelId)
   const usageTotal = usage?.contextWindowTokens ?? activeModel?.totalContextTokens
@@ -790,7 +886,7 @@ export function App(): React.JSX.Element {
     <header className="titlebar"><div className="brand-mark"><span>G</span></div><strong>GROK BUILD</strong><i>DESKTOP WORKBENCH</i><div className="drag-region" />
       <QuotaRings billing={billing} unavailable={billingUnavailable} />
       {active && <div className="usage-pill" title={`Context 額度${usage?.turnCount !== undefined ? ` · ${usage.turnCount} 回合` : ''}${usage?.toolCallCount !== undefined ? ` · ${usage.toolCallCount} 次工具` : ''} · 訂閱用量請至 grok.com 查看`}><Gauge /><span>{usagePercent !== undefined ? `${usagePercent}%` : '—'}</span><div className="usage-bar"><i className={usageLevel} style={{ width: `${Math.min(100, usagePercent ?? 0)}%` }} /></div><em>{formatTokens(usage?.contextTokensUsed)} / {formatTokens(usageTotal)}</em></div>}
-      <label title={running || lifecycleBusy ? '請先停止目前執行中的回合' : '工具權限模式（每次啟動重置為每次詢問）'}><select aria-label="權限模式" value={permissionMode} disabled={lifecycleBusy || running} onChange={(event) => requestPermissionMode(event.target.value as AgentPermissionMode)}><option value="ask">每次詢問</option><option value="always-approve">一律核准（YOLO）</option></select></label>
+      <label title={permissionModeTitle}><select aria-label="權限模式" value={permissionMode} disabled={permissionControlsLocked} onChange={(event) => requestPermissionMode(event.target.value as AgentPermissionMode)}><option value="ask">每次詢問</option><option value="always-approve">一律核准（YOLO）</option></select></label>
       {status.found && <button className="account-pill" aria-label="切換 Grok 帳號" title={running ? '請先停止目前執行中的回合' : '切換 Grok 帳號'} disabled={lifecycleBusy || running} onClick={() => openSetupDialog('account')}><UserRound />切換帳號</button>}
       <button className={`status-pill ${status.connected ? 'online' : ''}`} disabled={lifecycleBusy} onClick={() => { if (status.found) void connect(); else openSetupDialog('install') }}><span />{status.found ? `Grok ${status.version ?? ''}` : 'CLI not found'} · {status.connected ? 'Connected' : status.found ? 'Connect' : 'Setup'}</button></header>
     <div className={`workspace ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
@@ -822,7 +918,7 @@ export function App(): React.JSX.Element {
           <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{caps.modes.length > 0 && <select aria-label="Mode" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>Mode</option>{caps.modes.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}</select>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) setNotice(`已匯出到 ${path}`) }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
           <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
-          <footer className="composer-wrap"><div className="composer-status">{running ? <><LoaderCircle className="spin" />Grok 正在執行工具或生成回覆</> : <><span className="ready-dot" />準備就緒</>}<span>{shortcutLabel('sendPrompt')} 傳送 · {shortcutLabel('newline')} 換行 · {shortcutLabel('cancelTurn')} 取消</span></div>{attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}<div className="composer"><button className="attach-button" aria-label="加入檔案" onClick={() => void chooseFiles()}><Paperclip /></button><textarea value={drafts[active.id] ?? ''} onChange={(event) => setDrafts((current) => ({ ...current, [active.id]: event.target.value }))} onKeyDown={composerKey} onPaste={paste} placeholder="交給 Grok 一個任務，或貼上圖片與檔案路徑…" rows={3} />{running ? <button className="stop-button" data-nova-tone="danger" onClick={() => void window.grokApi.cancel(active.id)}><Square />停止</button> : <button className="send-button" data-magnetic data-nova-tone="primary" onClick={() => void sendPrompt()}><Send />送出</button>}</div></footer>
+          <footer className="composer-wrap"><div className="composer-status">{running ? <><LoaderCircle className="spin" />Grok 正在執行工具或生成回覆</> : lifecycleBusy || sessionLoading ? <><LoaderCircle className="spin" />系統忙碌中（連線或載入）</> : <><span className="ready-dot" />準備就緒</>}<span>{shortcutLabel('sendPrompt')} 傳送 · {shortcutLabel('newline')} 換行 · {shortcutLabel('cancelTurn')} 取消</span></div>{attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}{pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip}><Paperclip /><em>{pastePathChip}</em><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}<div className="composer"><button className="attach-button" aria-label="加入檔案" onClick={() => void chooseFiles()}><Paperclip /></button><textarea value={drafts[active.id] ?? ''} onChange={(event) => setDrafts((current) => ({ ...current, [active.id]: event.target.value }))} onKeyDown={composerKey} onPaste={paste} placeholder="交給 Grok 一個任務，或貼上圖片與檔案路徑…" rows={3} />{running ? <button className="stop-button" data-nova-tone="danger" onClick={() => void window.grokApi.cancel(active.id)}><Square />停止</button> : <button className="send-button" data-magnetic data-nova-tone="primary" onClick={() => void sendPrompt()}><Send />送出</button>}</div></footer>
         </>}
       </main>
       {panel === 'settings' && <SettingsPanel settings={settings} onClose={() => setPanel('none')} onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none') })} />}
@@ -835,7 +931,7 @@ export function App(): React.JSX.Element {
     {setupDialog === 'install' && <div className="modal-backdrop"><section className="permission-modal setup-modal" role="dialog" aria-modal="true" aria-label="安裝 Grok CLI" onKeyDown={containDialogFocus}><div className="permission-icon"><TerminalSquare /></div><span className="eyebrow">FIRST-TIME SETUP</span><h2>安裝 Grok CLI</h2><p>這是程式真正需要的工具，不是 Windows Terminal，也不是 Node.js。按下確認後才會從 x.ai 官方網址下載，安裝在你的 Windows 帳號內，不要求系統管理員權限。</p><code>https://x.ai/cli/install.ps1</code><div><button className="primary" aria-label="確認安裝 Grok CLI" disabled={lifecycleBusy} onClick={() => void installCli()}><TerminalSquare /><span><strong>{lifecycleBusy ? '正在安裝…' : '確認安裝 Grok CLI'}</strong><small>下載後會驗證 grok --version</small></span></button><button autoFocus disabled={lifecycleBusy} onClick={() => setSetupDialog(null)}><X /><span><strong>先不要</strong><small>不會下載或執行任何東西</small></span></button></div></section></div>}
     {setupDialog === 'account' && <div className="modal-backdrop"><section className="permission-modal setup-modal" role="dialog" aria-modal="true" aria-label="登入 Grok 帳號" onKeyDown={containDialogFocus}><div className="permission-icon"><UserRound /></div><span className="eyebrow">OFFICIAL GROK OAUTH</span><h2>{status.connected ? '切換 Grok 帳號' : '登入 Grok 帳號'}</h2><p>接下來會由 Grok CLI 開啟 x.ai 的瀏覽器登入頁。程式不會看見、保存或複製你的密碼與 token；CLI 目前也不提供帳號 email 或多帳號清單。</p><div><button className="primary" aria-label="開啟瀏覽器並重新登入" disabled={lifecycleBusy || running} onClick={() => void reauthenticateAccount()}><UserRound /><span><strong>{lifecycleBusy ? '等待瀏覽器登入…' : running ? '請先停止目前回合' : '開啟瀏覽器並重新登入'}</strong><small>完成後會重建連線與額度資料</small></span></button><button autoFocus disabled={lifecycleBusy} onClick={() => setSetupDialog(null)}><X /><span><strong>取消</strong><small>維持目前狀態</small></span></button></div></section></div>}
     {permission && <div className="modal-backdrop"><section key={permission.requestId} className="permission-modal" role="dialog" aria-modal="true" aria-label={permission.title} tabIndex={-1} autoFocus={!safePermissionOptionId} onKeyDown={containDialogFocus}><div className="permission-icon"><Wrench /></div><span className="eyebrow">ACTION REQUIRES APPROVAL{permissions.length > 1 ? ` · 還有 ${permissions.length - 1} 項待決` : ''}</span><h2>{permission.title}</h2><p>Grok 要求執行一項可能修改檔案或呼叫外部工具的操作。只可選擇代理提供的合法選項。</p><div>{permission.options.map((option) => <button key={option.optionId} autoFocus={option.optionId === safePermissionOptionId} className={option.kind.includes('reject') ? 'danger-option' : ''} onClick={() => void window.grokApi.respondPermission(permission.requestId, option.optionId).catch((error) => setNotice(error instanceof Error ? error.message : String(error))).then(() => setPermissions((current) => current.filter((item) => item.requestId !== permission.requestId)))}>{option.kind.includes('reject') ? <X /> : <Check />}<span><strong>{option.name}</strong><small>{option.kind}</small></span></button>)}</div></section></div>}
-    {yoloConfirm && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="啟用 YOLO 模式"><div className="permission-icon danger"><CircleAlert /></div><span className="eyebrow">PERMISSION MODE</span><h2>啟用 YOLO 模式？</h2><p>開啟「一律核准」後，權限請求將預設通過，可能讓工具或檔案變更在未複核下執行。建議只在你信任工作目錄與腳本時使用。</p><div><button className="danger-option" onClick={() => void confirmPermissionMode()}><CircleAlert /><span><strong>我了解風險，啟用 YOLO</strong><small>立即一律核准</small></span></button><button autoFocus onClick={() => setYoloConfirm(false)}><X /><span><strong>取消</strong><small>維持每次詢問</small></span></button></div></section></div>}
+    {yoloConfirm && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="啟用 YOLO 模式"><div className="permission-icon danger"><CircleAlert /></div><span className="eyebrow">PERMISSION MODE</span><h2>啟用 YOLO 模式？</h2><p>開啟「一律核准」後，權限請求將預設通過，可能讓工具或檔案變更在未複核下執行。建議只在你信任工作目錄與腳本時使用。</p><div><button className="danger-option" disabled={yoloBusy || lifecycleBusy || running || sessionLoading} onClick={() => void confirmPermissionMode()}><CircleAlert /><span><strong>{yoloBusy ? '啟用中…' : '我了解風險，啟用 YOLO'}</strong><small>立即一律核准</small></span></button><button autoFocus disabled={yoloBusy} onClick={() => setYoloConfirm(false)}><X /><span><strong>取消</strong><small>維持每次詢問</small></span></button></div></section></div>}
     {deleteTarget && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="刪除對話確認"><div className="permission-icon danger"><Trash2 /></div><span className="eyebrow">DELETE SESSION</span><h2>刪除這則對話？</h2><p>「{sessionDisplayTitle(deleteTarget, settings.sessionTitles)}」（{deleteTarget.cwd}）將從本機 session 歷史永久刪除，無法復原。</p><div><button className="danger-option" onClick={() => void deleteSession()}><Trash2 /><span><strong>永久刪除</strong><small>grok sessions delete</small></span></button><button autoFocus onClick={() => setDeleteTarget(null)}><X /><span><strong>取消</strong><small>保留這則對話</small></span></button></div></section></div>}
     {batchDeleteTargets && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="批次刪除確認"><div className="permission-icon danger"><Trash2 /></div><span className="eyebrow">DELETE SESSION</span><h2>刪除所選對話</h2><p>將刪除 {batchDeleteTargets.length} 則對話，請確認。這些資料將從本機 session 歷史永久移除，無法復原。</p><div><button className="danger-option" onClick={() => void deleteSessions(batchDeleteTargets)}><Trash2 /><span><strong>永久刪除</strong><small>grok sessions delete</small></span></button><button autoFocus onClick={() => setBatchDeleteTargets(null)}><X /><span><strong>取消</strong><small>保留全部對話</small></span></button></div></section></div>}
     {renameTarget && <div className="modal-backdrop"><section className="permission-modal rename-modal" role="dialog" aria-modal="true" aria-label="重新命名對話"><div className="permission-icon"><Pencil /></div><span className="eyebrow">LOCAL TITLE</span><h2>替這則對話取一個好找的名稱</h2><p>只改這台電腦上的顯示名稱，不會修改 Grok CLI 的原始紀錄。</p><label>對話名稱<input aria-label="對話名稱" autoFocus value={renameDraft} maxLength={80} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; if (event.key === 'Enter') void saveSessionTitle(); if (event.key === 'Escape') { event.stopPropagation(); setRenameTarget(null) } }} /></label><div><button onClick={() => void saveSessionTitle()}><Check /><span><strong>儲存名稱</strong><small>保存在本機設定</small></span></button><button onClick={() => setRenameTarget(null)}><X /><span><strong>取消</strong></span></button></div></section></div>}
