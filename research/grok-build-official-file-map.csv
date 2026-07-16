@@ -1,0 +1,66 @@
+category,repository,file_path,symbol,line_start,line_end,purpose,gui_relevance,security_relevance,evidence
+provenance,xai-org/grok-build,README.md,N/A,1,130,Official product overview install layout license,high,medium,SHA b189869; remote xai-org/grok-build
+license,xai-org/grok-build,LICENSE,Apache-2.0,1,50,First-party Apache 2.0 copyright SpaceXAI,high,high,Apache terms govern use/distribution
+contrib,xai-org/grok-build,CONTRIBUTING.md,N/A,1,19,External PRs not accepted,medium,low,Source transparency only
+security,xai-org/grok-build,SECURITY.md,N/A,1,7,Report vulns via HackerOne https://hackerone.com/x,medium,high,No public GitHub security issues
+notices,xai-org/grok-build,THIRD-PARTY-NOTICES,N/A,1,50,Third-party and in-tree port notices,low,medium,Includes codex/opencode ports index
+workspace,xai-org/grok-build,Cargo.toml,workspace.members,1,80,Generated workspace member list,medium,low,Read-only generated root
+workspace,xai-org/grok-build,Cargo.toml,agent-client-protocol,92,92,Pins ACP Rust crate 0.10.4,high,medium,Must track vs GUI TS SDK 1.2.1
+workspace,xai-org/grok-build,Cargo.lock,agent-client-protocol,32,35,Locked ACP crate version 0.10.4,high,medium,checksum recorded in lockfile
+cli,xai-org/grok-build,crates/codegen/xai-grok-pager/src/app/cli.rs,Command,9,139,Top-level clap subcommands including Agent,high,medium,Defines public CLI surface
+cli,xai-org/grok-build,crates/codegen/xai-grok-pager/src/app/cli.rs,AgentArgs,226,276,agent flags model yolo leader no_leader plugin-dir mode,high,high,--always-approve and --no-leader for GUI spawn
+cli,xai-org/grok-build,crates/codegen/xai-grok-pager/src/app/cli.rs,AgentCmd,303,312,Stdio Headless Serve Leader modes,high,high,stdio is official ACP mode
+cli,xai-org/grok-build,crates/codegen/xai-grok-pager/src/app/cli.rs,agent_plugin_dir_repeatable_and_canonicalized,953,983,Unit test parses agent --no-leader stdio,high,low,Validates Jackie GUI argv shape
+stdio,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/app.rs,run_stdio_agent,289,407,ACP stdio agent entrypoint,high,high,Primary integration runtime
+stdio,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/app.rs,GROK_CLIENT_VERSION log,306,314,Logs client version env for diagnostics,high,low,GUI should set GROK_CLIENT_VERSION
+stdio,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/app.rs,spawn_stdin_line_reader bridge,333,356,Bridges OS-thread stdin into ACP simplex,high,high,Windows hang fix depends on this path
+acp-lib,xai-org/grok-build,crates/codegen/xai-acp-lib/src/lib.rs,spawn_stdin_line_reader,27,27,Public export of stdin reader,high,high,Transport library surface
+acp-lib,xai-org/grok-build,crates/codegen/xai-acp-lib/src/stdin_reader.rs,spawn_stdin_line_reader,78,103,Dedicated acp-stdin thread; Windows NUL redirect,high,high,Prevents session/new deadlock on Windows
+acp-lib,xai-org/grok-build,crates/codegen/xai-acp-lib/src/stdin_reader.rs,module_docs_windows,17,40,Documents exclusive stdin ownership on Windows,high,high,Critical for Electron pipe clients
+acp-lib,xai-org/grok-build,crates/codegen/xai-acp-lib/src/channel.rs,acp_send,34,60,Request/response oneshot channel helper,medium,medium,Internal ACP request plumbing
+acp-lib,xai-org/grok-build,crates/codegen/xai-acp-lib/Cargo.toml,agent-client-protocol,8,8,Depends on agent-client-protocol with unstable,high,medium,Feature parity with unstable ACP APIs
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,initialize,21,438,ACP initialize capabilities authMethods meta,high,high,loadSession embedded_context modelState commands
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,AgentCapabilities,394,414,load_session true; MCP http/sse; embedded_context,high,medium,Drives GUI capability normalization
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,authenticate,439,500,API key / preferred method / admin disable,high,high,GUI must not bypass admin auth policy
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,new_session,811,1190,Creates ACP session with model/MCP setup,high,high,session/new path
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,load_session,1199,1970,Resume session from disk / memory,high,medium,session/load path
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,prompt,1978,2100,session/prompt entry; image upload path nearby,high,high,Main chat turn
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,prompt_images,2168,2251,Collects ImageContent and upload_images,high,medium,Native image prompts
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,set_session_mode,3097,3117,ACP session/set_mode handler,high,medium,Plan/ask modes from GUI
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,set_session_model,3118,3144,ACP session/set_model with allowlist check,high,medium,Model picker backend
+agent,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs,ext_method,3150,3435,x.ai/* extension method router,high,high,billing sessions plugins auth privacy
+billing,xai-org/grok-build,crates/codegen/xai-grok-shell/src/extensions/billing.rs,handle x.ai/billing,1,210,Billing/credits config extension for desktop,high,medium,GUI quota rings source
+billing,xai-org/grok-build,crates/codegen/xai-grok-shell/src/extensions/billing.rs,BillingConfigResponse,60,121,Typed billing fields periods tiers prepaid,high,low,Normalize carefully in GUI billing.ts
+permissions,xai-org/grok-build,crates/codegen/xai-grok-shell/src/util/config/permissions.rs,resolve_permission_mode,1,250,CLI/config YOLO and permission mode resolution,high,high,Maps --always-approve vs config
+permissions,xai-org/grok-build,crates/codegen/xai-grok-pager/docs/user-guide/22-permissions-and-safety.md,authorization_pipeline,1,200,Official permission pipeline and modes,high,high,User-facing safety contract
+headless,xai-org/grok-build,crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md,flags_table,19,45,Headless flags allow deny sandbox max-turns,medium,high,plugin-cc and side-job pattern
+agent-docs,xai-org/grok-build,crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md,stdio_transport,19,44,Documents grok agent stdio and options,high,high,Primary third-party integration doc
+sessions-docs,xai-org/grok-build,crates/codegen/xai-grok-pager/docs/user-guide/17-sessions.md,storage_layout,22,40,Session directory files under ~/.grok/sessions,high,medium,Resume and signals.json context
+auth-docs,xai-org/grok-build,crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md,methods,1,80,OAuth device-auth API key OIDC,high,high,GUI reauth via grok login
+usage-docs,xai-org/grok-build,crates/codegen/xai-grok-pager/docs/user-guide/24-monitoring-usage.md,external_otel,1,80,External OTEL double opt-in content-free,low,high,Privacy separation product vs external
+telemetry,xai-org/grok-build,crates/codegen/xai-grok-telemetry/src/client.rs,TelemetryClient,1,180,Product events + Mixpanel emitter,low,high,CLI telemetry not GUI
+config,xai-org/grok-build,crates/codegen/xai-grok-config/src/loader.rs,telemetry_mode_merge,468,625,Config merge tests for telemetry mode,low,medium,Users can set telemetry disabled
+windows,xai-org/grok-build,crates/codegen/xai-tty-utils/src/lib.rs,CREATE_NO_WINDOW JobObject,93,366,Windows process flags and Job Object kill-on-close,high,high,Lifecycle/orphan process control
+leader,xai-org/grok-build,crates/codegen/xai-grok-shell/src/leader/mod.rs,architecture,1,50,Leader multiplexes stdio/WS clients,medium,medium,Explains --no-leader isolation value
+leader,xai-org/grok-build,crates/codegen/xai-grok-shell/src/leader/protocol.rs,ClientMode,114,120,Stdio mode uses local IPC to leader,medium,medium,Multi-client architecture
+upload,xai-org/grok-build,crates/codegen/xai-grok-shell/src/agent/app.rs,cleanup_orphaned_uploads,299,304,Cleans upload queue temp files at stdio start,medium,medium,Image/file upload hygiene
+tools,xai-org/grok-build,crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md,N/A,1,30,Codex/opencode port license notices,low,medium,Attribution for tool ports
+bin,xai-org/grok-build,crates/codegen/xai-grok-pager-bin/src/main.rs,main,1,80,Composition root binary entry,medium,low,Builds xai-grok-pager
+plugin-cc,xai-org/grok-build-plugin-cc,README.md,N/A,1,150,Claude Code bridge via headless grok -p,high,medium,Reference non-ACP integration
+plugin-cc,xai-org/grok-build-plugin-cc,plugins/grok-build/scripts/lib/grok.mjs,buildHeadlessArgs,155,200,Builds -p -r --permission-mode --sandbox args,high,high,Safe default plan+read-only
+plugin-cc,xai-org/grok-build-plugin-cc,plugins/grok-build/scripts/lib/grok.mjs,resolveGrokBinary,16,22,GROK_BINARY override then grok,high,low,Binary resolution pattern
+plugin-cc,xai-org/grok-build-plugin-cc,plugins/grok-build/scripts/lib/process.mjs,runCommand,13,37,spawnSync with windowsHide shell on win32,medium,medium,Windows process spawn notes
+plugin-cc,xai-org/grok-build-plugin-cc,plugins/grok-build/scripts/lib/process.mjs,terminateProcessTree,118,158,taskkill /PID /T /F on Windows,high,high,GUI should mirror for orphan kill
+plugin-cc,xai-org/grok-build-plugin-cc,plugins/grok-build/scripts/lib/job-control.mjs,filterJobsForSession,21,27,Session-scoped job listing,medium,low,Side-job UX pattern
+marketplace,xai-org/plugin-marketplace,README.md,N/A,1,100,Catalog format SHA pin third-party disclaimer,medium,high,Plugin install risk messaging
+marketplace,xai-org/plugin-marketplace,.grok-plugin/marketplace.json,N/A,1,50,Official plugin catalog index,low,medium,Source of truth for marketplace names
+docs-site,docs.x.ai,build/overview,N/A,1,120,Install headless custom models API,high,medium,https://docs.x.ai/build/overview
+docs-site,docs.x.ai,build/cli/headless-scripting,N/A,1,200,Headless flags + ACP JS example,high,high,https://docs.x.ai/build/cli/headless-scripting
+docs-site,docs.x.ai,build/features/skills-plugins-marketplaces,N/A,1,80,Skills plugins hooks marketplaces,medium,medium,https://docs.x.ai/build/features/skills-plugins-marketplaces
+docs-site,docs.x.ai,build/modes-and-commands,N/A,1,120,Modes slash commands list,medium,low,https://docs.x.ai/build/modes-and-commands
+product,x.ai,cli,N/A,1,100,Product landing install features,medium,low,https://x.ai/cli
+news,x.ai,news/grok-build-open-source,N/A,1,60,OSS announcement 2026-07-15,medium,low,https://x.ai/news/grok-build-open-source
+gui-baseline,j0988114582-ui/grok-build-control-center,src/main/grok-cli.ts,buildAgentArgs,17,22,agent [--always-approve] --no-leader stdio,high,high,Current GUI spawn argv
+gui-baseline,j0988114582-ui/grok-build-control-center,src/main/acp-client.ts,GrokAcpClient.start,87,154,Spawn + initialize + capability parse,high,high,ACP client core
+gui-baseline,j0988114582-ui/grok-build-control-center,src/main/acp-client.ts,getBilling,211,213,Requests _x.ai/billing {},high,medium,Quota rings path
+gui-baseline,j0988114582-ui/grok-build-control-center,package.json,dependencies,22,24,ACP SDK 1.2.1 Electron app v0.4.1,high,low,Client SDK pin
