@@ -32,6 +32,8 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 ### Fixed
 
 - Collapsing the sidebar on the home screen left no way to reopen it.
+- Permission-mode select is disabled while a turn or lifecycle is busy, so reconnect cannot silently kill the active turn.
+- Batch/single delete confirmation closes before the delete loop, with a re-entry lock against double-submit.
 
 ## [0.3.2] - 2026-07-12
 

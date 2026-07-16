@@ -200,6 +200,7 @@ export function App(): React.JSX.Element {
   const loadingSessionsRef = useRef<Set<string>>(new Set())
   const permissionReturnFocusRef = useRef<HTMLElement | null>(null)
   const setupReturnFocusRef = useRef<HTMLElement | null>(null)
+  const deletingSessionsRef = useRef(false)
   followTailRef.current = followTail
   activeIdRef.current = active?.id ?? null
 
@@ -436,11 +437,16 @@ export function App(): React.JSX.Element {
     setSelectedIds(new Set())
   }
   const confirmPermissionMode = async (): Promise<void> => {
+    if (lifecycleBusy || running) {
+      setYoloConfirm(false)
+      setNotice('請先停止目前執行中的回合，再切換權限模式')
+      return
+    }
     setYoloConfirm(false)
     await setPermissionModeWithBackend('always-approve')
   }
   const requestPermissionMode = (mode: AgentPermissionMode): void => {
-    if (mode === permissionMode) return
+    if (mode === permissionMode || lifecycleBusy || running) return
     if (mode === 'always-approve') setYoloConfirm(true)
     else void setPermissionModeWithBackend('ask')
   }
@@ -616,67 +622,73 @@ export function App(): React.JSX.Element {
     await deleteSessions([deleteTarget])
   }
   const deleteSessions = async (targets: SessionSummary[]): Promise<void> => {
-    if (!targets.length) return
+    if (!targets.length || deletingSessionsRef.current) return
+    deletingSessionsRef.current = true
+    // Close confirm modals before the async loop so the action cannot be re-entered.
+    setBatchDeleteTargets(null)
+    setDeleteTarget(null)
     const succeeded: string[] = []
     const failed: string[] = []
     const ids = targets.map((target) => target.id)
-    if (targets.length === 1) setCollapsingSessionId(targets[0].id)
-    for (const target of targets) {
-      if (runningMap[target.id]) {
-        try { await window.grokApi.cancel(target.id) } catch { /* 取消失敗仍繼續刪除 */ }
+    try {
+      if (targets.length === 1) setCollapsingSessionId(targets[0].id)
+      for (const target of targets) {
+        if (runningMap[target.id]) {
+          try { await window.grokApi.cancel(target.id) } catch { /* 取消失敗仍繼續刪除 */ }
+        }
+        try {
+          await window.grokApi.deleteSession(target.id)
+          succeeded.push(target.id)
+        } catch {
+          failed.push(target.id)
+        }
       }
-      try {
-        await window.grokApi.deleteSession(target.id)
-        succeeded.push(target.id)
-      } catch {
-        failed.push(target.id)
+      if (targets.length === 1 && succeeded.length > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, 260))
       }
-    }
-    if (targets.length === 1 && succeeded.length > 0) {
-      await new Promise((resolve) => window.setTimeout(resolve, 260))
-    }
-    const succeededSet = new Set(succeeded)
-    if (succeeded.length > 0) {
-      setSessions((current) => current.filter((item) => !succeededSet.has(item.id)))
-      setEvents((current) => {
+      const succeededSet = new Set(succeeded)
+      if (succeeded.length > 0) {
+        setSessions((current) => current.filter((item) => !succeededSet.has(item.id)))
+        setEvents((current) => {
+          const next = { ...current }
+          succeeded.forEach((id) => { delete next[id] })
+          return next
+        })
+        setDrafts((current) => {
+          const next = { ...current }
+          succeeded.forEach((id) => { delete next[id] })
+          return next
+        })
+        setAttachmentsBySession((current) => {
+          const next = { ...current }
+          succeeded.forEach((id) => { delete next[id] })
+          return next
+        })
+        if (active && succeededSet.has(active.id)) { setActive(null); setUsage(null) }
+        setSelectedIds((current) => {
+          const next = new Set(current)
+          succeeded.forEach((id) => next.delete(id))
+          return next
+        })
+        const nextSettings = removeSessionLocalData(settings, succeeded)
+        setSettings(nextSettings)
+        void window.grokApi.saveSettings(nextSettings).then(setSettings).catch(() => undefined)
+        if (targets.length > 1) setNotice(`已刪除 ${succeeded.length}，失敗 ${failed.length}`)
+        else setNotice(failed.length > 0
+          ? `刪除對話「${sessionDisplayTitle(targets[0], settings.sessionTitles)}」失敗`
+          : `已刪除對話「${sessionDisplayTitle(targets[0], settings.sessionTitles)}」`)
+      } else {
+        setNotice(targets.length > 1 ? `已刪除 0，失敗 ${failed.length}` : `刪除對話「${sessionDisplayTitle(targets[0], settings.sessionTitles)}」失敗`)
+      }
+      setRunningMap((current) => {
         const next = { ...current }
-        succeeded.forEach((id) => { delete next[id] })
+        ids.forEach((id) => { delete next[id] })
         return next
       })
-      setDrafts((current) => {
-        const next = { ...current }
-        succeeded.forEach((id) => { delete next[id] })
-        return next
-      })
-      setAttachmentsBySession((current) => {
-        const next = { ...current }
-        succeeded.forEach((id) => { delete next[id] })
-        return next
-      })
-      if (active && succeededSet.has(active.id)) { setActive(null); setUsage(null) }
+    } finally {
+      deletingSessionsRef.current = false
       setCollapsingSessionId(null)
-      setSelectedIds((current) => {
-        const next = new Set(current)
-        succeeded.forEach((id) => next.delete(id))
-        return next
-      })
-      const nextSettings = removeSessionLocalData(settings, succeeded)
-      setSettings(nextSettings)
-      void window.grokApi.saveSettings(nextSettings).then(setSettings).catch(() => undefined)
-      if (targets.length > 1) setNotice(`已刪除 ${succeeded.length}，失敗 ${failed.length}`)
-      else setNotice(failed.length > 0
-        ? `刪除對話「${sessionDisplayTitle(targets[0], settings.sessionTitles)}」失敗`
-        : `已刪除對話「${sessionDisplayTitle(targets[0], settings.sessionTitles)}」`)
-    } else {
-      setNotice(targets.length > 1 ? `已刪除 0，失敗 ${failed.length}` : `刪除對話「${sessionDisplayTitle(targets[0], settings.sessionTitles)}」失敗`)
     }
-    if (batchDeleteTargets) setBatchDeleteTargets(null)
-    setRunningMap((current) => {
-      const next = { ...current }
-      ids.forEach((id) => { delete next[id] })
-      return next
-    })
-    setCollapsingSessionId(null)
   }
   const sendPrompt = async (): Promise<void> => {
     if (!active || running) return
@@ -778,7 +790,7 @@ export function App(): React.JSX.Element {
     <header className="titlebar"><div className="brand-mark"><span>G</span></div><strong>GROK BUILD</strong><i>DESKTOP WORKBENCH</i><div className="drag-region" />
       <QuotaRings billing={billing} unavailable={billingUnavailable} />
       {active && <div className="usage-pill" title={`Context 額度${usage?.turnCount !== undefined ? ` · ${usage.turnCount} 回合` : ''}${usage?.toolCallCount !== undefined ? ` · ${usage.toolCallCount} 次工具` : ''} · 訂閱用量請至 grok.com 查看`}><Gauge /><span>{usagePercent !== undefined ? `${usagePercent}%` : '—'}</span><div className="usage-bar"><i className={usageLevel} style={{ width: `${Math.min(100, usagePercent ?? 0)}%` }} /></div><em>{formatTokens(usage?.contextTokensUsed)} / {formatTokens(usageTotal)}</em></div>}
-      <label><select aria-label="權限模式" value={permissionMode} onChange={(event) => requestPermissionMode(event.target.value as AgentPermissionMode)}><option value="ask">每次詢問</option><option value="always-approve">一律核准（YOLO）</option></select></label>
+      <label title={running || lifecycleBusy ? '請先停止目前執行中的回合' : '工具權限模式（每次啟動重置為每次詢問）'}><select aria-label="權限模式" value={permissionMode} disabled={lifecycleBusy || running} onChange={(event) => requestPermissionMode(event.target.value as AgentPermissionMode)}><option value="ask">每次詢問</option><option value="always-approve">一律核准（YOLO）</option></select></label>
       {status.found && <button className="account-pill" aria-label="切換 Grok 帳號" title={running ? '請先停止目前執行中的回合' : '切換 Grok 帳號'} disabled={lifecycleBusy || running} onClick={() => openSetupDialog('account')}><UserRound />切換帳號</button>}
       <button className={`status-pill ${status.connected ? 'online' : ''}`} disabled={lifecycleBusy} onClick={() => { if (status.found) void connect(); else openSetupDialog('install') }}><span />{status.found ? `Grok ${status.version ?? ''}` : 'CLI not found'} · {status.connected ? 'Connected' : status.found ? 'Connect' : 'Setup'}</button></header>
     <div className={`workspace ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
