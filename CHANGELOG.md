@@ -13,6 +13,27 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
 
+## [0.7.0] - 2026-07-16
+
+### Added
+
+- **Preview Dock（右側可收合預覽台）**：圖片／影片／HTML（srcdoc）／程式碼四種預覽。
+- **自動發現**：對話完成時掃描路徑、Markdown 圖、code fence；清單上限 50。
+- **`grok-preview://` protocol**：影片與 >8MB 圖；HTTP Range seek；≤8MB 圖 base64。
+- **強制 multi-root allowlist**：session cwd／paste tmp／dialog 選檔。
+- **CSP P-SEC-6**：`img-src` 含 data/grok-preview/https；`media-src` 含 grok-preview。
+- **隱私鐵則**：transcript 永不自動載遠端圖（chip 點擊後才在 Dock 載入）。
+- **HTML 安全**：預設無腳本；「允許腳本」逐檔逐次不持久化；永不 same-origin+scripts。
+- **快捷鍵** `Ctrl+Shift+V`（`togglePreview` ∈ DEFAULT_SHORTCUTS）。
+- **設定**：自動預覽最新媒體、HTML 進階按鈕、圖／影片 MB 上限。
+- **smoke:preview** + 對抗單元測試 + RTL（Escape 燈箱、sandbox、遠端圖）。
+
+### Notes
+
+- 計畫：`docs/plans/2026-07-16-preview-pane-full-plan.md`
+- Fable 審查：`docs/plans/2026-07-16-preview-pane-full-plan-FABLE5-REVIEW.md`
+- 本版不做 HTML 同目錄資源解析；不做 data: 內嵌影片。
+
 ## [0.6.1] - 2026-07-16
 
 ### Added

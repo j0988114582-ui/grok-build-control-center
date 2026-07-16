@@ -10,8 +10,32 @@ describe('settings', () => {
       sessionTitles: {},
       drafts: {},
       pinnedSessions: [],
-      recentCommands: []
+      recentCommands: [],
+      preview: expect.objectContaining({ open: false, autoPreviewLatestMedia: false, showHtmlScriptAdvanced: false })
     })
+  })
+
+  it('normalizes preview settings and caps recent sessions', () => {
+    const recent = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [
+      `s${i}`,
+      [{ path: `C:\\a\\${i}.png`, kind: 'image', label: `${i}.png` }]
+    ]))
+    const normalized = normalizeSettings({
+      preview: {
+        open: true,
+        width: 999,
+        autoPreviewLatestMedia: true,
+        showHtmlScriptAdvanced: true,
+        maxImageMb: 500,
+        maxVideoMb: 0,
+        recentBySession: recent as never
+      }
+    }, 'C:\\Users\\demo')
+    expect(normalized.preview.open).toBe(true)
+    expect(normalized.preview.width).toBe(480)
+    expect(normalized.preview.maxImageMb).toBe(100)
+    expect(normalized.preview.maxVideoMb).toBe(1)
+    expect(Object.keys(normalized.preview.recentBySession).length).toBeLessThanOrEqual(20)
   })
 
   it('clamps unsafe visual values and preserves valid choices', () => {

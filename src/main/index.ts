@@ -33,6 +33,18 @@ import {
 import type { AppSettings, CliStatus, PromptBlock } from '../shared/types'
 import { assertRevealAllowed, ExportPathAllowlist } from '../shared/export-reveal'
 import { SessionReadyGate } from './session-ready-gate'
+import {
+  installGrokPreviewProtocol,
+  PreviewMediaAllowlist,
+  registerGrokPreviewSchemePrivileged
+} from './preview-protocol'
+import { PreviewRootTracker, previewReadText, previewRegister, previewStat } from './preview-service'
+import { isAbsoluteLocalPath, rejectUnsafePreviewPath } from '../shared/preview-path-policy'
+
+// P-SEC-6: privileged scheme must be registered before app.whenReady().
+try {
+  registerGrokPreviewSchemePrivileged()
+} catch { /* tests may import after ready */ }
 
 // Avoid noisy Windows GPU/disk-cache errors when cache dir is locked (multiple instances / AV).
 // App still runs; shader/disk GPU cache is optional.
@@ -95,6 +107,8 @@ const executeLifecycleFile: ExecuteFile = async (executable, args, options) => {
 }
 
 const sessionReadyGate = new SessionReadyGate()
+const previewRoots = new PreviewRootTracker()
+const previewAllowlist = new PreviewMediaAllowlist()
 
 function disconnectAcp(): void {
   const current = acpConnection.current
@@ -247,7 +261,10 @@ function registerIpc(): void {
     const client = await connectAcp()
     const result = await client.createSession(cwd)
     const sessionId = typeof result?.sessionId === 'string' ? result.sessionId : undefined
-    if (sessionId) sessionReadyGate.markReady(sessionId)
+    if (sessionId) {
+      sessionReadyGate.markReady(sessionId)
+      if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
+    }
     return result
   }))
   ipcMain.handle('grok:session:load', async (_event, sessionId: string, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => {
@@ -256,6 +273,7 @@ function registerIpc(): void {
     try {
       const result = await client.loadSession(sessionId, cwd)
       sessionReadyGate.markReady(sessionId)
+      if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
       return result
     } catch (error) {
       sessionReadyGate.clear(sessionId)
@@ -317,6 +335,7 @@ function registerIpc(): void {
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile', 'multiSelections'] })
     if (result.canceled) return []
     return Promise.all(result.filePaths.map(async (file) => {
+      previewRoots.addDialogPath(file)
       const mimeType = mimeFor(file)
       let data: string | undefined
       if (mimeType) {
@@ -391,6 +410,41 @@ function registerIpc(): void {
       return false
     }
   })
+
+  const previewLimits = (): { maxImageMb: number; maxVideoMb: number } => {
+    const preview = settings().preview
+    return { maxImageMb: preview.maxImageMb, maxVideoMb: preview.maxVideoMb }
+  }
+  ipcMain.handle('preview:stat', (_event, filePath: unknown) => previewStat(filePath, previewRoots, previewLimits()))
+  ipcMain.handle('preview:register', (_event, filePath: unknown) => previewRegister(filePath, previewRoots, previewAllowlist, previewLimits()))
+  ipcMain.handle('preview:read-text', (_event, filePath: unknown) => previewReadText(filePath, previewRoots, previewLimits()))
+  ipcMain.handle('preview:choose-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'Previewable', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'mp4', 'webm', 'html', 'htm', 'ts', 'tsx', 'js', 'jsx', 'json', 'md', 'txt', 'css', 'py', 'rs', 'go'] },
+        { name: 'All', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const file = result.filePaths[0]
+    previewRoots.addDialogPath(file)
+    return file
+  })
+  ipcMain.handle('shell:reveal-path', async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('無效的檔案路徑')
+    if (!isAbsoluteLocalPath(filePath) && rejectUnsafePreviewPath(filePath)) {
+      // Still allow reveal for absolute local paths even if extension is unsupported
+    }
+    if (!isAbsoluteLocalPath(filePath.trim())) throw new Error('僅允許本機絕對路徑')
+    shell.showItemInFolder(filePath.trim())
+    return true
+  })
+  ipcMain.handle('shell:open-path', async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('無效的檔案路徑')
+    if (!isAbsoluteLocalPath(filePath.trim())) throw new Error('僅允許本機絕對路徑')
+    return shell.openPath(filePath.trim())
+  })
 }
 
 function createWindow(): void {
@@ -415,6 +469,7 @@ let isQuitting = false
 
 app.whenReady().then(() => {
   registerIpc()
+  installGrokPreviewProtocol(previewAllowlist)
   void cleanupPasteImageDirectory()
   createWindow()
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })

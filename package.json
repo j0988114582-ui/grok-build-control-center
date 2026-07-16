@@ -1,6 +1,6 @@
 {
   "name": "grok-build-gui",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "description": "Unofficial Windows-first control center for Grok Build CLI",
   "author": "Grok Build Control Center contributors",
@@ -18,6 +18,7 @@
     "lint": "eslint . --max-warnings=0",
     "verify": "npm test && npm run lint && npm run typecheck && npm run build",
     "smoke:ui": "npm run build && node work/ui_feature_smoke.mjs",
+    "smoke:preview": "npm run build && node work/preview_feature_smoke.mjs",
     "smoke:t4-live": "npx --yes tsx scripts/t4-live-dual-prompt.ts"
   },
   "dependencies": {

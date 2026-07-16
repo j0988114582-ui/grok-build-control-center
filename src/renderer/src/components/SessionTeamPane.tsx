@@ -24,7 +24,7 @@ type Props = {
   onInterject: () => void
   onDoNow: () => void
   onStop: () => void
-  EventCard: React.ComponentType<{ event: UiSessionEvent; query: string }>
+  EventCard: React.ComponentType<{ event: UiSessionEvent; query: string; preview?: unknown }>
 }
 
 export function SessionTeamPane({

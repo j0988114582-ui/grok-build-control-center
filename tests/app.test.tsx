@@ -38,6 +38,12 @@ const createApiMock = (): GrokBridgeApi => ({
   savePasteImage: vi.fn().mockResolvedValue({ path: 'C:\\Users\\demo\\AppData\\Local\\Temp\\grok-build-gui-paste\\paste-1.png' }),
   exportSession: vi.fn(), revealExport: vi.fn().mockResolvedValue(true), openTui: vi.fn(), openExternal: vi.fn(),
   notify: vi.fn().mockResolvedValue(false),
+  previewStat: vi.fn().mockResolvedValue({ ok: false, reason: '找不到檔案，可能已被移動或刪除' }),
+  previewRegister: vi.fn().mockResolvedValue({ ok: false, reason: '找不到檔案，可能已被移動或刪除' }),
+  previewReadText: vi.fn().mockResolvedValue({ ok: false, reason: '找不到檔案，可能已被移動或刪除' }),
+  previewChooseFile: vi.fn().mockResolvedValue(null),
+  revealPath: vi.fn().mockResolvedValue(true),
+  openPath: vi.fn().mockResolvedValue(''),
   onEvent: vi.fn().mockReturnValue(() => {}), onPermission: vi.fn().mockReturnValue(() => {}), onStatus: vi.fn().mockReturnValue(() => {})
 } as unknown as GrokBridgeApi)
 

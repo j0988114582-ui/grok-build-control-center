@@ -1,5 +1,14 @@
-import type { AppSettings } from './types'
+import type { AppSettings, PreviewRecentEntry, PreviewSettings } from './types'
 import { DEFAULT_SHORTCUTS, normalizeAccelerator } from './shortcuts'
+import {
+  DEFAULT_PREVIEW_SETTINGS,
+  PREVIEW_DEFAULT_MAX_IMAGE_MB,
+  PREVIEW_DEFAULT_MAX_VIDEO_MB,
+  PREVIEW_DEFAULT_WIDTH,
+  PREVIEW_MAX_RECENT_SESSIONS,
+  PREVIEW_MAX_WIDTH,
+  PREVIEW_MIN_WIDTH
+} from './preview-types'
 
 const windowsJoin = (...parts: string[]): string => parts.map((part, index) => index === 0 ? part.replace(/[\\/]+$/, '') : part.replace(/^[\\/]+|[\\/]+$/g, '')).join('\\')
 
@@ -15,7 +24,8 @@ export const createDefaultSettings = (homeDir: string): AppSettings => ({
   fontSize: 15,
   lineHeight: 1.65,
   contentWidth: 920,
-  shortcuts: DEFAULT_SHORTCUTS.map((binding) => ({ ...binding }))
+  shortcuts: DEFAULT_SHORTCUTS.map((binding) => ({ ...binding })),
+  preview: { ...DEFAULT_PREVIEW_SETTINGS, recentBySession: {} }
 })
 
 const clamp = (value: unknown, min: number, max: number, fallback: number): number =>
@@ -77,6 +87,52 @@ const normalizePinnedSessions = (value: unknown): string[] => {
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()))].slice(0, 200)
 }
 
+const PREVIEW_KINDS = new Set(['image', 'video', 'html', 'code', 'remote-image'])
+
+const normalizePreviewRecent = (value: unknown): Record<string, PreviewRecentEntry[]> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const entries = Object.entries(value as Record<string, unknown>)
+    .flatMap(([sessionId, list]) => {
+      if (!sessionId || !Array.isArray(list)) return []
+      const items = list.flatMap((entry): PreviewRecentEntry[] => {
+        if (!entry || typeof entry !== 'object') return []
+        const row = entry as Record<string, unknown>
+        const kind = typeof row.kind === 'string' && PREVIEW_KINDS.has(row.kind) ? row.kind as PreviewRecentEntry['kind'] : null
+        const label = typeof row.label === 'string' ? row.label.trim().slice(0, 240) : ''
+        if (!kind || !label) return []
+        return [{
+          path: typeof row.path === 'string' ? row.path.slice(0, 1000) : undefined,
+          kind,
+          label,
+          mtimeMs: typeof row.mtimeMs === 'number' && Number.isFinite(row.mtimeMs) ? row.mtimeMs : undefined,
+          language: typeof row.language === 'string' ? row.language.slice(0, 40) : undefined,
+          contentPreview: typeof row.contentPreview === 'string' ? row.contentPreview.slice(0, 2000) : undefined
+        }]
+      }).slice(0, 50)
+      return items.length ? [[sessionId, items] as const] : []
+    })
+    // Keep most recently listed sessions (object key order is insertion order)
+    .slice(-PREVIEW_MAX_RECENT_SESSIONS)
+  return Object.fromEntries(entries)
+}
+
+const normalizePreview = (value: unknown): PreviewSettings => {
+  const defaults = DEFAULT_PREVIEW_SETTINGS
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ...defaults, recentBySession: {} }
+  }
+  const raw = value as Partial<PreviewSettings>
+  return {
+    open: typeof raw.open === 'boolean' ? raw.open : defaults.open,
+    width: clamp(raw.width, PREVIEW_MIN_WIDTH, PREVIEW_MAX_WIDTH, PREVIEW_DEFAULT_WIDTH),
+    autoPreviewLatestMedia: typeof raw.autoPreviewLatestMedia === 'boolean' ? raw.autoPreviewLatestMedia : defaults.autoPreviewLatestMedia,
+    showHtmlScriptAdvanced: typeof raw.showHtmlScriptAdvanced === 'boolean' ? raw.showHtmlScriptAdvanced : defaults.showHtmlScriptAdvanced,
+    maxImageMb: clamp(raw.maxImageMb, 1, 100, PREVIEW_DEFAULT_MAX_IMAGE_MB),
+    maxVideoMb: clamp(raw.maxVideoMb, 1, 1024, PREVIEW_DEFAULT_MAX_VIDEO_MB),
+    recentBySession: normalizePreviewRecent(raw.recentBySession)
+  }
+}
+
 export function normalizeSettings(value: Partial<AppSettings> | undefined, homeDir: string): AppSettings {
   const defaults = createDefaultSettings(homeDir)
   return {
@@ -96,6 +152,7 @@ export function normalizeSettings(value: Partial<AppSettings> | undefined, homeD
     fontSize: clamp(value?.fontSize, 12, 22, defaults.fontSize),
     lineHeight: clamp(value?.lineHeight, 1.2, 2.1, defaults.lineHeight),
     contentWidth: clamp(value?.contentWidth, 640, 1400, defaults.contentWidth),
-    shortcuts: normalizeShortcuts(value?.shortcuts)
+    shortcuts: normalizeShortcuts(value?.shortcuts),
+    preview: normalizePreview(value?.preview)
   }
 }

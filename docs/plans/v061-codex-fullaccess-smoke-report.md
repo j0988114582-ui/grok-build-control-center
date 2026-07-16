@@ -2,7 +2,7 @@
 
 日期：2026-07-16（Asia/Taipei）  
 執行環境：Windows 真機、workspace write + danger-full-access  
-工作目錄：`C:\Users\111\Documents\grok-build-GUI\work\_upstream`
+工作目錄：`C:\Users\demo\Documents\grok-build-GUI\work\_upstream`
 
 ## 1. Verdict
 

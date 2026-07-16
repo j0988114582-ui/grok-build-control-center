@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -35,7 +35,18 @@ import { QuotaRings } from './components/QuotaRings'
 import { ModelPicker } from './components/ModelPicker'
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette'
 import { CodeBlock } from './components/CodeBlock'
+import { PreviewDock, type PreviewLoadState } from './components/PreviewDock/PreviewDock'
 import { AgentsTeamToolbar, SessionTeamPane } from './components/SessionTeamPane'
+import {
+  discoverPreviewCandidates,
+  isMediaPreviewItem
+} from '../../shared/preview-discover'
+import {
+  PREVIEW_DEFAULT_WIDTH,
+  PREVIEW_MAX_WIDTH,
+  PREVIEW_MIN_WIDTH,
+  type PreviewItem
+} from '../../shared/preview-types'
 import { StarfieldCanvas } from './fx/StarfieldCanvas'
 import { CursorFX } from './fx/CursorFX'
 import { StatusOrb, type StatusOrbMode } from './fx/StatusOrb'
@@ -130,19 +141,35 @@ const eventTitle = (event: Exclude<UiSessionEvent, { kind: 'message' } | { kind:
   }
 }
 
-function Markdown({ children }: { children: string }): React.JSX.Element {
+type PreviewHandlers = {
+  onPreviewPath: (path: string) => void
+  onPreviewRemote: (url: string) => void
+  onPreviewCode: (code: string, language?: string) => void
+}
+
+function Markdown({ children, preview }: { children: string; preview?: PreviewHandlers }): React.JSX.Element {
   return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={{
     a: ({ href, children: label }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) void window.grokApi.openExternal(href) }}>{label}</a>,
-    code: ({ children: code, className }) => <CodeBlock className={className}>{code}</CodeBlock>
+    code: ({ children: code, className }) => (
+      <CodeBlock className={className} onPreview={preview ? (text, language) => preview.onPreviewCode(text, language) : undefined}>{code}</CodeBlock>
+    ),
+    // Privacy: never auto-load remote images in transcript (tracking pixels).
+    img: ({ src, alt }) => {
+      if (!src) return null
+      if (/^https?:\/\//i.test(src)) {
+        return <button type="button" className="md-preview-chip" data-testid="md-remote-image-chip" onClick={() => preview?.onPreviewRemote(src)}>{alt || '遠端圖片 · 點擊在預覽台開啟'}</button>
+      }
+      return <button type="button" className="md-preview-chip" data-testid="md-local-image-chip" onClick={() => preview?.onPreviewPath(src)}>{alt || src}</button>
+    }
   }}>{children}</ReactMarkdown>
 }
 
-function EventCard({ event, query }: { event: UiSessionEvent; query: string }): React.JSX.Element {
+function EventCard({ event, query, preview }: { event: UiSessionEvent; query: string; preview?: PreviewHandlers }): React.JSX.Element {
   const [open, setOpen] = useState(event.kind === 'message' || event.kind === 'error')
   const matches = query && eventText(event).toLocaleLowerCase().includes(query.toLocaleLowerCase())
   if (event.kind === 'message') return <article className={`message ${event.role} ${matches ? 'search-hit' : ''}`}>
     <div className="message-rail">{event.role === 'assistant' ? <Bot size={17} /> : <UserRound size={17} />}</div>
-    <div className="message-body"><div className="message-label">{event.role === 'assistant' ? 'GROK' : 'YOU'}</div><Markdown>{event.text}</Markdown></div>
+    <div className="message-body"><div className="message-label">{event.role === 'assistant' ? 'GROK' : 'YOU'}</div><Markdown preview={preview}>{event.text}</Markdown></div>
   </article>
   if (event.kind === 'turn') return <div className={`turn-marker ${event.status}`}><span />{event.status === 'running' ? 'Grok 正在工作' : `回合${event.status === 'completed' ? '完成' : event.status}`}</div>
   const icon = event.kind === 'tool' ? <Wrench size={16} /> : event.kind === 'thought' ? <Zap size={16} /> : event.kind === 'plan' ? <ListTodo size={16} /> : event.kind === 'subagent' ? <Bot size={16} /> : event.kind === 'task' ? <Activity size={16} /> : <CircleAlert size={16} />
@@ -150,12 +177,12 @@ function EventCard({ event, query }: { event: UiSessionEvent; query: string }): 
   return <article className={`event-card ${event.kind} ${matches ? 'search-hit' : ''}`}>
     <button className="event-head" onClick={() => setOpen(!open)}>{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{icon}<span>{title}</span>{'status' in event && <em>{event.status}</em>}</button>
     {open && <div className="event-content">
-      {event.kind === 'thought' && <Markdown>{event.text}</Markdown>}
-      {event.kind === 'tool' && <><pre>{event.rawInput ? JSON.stringify(event.rawInput, null, 2) : 'No input details'}</pre>{event.output && <Markdown>{event.output}</Markdown>}</>}
+      {event.kind === 'thought' && <Markdown preview={preview}>{event.text}</Markdown>}
+      {event.kind === 'tool' && <><pre>{event.rawInput ? JSON.stringify(event.rawInput, null, 2) : 'No input details'}</pre>{event.output && <Markdown preview={preview}>{event.output}</Markdown>}</>}
       {event.kind === 'plan' && <ol>{event.entries.map((entry, index) => <li key={index} data-status={entry.status}>{entry.content}<small>{entry.status}</small></li>)}</ol>}
       {event.kind === 'subagent' && <p>{event.output ?? `Subagent ${event.status}`}</p>}
       {event.kind === 'task' && <p>Background task · {event.status}</p>}
-      {event.kind === 'recap' && <Markdown>{event.summary}</Markdown>}
+      {event.kind === 'recap' && <Markdown preview={preview}>{event.summary}</Markdown>}
       {event.kind === 'error' && <p>{event.message}</p>}
       {event.kind === 'unknown' && <p>{event.summary}</p>}
       {event.kind === 'commands' && <p>{event.commands.length} commands available</p>}
@@ -207,6 +234,13 @@ function SettingsPanel({
       <label className="toggle-row"><span><strong>星航游標</strong><small>拖尾、nova 與磁吸</small></span><input type="checkbox" checked={draft.effects.cursor} onChange={(event) => update({ ...draft, effects: { ...draft.effects, cursor: event.target.checked } })} /></label>
       <label className="toggle-row"><span><strong>停用全部動效</strong><small>保留靜態星圖與完整功能</small></span><input type="checkbox" checked={draft.effects.reducedMotion} onChange={(event) => update({ ...draft, effects: { ...draft.effects, reducedMotion: event.target.checked } })} /></label>
       <label className="density-row"><span>粒子密度</span><select value={draft.effects.density} onChange={(event) => update({ ...draft, effects: { ...draft.effects, density: event.target.value as AppSettings['effects']['density'] } })}><option value="low">低 · 600</option><option value="medium">中 · 1000</option><option value="high">高 · 1500</option></select></label>
+    </div>
+    <div className="settings-section preview-settings" data-testid="preview-settings"><div className="section-title"><h3>預覽台</h3></div>
+      <label className="toggle-row"><span><strong>啟動時展開預覽台</strong><small>記住展開狀態</small></span><input type="checkbox" checked={draft.preview.open} onChange={(event) => update({ ...draft, preview: { ...draft.preview, open: event.target.checked } })} /></label>
+      <label className="toggle-row"><span><strong>自動預覽最新媒體</strong><small>對話完成後自動打開最新圖／影（預設關）</small></span><input type="checkbox" checked={draft.preview.autoPreviewLatestMedia} onChange={(event) => update({ ...draft, preview: { ...draft.preview, autoPreviewLatestMedia: event.target.checked } })} /></label>
+      <label className="toggle-row"><span><strong>顯示 HTML「允許腳本」</strong><small>進階按鈕；腳本同意仍為逐檔逐次</small></span><input type="checkbox" checked={draft.preview.showHtmlScriptAdvanced} onChange={(event) => update({ ...draft, preview: { ...draft.preview, showHtmlScriptAdvanced: event.target.checked } })} /></label>
+      <label>圖片上限 MB <output>{draft.preview.maxImageMb}</output><input type="range" min="1" max="100" value={draft.preview.maxImageMb} onChange={(event) => update({ ...draft, preview: { ...draft.preview, maxImageMb: Number(event.target.value) } })} /></label>
+      <label>影片上限 MB <output>{draft.preview.maxVideoMb}</output><input type="range" min="1" max="1024" value={draft.preview.maxVideoMb} onChange={(event) => update({ ...draft, preview: { ...draft.preview, maxVideoMb: Number(event.target.value) } })} /></label>
     </div>
     <div className="settings-section"><div className="section-title"><h3>快捷鍵</h3><button type="button" className="text-button" onClick={() => update({ ...draft, shortcuts: DEFAULT_SHORTCUTS.map((binding) => ({ ...binding })) })}>恢復預設</button></div>
       {draft.shortcuts.map((binding, index) => <label className="shortcut-row" key={binding.command}><span>{binding.command}</span><input value={binding.accelerator} onChange={(event) => update({ ...draft, shortcuts: draft.shortcuts.map((item, i) => i === index ? { ...item, accelerator: event.target.value } : item) })} /><small>{binding.scope}</small></label>)}
@@ -276,6 +310,13 @@ export function App(): React.JSX.Element {
   const [followTail, setFollowTail] = useState(true)
   const [unread, setUnread] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [previewItemsBySession, setPreviewItemsBySession] = useState<Record<string, PreviewItem[]>>({})
+  const [previewActiveId, setPreviewActiveId] = useState<string | null>(null)
+  const [previewLoad, setPreviewLoad] = useState<PreviewLoadState>({ status: 'idle' })
+  /** Session-scoped HTML script consent: key = item id, never persisted. */
+  const [htmlScriptConsent, setHtmlScriptConsent] = useState<Record<string, boolean>>({})
+  const previewDiscoverTimer = useRef<number | null>(null)
+  const scanPreviewForSessionRef = useRef<((sessionId: string) => void) | null>(null)
   const [notice, setNotice] = useState('')
   const [setupDialog, setSetupDialog] = useState<SetupDialog>(null)
   const [lifecycleBusy, setLifecycleBusy] = useState(false)
@@ -434,6 +475,13 @@ export function App(): React.JSX.Element {
             const title = event.status === 'completed' ? 'Grok 回合完成' : event.status === 'cancelled' ? 'Grok 回合已取消' : 'Grok 回合結束（錯誤）'
             void window.grokApi.notify({ title, body: '回到 Grok Build Control Center 查看結果' }).catch(() => undefined)
           }
+          // Preview discover on turn complete (debounced; does not steal focus unless auto-preview setting).
+          if (event.status === 'completed') {
+            if (previewDiscoverTimer.current) window.clearTimeout(previewDiscoverTimer.current)
+            previewDiscoverTimer.current = window.setTimeout(() => {
+              scanPreviewForSessionRef.current?.(event.sessionId)
+            }, 280)
+          }
           void refreshUsageRef.current(event.sessionId)
           void refreshSessionsRef.current()
           window.setTimeout(() => { void refreshBillingRef.current() }, 800)
@@ -494,6 +542,14 @@ export function App(): React.JSX.Element {
       const editing = Boolean(target?.matches('input, textarea, select') || target?.isContentEditable)
       const command = commandForEvent(settings.shortcuts, event, editing ? ['global'] : ['global', 'transcript'])
       if (command === 'toggleSidebar') { event.preventDefault(); setSidebarOpen((current) => !current); return }
+      if (command === 'togglePreview') {
+        event.preventDefault()
+        setSettings((current) => ({
+          ...current,
+          preview: { ...current.preview, open: !current.preview.open }
+        }))
+        return
+      }
       if (command === 'searchTranscript') { event.preventDefault(); setSearchOpen(true); setTimeout(() => transcriptSearchRef.current?.focus(), 0); return }
       if (command === 'commandPalette') { event.preventDefault(); setPanel('commands'); return }
       if (command === 'searchSessions') { event.preventDefault(); if (!sidebarOpen) setSidebarOpen(true); setTimeout(() => sessionSearchRef.current?.focus(), 0); return }
@@ -1294,6 +1350,201 @@ export function App(): React.JSX.Element {
     })
   }
 
+  const focusSessionId = (teamEnabled && team.focusId) || active?.id || null
+  const previewSessionId = focusSessionId
+  const previewItems = previewSessionId ? (previewItemsBySession[previewSessionId] ?? []) : []
+
+  const ensurePreviewOpen = useCallback((): void => {
+    setSettings((current) => current.preview.open ? current : { ...current, preview: { ...current.preview, open: true } })
+  }, [])
+
+  const loadPreviewItem = useCallback(async (item: PreviewItem): Promise<void> => {
+    setPreviewActiveId(item.id)
+    setPreviewLoad({ status: 'loading' })
+    try {
+      if (item.source.type === 'remote-url') {
+        setPreviewLoad({
+          status: 'ready',
+          kind: 'remote-image',
+          mediaSrc: item.source.url,
+          mimeType: 'image/*'
+        })
+        return
+      }
+      if (item.source.type === 'inline-code') {
+        setPreviewLoad({
+          status: 'ready',
+          kind: 'code',
+          text: item.source.content,
+          language: item.source.language,
+          sizeBytes: item.source.content.length
+        })
+        return
+      }
+      const filePath = item.source.path
+      if (item.kind === 'html' || item.kind === 'code') {
+        const reg = await window.grokApi.previewRegister(filePath)
+        if (!reg.ok) {
+          setPreviewLoad({ status: 'error', message: reg.reason, revealOnly: reg.revealOnly })
+          return
+        }
+        const textResult = await window.grokApi.previewReadText(filePath)
+        if (!textResult.ok) {
+          setPreviewLoad({ status: 'error', message: textResult.reason })
+          return
+        }
+        setPreviewLoad({
+          status: 'ready',
+          kind: textResult.kind,
+          path: textResult.path,
+          text: textResult.text,
+          truncated: textResult.truncated,
+          sizeBytes: textResult.sizeBytes,
+          language: item.kind === 'code' ? undefined : undefined
+        })
+        return
+      }
+      const reg = await window.grokApi.previewRegister(filePath)
+      if (!reg.ok) {
+        setPreviewLoad({ status: 'error', message: reg.reason, revealOnly: reg.revealOnly })
+        return
+      }
+      const mediaSrc = reg.base64DataUrl ?? reg.protocolUrl
+      if (!mediaSrc && reg.kind !== 'code' && reg.kind !== 'html') {
+        setPreviewLoad({ status: 'error', message: '無法建立預覽載入路徑' })
+        return
+      }
+      setPreviewLoad({
+        status: 'ready',
+        kind: reg.kind,
+        path: reg.path,
+        mediaSrc,
+        sizeBytes: reg.sizeBytes,
+        mimeType: reg.mimeType
+      })
+    } catch (error) {
+      setPreviewLoad({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }, [])
+
+  const upsertPreviewItems = useCallback((sessionId: string, discovered: PreviewItem[], autoSelectMedia: boolean): void => {
+    setPreviewItemsBySession((current) => {
+      const existing = current[sessionId] ?? []
+      const merged = discoverPreviewCandidates('', {
+        sessionId,
+        existing: [...discovered, ...existing],
+        nowMs: Date.now()
+      })
+      // discover with empty text just re-merges existing+discovered via existing option
+      const map = new Map<string, PreviewItem>()
+      for (const item of existing) map.set(item.id, item)
+      for (const item of discovered) map.set(item.id, item)
+      const next = [...map.values()].sort((a, b) => b.discoveredAt - a.discoveredAt).slice(0, 50)
+      return { ...current, [sessionId]: next.length ? next : merged }
+    })
+    if (autoSelectMedia) {
+      const media = discovered.find(isMediaPreviewItem) ?? discovered[0]
+      if (media) {
+        ensurePreviewOpen()
+        void loadPreviewItem(media)
+      }
+    }
+  }, [ensurePreviewOpen, loadPreviewItem])
+
+  const scanPreviewForSession = useCallback((sessionId: string): void => {
+    const session = sessions.find((item) => item.id === sessionId) ?? (active?.id === sessionId ? active : null)
+    const list = events[sessionId] ?? []
+    // Prefer completed message/tool text (skip pure running markers)
+    const chunks = list.flatMap((event) => {
+      if (event.kind === 'message') return [event.text]
+      if (event.kind === 'tool' && event.status !== 'pending' && event.status !== 'in_progress') {
+        return [`${event.title}\n${event.output ?? ''}`]
+      }
+      if (event.kind === 'recap') return [event.summary]
+      return []
+    })
+    const text = chunks.join('\n')
+    if (!text.trim()) return
+    const discovered = discoverPreviewCandidates(text, {
+      sessionId,
+      cwd: session?.cwd,
+      nowMs: Date.now(),
+      existing: previewItemsBySession[sessionId] ?? []
+    })
+    const auto = settings.preview.autoPreviewLatestMedia
+    upsertPreviewItems(sessionId, discovered, auto)
+  }, [sessions, active, events, previewItemsBySession, settings.preview.autoPreviewLatestMedia, upsertPreviewItems])
+
+  scanPreviewForSessionRef.current = scanPreviewForSession
+
+  const openPreviewPath = useCallback((rawPath: string): void => {
+    if (!previewSessionId) {
+      setNotice('請先開啟一個對話再預覽')
+      return
+    }
+    const session = sessions.find((item) => item.id === previewSessionId) ?? active
+    const cwd = session?.cwd
+    let path = rawPath.trim()
+    if (cwd && !/^[a-zA-Z]:[\\/]/.test(path) && !path.startsWith('/')) {
+      path = `${cwd.replace(/[\\/]+$/, '')}\\${path.replace(/^[\\/]+/, '').replace(/\//g, '\\')}`
+    }
+    const item: PreviewItem = {
+      id: `file:${path.toLowerCase()}`,
+      kind: path.match(/\.(mp4|webm)$/i) ? 'video' : path.match(/\.(html?)$/i) ? 'html' : path.match(/\.(png|jpe?g|webp|gif|svg)$/i) ? 'image' : 'code',
+      source: { type: 'file', path },
+      label: path.split(/[\\/]/).pop() || path,
+      discoveredAt: Date.now(),
+      sessionId: previewSessionId
+    }
+    upsertPreviewItems(previewSessionId, [item], false)
+    ensurePreviewOpen()
+    void loadPreviewItem(item)
+  }, [previewSessionId, sessions, active, upsertPreviewItems, ensurePreviewOpen, loadPreviewItem])
+
+  const openPreviewRemote = useCallback((url: string): void => {
+    if (!previewSessionId) {
+      setNotice('請先開啟一個對話再預覽')
+      return
+    }
+    const item: PreviewItem = {
+      id: `remote:${url}`,
+      kind: 'remote-image',
+      source: { type: 'remote-url', url },
+      label: url.split('/').pop()?.split('?')[0] || '遠端圖片',
+      discoveredAt: Date.now(),
+      sessionId: previewSessionId
+    }
+    upsertPreviewItems(previewSessionId, [item], false)
+    ensurePreviewOpen()
+    void loadPreviewItem(item)
+  }, [previewSessionId, upsertPreviewItems, ensurePreviewOpen, loadPreviewItem])
+
+  const openPreviewCode = useCallback((code: string, language?: string): void => {
+    if (!previewSessionId) {
+      setNotice('請先開啟一個對話再預覽')
+      return
+    }
+    const hash = `${code.length}:${code.slice(0, 32)}`
+    const item: PreviewItem = {
+      id: `code:${hash}:${language ?? ''}`,
+      kind: 'code',
+      source: { type: 'inline-code', language, content: code, hash },
+      label: language ? `${language} 程式碼` : '程式碼區塊',
+      discoveredAt: Date.now(),
+      sessionId: previewSessionId,
+      sizeBytes: code.length
+    }
+    upsertPreviewItems(previewSessionId, [item], false)
+    ensurePreviewOpen()
+    void loadPreviewItem(item)
+  }, [previewSessionId, upsertPreviewItems, ensurePreviewOpen, loadPreviewItem])
+
+  const previewHandlers: PreviewHandlers = useMemo(() => ({
+    onPreviewPath: openPreviewPath,
+    onPreviewRemote: openPreviewRemote,
+    onPreviewCode: openPreviewCode
+  }), [openPreviewPath, openPreviewRemote, openPreviewCode])
+
   const activeModel = models?.availableModels.find((model) => model.modelId === models.currentModelId)
   const usageTotal = usage?.contextWindowTokens ?? activeModel?.totalContextTokens
   const usagePercent = usage?.contextWindowUsage ?? (usage?.contextTokensUsed !== undefined && usageTotal ? Math.round((usage.contextTokensUsed / usageTotal) * 100) : undefined)
@@ -1318,7 +1569,10 @@ export function App(): React.JSX.Element {
     }))
   ]
 
-  return <div className="app" data-theme={settings.theme} data-immersion={effectiveImmersion} data-cursor={settings.effects.cursor && !settings.effects.reducedMotion ? 'true' : undefined} data-fx-off={settings.effects.reducedMotion ? 'true' : undefined} style={{ '--font-size': `${settings.fontSize}px`, '--line-height': settings.lineHeight, '--content-width': `${settings.contentWidth}px` } as React.CSSProperties}>
+  const previewOpen = settings.preview.open
+  const previewWidth = Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, settings.preview.width || PREVIEW_DEFAULT_WIDTH))
+
+  return <div className="app" data-theme={settings.theme} data-immersion={effectiveImmersion} data-cursor={settings.effects.cursor && !settings.effects.reducedMotion ? 'true' : undefined} data-fx-off={settings.effects.reducedMotion ? 'true' : undefined} style={{ '--font-size': `${settings.fontSize}px`, '--line-height': settings.lineHeight, '--content-width': `${settings.contentWidth}px`, '--preview-width': `${previewWidth}px` } as React.CSSProperties}>
     <StarfieldCanvas enabled={settings.effects.galaxy} theme={settings.theme} density={settings.effects.density} reducedMotion={settings.effects.reducedMotion} running={running} connected={status.connected} errorPulse={errorPulse} />
     <CursorFX enabled={settings.effects.cursor} reducedMotion={settings.effects.reducedMotion} />
     <header className="titlebar"><div className="brand-mark"><span>G</span></div><strong>GROK BUILD</strong><i>GALAXY COCKPIT</i><div className="drag-region" />
@@ -1328,7 +1582,7 @@ export function App(): React.JSX.Element {
       <label title={permissionModeTitle}><select aria-label="權限模式" value={permissionMode} disabled={permissionControlsLocked} onChange={(event) => requestPermissionMode(event.target.value as AgentPermissionMode)}><option value="ask">每次詢問</option><option value="always-approve">一律核准（YOLO）</option></select></label>
       {status.found && <button className="account-pill" aria-label="切換 Grok 帳號" title={running || anyRunning ? '請先停止所有執行中的回合' : '切換 Grok 帳號'} disabled={lifecycleBusy || running || anyRunning} onClick={() => openSetupDialog('account')}><UserRound />切換帳號</button>}
       <button className={`status-pill ${status.connected ? 'online' : ''}`} disabled={lifecycleBusy || anyRunning} onClick={() => { if (status.found) void connect(); else openSetupDialog('install') }}><span />{status.found ? `Grok ${status.version ?? ''}` : 'CLI not found'} · {status.connected ? 'Connected' : status.found ? 'Connect' : 'Setup'}</button></header>
-    <div className={`workspace ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
+    <div className={`workspace ${sidebarOpen ? '' : 'sidebar-collapsed'} ${previewOpen ? 'preview-open' : 'preview-rail'}`}>
       <aside className="sidebar">
         <div className="sidebar-actions"><button className="primary" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => void createSession()}><FilePlus2 />新 Session</button><button className="icon-button sidebar-rail-expand" aria-label="展開側欄" onClick={() => setSidebarOpen(true)}><PanelLeft /></button><button className="icon-button" aria-label="收合側欄" onClick={() => setSidebarOpen(false)}><PanelLeftClose /></button></div>
         <div className="sidebar-team-bar">
@@ -1380,7 +1634,7 @@ export function App(): React.JSX.Element {
               draft={drafts[sessionId] ?? ''}
               running={runningMap[sessionId] === true}
               focused={focused}
-              EventCard={MemoEventCard}
+              EventCard={(props) => <MemoEventCard {...props} preview={previewHandlers} />}
               ready={isSessionReady(sessionReady, sessionId, connectionGeneration)}
               onFocus={() => {
                 setTeam((current) => setTeamFocus(current, sessionId))
@@ -1398,7 +1652,7 @@ export function App(): React.JSX.Element {
         </section> : active ? <>
           <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION · PROJECT</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) { setNotice(`已匯出：${path}（可在檔案總管開啟該路徑）`); setExportedPaths((current) => ({ ...current, [active.id]: path })); setLastExportedPath(path); } }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button>{exportedPaths[active.id] && <button className="icon-button" title="在檔案總管開啟匯出檔案" onClick={() => void window.grokApi.revealExport(exportedPaths[active.id]).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><FolderOpen /></button>}<button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
-          <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
+          <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} preview={previewHandlers} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
           <footer className="composer-wrap" onDragOver={onComposerDragOver} onDrop={onComposerDrop}>
             <div className="composer-status" data-testid="composer-status">
               <span className={`composer-status-pill ${running ? 'is-running' : lifecycleBusy || sessionLoading ? 'is-busy' : 'is-ready'}`}>
@@ -1417,7 +1671,7 @@ export function App(): React.JSX.Element {
               <span className="composer-status-keys">{running ? `${shortcutLabel('sendPrompt')} 插話 · ${shortcutLabel('cancelTurn')} 停止` : `${shortcutLabel('sendPrompt')} 傳送 · ${shortcutLabel('newline')} 換行`}</span>
             </div>
             {attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}
-            {pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip.path} data-testid="path-chip">{pastePathChip.previewUrl ? <img className="path-chip-thumb" data-testid="path-chip-thumb" src={pastePathChip.previewUrl} alt="" width={28} height={28} /> : <Paperclip />}<em>{pastePathChip.path}</em><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}
+            {pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip.path} data-testid="path-chip">{pastePathChip.previewUrl ? <img className="path-chip-thumb" data-testid="path-chip-thumb" src={pastePathChip.previewUrl} alt="" width={28} height={28} /> : <Paperclip />}<em>{pastePathChip.path}</em><button type="button" className="path-preview-btn" data-testid="path-chip-preview" aria-label="預覽貼圖" onClick={() => openPreviewPath(pastePathChip.path)}>預覽</button><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}
             {!running && <div className="template-row" data-testid="prompt-templates">
               {PROMPT_TEMPLATES.map((item) => (
                 <button
@@ -1452,6 +1706,49 @@ export function App(): React.JSX.Element {
           </footer>
         </> : null}
       </main>
+      <PreviewDock
+        open={previewOpen}
+        width={previewWidth}
+        items={previewItems}
+        activeId={previewActiveId}
+        load={previewLoad}
+        showHtmlScriptAdvanced={settings.preview.showHtmlScriptAdvanced}
+        htmlScriptsAllowed={previewActiveId ? htmlScriptConsent[previewActiveId] === true : false}
+        onToggleOpen={() => setSettings((current) => ({ ...current, preview: { ...current.preview, open: !current.preview.open } }))}
+        onWidthChange={(width) => setSettings((current) => ({ ...current, preview: { ...current.preview, width } }))}
+        onSelectItem={(id) => {
+          const item = previewItems.find((entry) => entry.id === id)
+          if (item) void loadPreviewItem(item)
+        }}
+        onRefresh={() => {
+          const item = previewItems.find((entry) => entry.id === previewActiveId)
+          if (item) {
+            setHtmlScriptConsent((current) => {
+              if (!previewActiveId || !current[previewActiveId]) return current
+              const next = { ...current }
+              delete next[previewActiveId]
+              return next
+            })
+            void loadPreviewItem(item)
+          }
+        }}
+        onRescan={() => {
+          if (previewSessionId) scanPreviewForSession(previewSessionId)
+        }}
+        onOpenFile={() => {
+          void window.grokApi.previewChooseFile().then((file) => {
+            if (file) openPreviewPath(file)
+          }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+        }}
+        onToggleHtmlScripts={(allowed) => {
+          if (!previewActiveId) return
+          setHtmlScriptConsent((current) => ({ ...current, [previewActiveId]: allowed }))
+        }}
+        onCopyPath={(path) => { void navigator.clipboard.writeText(path).then(() => setNotice('已複製路徑')).catch(() => setNotice('複製失敗')) }}
+        onRevealPath={(path) => { void window.grokApi.revealPath(path).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}
+        onOpenExternalPath={(path) => { void window.grokApi.openPath(path).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}
+        reducedMotion={settings.effects.reducedMotion}
+      />
       {panel === 'settings' && <SettingsPanel
         settings={settings}
         cliVersion={status.version}
@@ -1465,7 +1762,8 @@ export function App(): React.JSX.Element {
           lineHeight: next.lineHeight,
           contentWidth: next.contentWidth,
           grokExecutable: next.grokExecutable,
-          shortcuts: next.shortcuts
+          shortcuts: next.shortcuts,
+          preview: next.preview
         }))}
         onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none'); setNotice('設定已儲存') })}
       />}
@@ -1513,7 +1811,7 @@ export function App(): React.JSX.Element {
     </div>
     {panel === 'commands' && <CommandPalette commands={paletteCommands} recentIds={settings.recentCommands} onUse={rememberCommand} onClose={() => setPanel('none')} />}
     {panel === 'shortcuts' && <div className="modal-backdrop"><section className="shortcut-overlay" role="dialog" aria-modal="true" aria-label="快捷鍵一覽"><header><div><span className="eyebrow">KEYBOARD HELP</span><h2>快捷鍵一覽</h2></div><button className="icon-button" aria-label="關閉快捷鍵" onClick={() => setPanel('none')}><X /></button></header><div>{[
-      [shortcutLabel('newSession'), '建立新對話'], [shortcutLabel('searchSessions'), '搜尋本機對話'], [shortcutLabel('searchTranscript'), '搜尋目前內容'], [shortcutLabel('toggleSidebar'), '切換側欄'], [shortcutLabel('commandPalette'), '開啟命令面板'], [shortcutLabel('jumpToLatest'), '跳到最新訊息'], [shortcutLabel('cancelTurn'), '取消執行（Esc 永遠先關閉視窗）'], ['?', '顯示這張說明']
+      [shortcutLabel('newSession'), '建立新對話'], [shortcutLabel('searchSessions'), '搜尋本機對話'], [shortcutLabel('searchTranscript'), '搜尋目前內容'], [shortcutLabel('toggleSidebar'), '切換側欄'], [shortcutLabel('togglePreview'), '開關預覽台'], [shortcutLabel('commandPalette'), '開啟命令面板'], [shortcutLabel('jumpToLatest'), '跳到最新訊息'], [shortcutLabel('cancelTurn'), '取消執行（Esc 永遠先關閉視窗）'], ['?', '顯示這張說明']
     ].map(([keys, action]) => <p key={keys}><kbd>{keys}</kbd><span>{action}</span></p>)}</div><footer><Keyboard />在輸入框內按「?」會正常輸入文字，不會打開這張卡片。</footer></section></div>}
     {setupDialog === 'install' && <div className="modal-backdrop"><section className="permission-modal setup-modal" role="dialog" aria-modal="true" aria-label="安裝 Grok CLI" onKeyDown={containDialogFocus}><div className="permission-icon"><TerminalSquare /></div><span className="eyebrow">FIRST-TIME SETUP</span><h2>安裝 Grok CLI</h2><p>這是程式真正需要的工具，不是 Windows Terminal，也不是 Node.js。按下確認後才會從 x.ai 官方網址下載，安裝在你的 Windows 帳號內，不要求系統管理員權限。</p><code>https://x.ai/cli/install.ps1</code><div><button className="primary" aria-label="確認安裝 Grok CLI" disabled={lifecycleBusy} onClick={() => void installCli()}><TerminalSquare /><span><strong>{lifecycleBusy ? '正在安裝…' : '確認安裝 Grok CLI'}</strong><small>下載後會驗證 grok --version</small></span></button><button autoFocus disabled={lifecycleBusy} onClick={() => setSetupDialog(null)}><X /><span><strong>先不要</strong><small>不會下載或執行任何東西</small></span></button></div></section></div>}
     {setupDialog === 'account' && <div className="modal-backdrop"><section className="permission-modal setup-modal" role="dialog" aria-modal="true" aria-label="登入 Grok 帳號" onKeyDown={containDialogFocus}><div className="permission-icon"><UserRound /></div><span className="eyebrow">OFFICIAL GROK OAUTH</span><h2>{status.connected ? '切換 Grok 帳號' : '登入 Grok 帳號'}</h2><p>接下來會由 Grok CLI 開啟 x.ai 的瀏覽器登入頁。程式不會看見、保存或複製你的密碼與 token；CLI 目前也不提供帳號 email 或多帳號清單。</p><div><button className="primary" aria-label="開啟瀏覽器並重新登入" disabled={lifecycleBusy || running || anyRunning} onClick={() => void reauthenticateAccount()}><UserRound /><span><strong>{lifecycleBusy ? '等待瀏覽器登入…' : running || anyRunning ? '請先停止所有執行中的回合' : '開啟瀏覽器並重新登入'}</strong><small>完成後會重建連線與額度資料</small></span></button><button autoFocus disabled={lifecycleBusy} onClick={() => setSetupDialog(null)}><X /><span><strong>取消</strong><small>維持目前狀態</small></span></button></div></section></div>}

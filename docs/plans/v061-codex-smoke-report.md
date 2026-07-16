@@ -1,13 +1,13 @@
 # v0.6.1 Codex full smoke report
 
 執行時間：2026-07-16（Asia/Taipei）  
-工作樹：`C:\Users\111\Documents\grok-build-GUI\work\_upstream`
+工作樹：`C:\Users\demo\Documents\grok-build-GUI\work\_upstream`
 
 ## 1. Verdict
 
 **FAIL（verification/environment-blocked）**
 
-指定流程未能全綠：`npm test`、`npm run build`、`npm run smoke:ui` 的本次指定入口皆為 exit 1。已確認主要阻擋是受管制執行環境，而不是已重現的產品測試失敗：esbuild 預設 config bundler 沿祖先目錄搜尋 package scope 時，讀取 `C:\Users\111` 被 workspace sandbox 拒絕。Vitest 改用官方 `--configLoader runner` 後，**44 test files / 195 tests 全數通過**。不過 build 與完整 UI smoke 沒有等價的成功重跑，因此不能判為 PASS 或 PASS-with-nits。
+指定流程未能全綠：`npm test`、`npm run build`、`npm run smoke:ui` 的本次指定入口皆為 exit 1。已確認主要阻擋是受管制執行環境，而不是已重現的產品測試失敗：esbuild 預設 config bundler 沿祖先目錄搜尋 package scope 時，讀取 `C:\Users\demo` 被 workspace sandbox 拒絕。Vitest 改用官方 `--configLoader runner` 後，**44 test files / 195 tests 全數通過**。不過 build 與完整 UI smoke 沒有等價的成功重跑，因此不能判為 PASS 或 PASS-with-nits。
 
 ## 2. Command results
 
@@ -68,4 +68,4 @@
 
 ## 6. 給站主
 
-站主您好：這輪程式面沒有抓到 P0/P1，lint、typecheck 皆綠，Vitest 改走不需 esbuild bundling 的官方 runner 後是 195/195 全過，四個指定功能也都有程式與測試證據；但 Codex 受管制環境會阻擋 esbuild 往上讀 `C:\Users\111`，且 UI runner 連 Grok 額度列時又遇到網路封鎖，所以本報告必須誠實判 **FAIL（環境阻擋、尚未完成發布驗證）**。請在一般本機終端原樣跑完 test/build/smoke:ui 三個未綠項並看新截圖；三者 exit 0、a11y 仍為零後，才可把這輪改判 PASS。
+站主您好：這輪程式面沒有抓到 P0/P1，lint、typecheck 皆綠，Vitest 改走不需 esbuild bundling 的官方 runner 後是 195/195 全過，四個指定功能也都有程式與測試證據；但 Codex 受管制環境會阻擋 esbuild 往上讀 `C:\Users\demo`，且 UI runner 連 Grok 額度列時又遇到網路封鎖，所以本報告必須誠實判 **FAIL（環境阻擋、尚未完成發布驗證）**。請在一般本機終端原樣跑完 test/build/smoke:ui 三個未綠項並看新截圖；三者 exit 0、a11y 仍為零後，才可把這輪改判 PASS。

@@ -103,6 +103,26 @@ export type PermissionRequest = { requestId: string; sessionId: string; title: s
 /** Runtime-only for the current process; always starts as `ask` on app launch. */
 export type AgentPermissionMode = 'ask' | 'always-approve'
 
+export type PreviewRecentEntry = {
+  path?: string
+  kind: 'image' | 'video' | 'html' | 'code' | 'remote-image'
+  label: string
+  mtimeMs?: number
+  language?: string
+  contentPreview?: string
+}
+
+export type PreviewSettings = {
+  open: boolean
+  width: number
+  autoPreviewLatestMedia: boolean
+  /** Whether to show the per-file HTML script allow control (not sticky allow-all). */
+  showHtmlScriptAdvanced: boolean
+  maxImageMb: number
+  maxVideoMb: number
+  recentBySession: Record<string, PreviewRecentEntry[]>
+}
+
 export type AppSettings = {
   grokExecutable: string
   theme: 'dark' | 'light'
@@ -122,6 +142,8 @@ export type AppSettings = {
   lineHeight: number
   contentWidth: number
   shortcuts: ShortcutBinding[]
+  /** Preview Dock preferences (0.7.0+). */
+  preview: PreviewSettings
 }
 
 export type ShortcutBinding = {

@@ -26,7 +26,7 @@ npx tsx scripts/t4-live-dual-prompt.ts
 | 欄位 | 值 |
 | --- | --- |
 | 時間 | 2026-07-16T14:46:49Z → 14:46:56Z |
-| CLI | `C:\Users\111\.grok\bin\grok.exe`（0.2.101 環境） |
+| CLI | `C:\Users\demo\.grok\bin\grok.exe`（0.2.101 環境） |
 | 重疊 running | **是**（aRunning + bRunning，cancel 前 A 未結束） |
 | A 最終 | **cancelled** |
 | B 最終 | **completed** (`end_turn`) |

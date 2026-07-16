@@ -32,6 +32,12 @@ const api: GrokBridgeApi = {
   openTui: (cwd) => ipcRenderer.invoke('grok:tui', cwd),
   openExternal: (url) => ipcRenderer.invoke('shell:external', url),
   notify: (payload) => ipcRenderer.invoke('app:notify', payload),
+  previewStat: (filePath) => ipcRenderer.invoke('preview:stat', filePath),
+  previewRegister: (filePath) => ipcRenderer.invoke('preview:register', filePath),
+  previewReadText: (filePath) => ipcRenderer.invoke('preview:read-text', filePath),
+  previewChooseFile: () => ipcRenderer.invoke('preview:choose-file'),
+  revealPath: (filePath) => ipcRenderer.invoke('shell:reveal-path', filePath),
+  openPath: (filePath) => ipcRenderer.invoke('shell:open-path', filePath),
   onEvent: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, value: UiSessionEvent): void => callback(value)
     ipcRenderer.on('grok:event', listener)

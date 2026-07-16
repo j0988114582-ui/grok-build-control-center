@@ -1118,7 +1118,7 @@ async def initialize_l1_connection(endpoint: str):
         <div class="path-chip-wrap">
           <div class="path-chip" id="active-path-chip" title="當前編輯/編譯檔案路徑">
             <div class="path-thumbnail-placeholder" id="path-thumb">PY</div>
-            <span class="path-text" id="path-text-label">C:\Users\111\Documents\grok-build-GUI\src\main.py</span>
+            <span class="path-text" id="path-text-label">C:\Users\demo\Documents\grok-build-GUI\src\main.py</span>
             <span class="path-chip-remove" onclick="removePathChip()" title="清除選取">×</span>
           </div>
         </div>
@@ -1353,7 +1353,7 @@ async def initialize_l1_connection(endpoint: str):
       const fileName = element.querySelector('.file-name').title;
       const fileLabel = fileName.split('/').pop().toUpperCase();
       
-      document.getElementById('path-text-label').innerText = `C:\\Users\\111\\Documents\\grok-build-GUI\\${fileName.replace(/\//g, '\\')}`;
+      document.getElementById('path-text-label').innerText = `C:\\Users\\demo\\Documents\\grok-build-GUI\\${fileName.replace(/\//g, '\\')}`;
       const thumb = document.getElementById('path-thumb');
       thumb.innerText = fileLabel.substring(0, 2);
       

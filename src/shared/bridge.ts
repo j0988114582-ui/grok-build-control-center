@@ -1,6 +1,7 @@
 import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock, SessionSummary, SessionUsage, UiSessionEvent
 } from './types'
+import type { PreviewReadTextResult, PreviewRegisterResult, PreviewStatResult } from './preview-types'
 
 export type CliStatusUpdate = Partial<CliStatus> & { message?: string; stderr?: string }
 
@@ -46,6 +47,18 @@ export interface GrokBridgeApi {
   openExternal(url: string): Promise<void>
   /** OS notification (suppressed when the main window is focused). */
   notify(payload: { title: string; body?: string }): Promise<boolean>
+  /** Preview Dock: stat a local file under allowlisted roots. */
+  previewStat(filePath: string): Promise<PreviewStatResult>
+  /** Preview Dock: register for protocol/base64 load. */
+  previewRegister(filePath: string): Promise<PreviewRegisterResult>
+  /** Preview Dock: read code/HTML text (utf-8, size-capped). */
+  previewReadText(filePath: string): Promise<PreviewReadTextResult>
+  /** Preview Dock: open-file dialog; selected file is auto-registered as root. */
+  previewChooseFile(): Promise<string | null>
+  /** Reveal any absolute path in the OS file manager (best-effort; not export-gated). */
+  revealPath(filePath: string): Promise<boolean>
+  /** Open a local file with the system default application. */
+  openPath(filePath: string): Promise<string>
   onEvent(callback: (event: UiSessionEvent) => void): () => void
   onPermission(callback: (request: PermissionRequest) => void): () => void
   onStatus(callback: (status: CliStatusUpdate) => void): () => void

@@ -3,7 +3,7 @@
 **Research session date:** 2026-07-16  
 **GUI target:** `j0988114582-ui/grok-build-control-center` (Windows Electron GUI, v0.4.1)  
 **Hard source policy:** primary evidence only from `github.com/xai-org`, `x.ai`, `docs.x.ai`.  
-**Local clones:** `C:\Users\111\Documents\grok-build-GUI\work\official-src\`
+**Local clones:** `C:\Users\demo\Documents\grok-build-GUI\work\official-src\`
 
 ---
 
