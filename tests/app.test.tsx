@@ -36,7 +36,7 @@ const createApiMock = (): GrokBridgeApi => ({
   }),
   respondPermission: vi.fn(), chooseDirectory: vi.fn(), chooseFiles: vi.fn(),
   savePasteImage: vi.fn().mockResolvedValue({ path: 'C:\\Users\\demo\\AppData\\Local\\Temp\\grok-build-gui-paste\\paste-1.png' }),
-  exportSession: vi.fn(), openTui: vi.fn(), openExternal: vi.fn(),
+  exportSession: vi.fn(), revealExport: vi.fn().mockResolvedValue(true), openTui: vi.fn(), openExternal: vi.fn(),
   notify: vi.fn().mockResolvedValue(false),
   onEvent: vi.fn().mockReturnValue(() => {}), onPermission: vi.fn().mockReturnValue(() => {}), onStatus: vi.fn().mockReturnValue(() => {})
 } as unknown as GrokBridgeApi)

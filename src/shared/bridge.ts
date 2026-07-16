@@ -37,6 +37,11 @@ export interface GrokBridgeApi {
   /** Save a clipboard image into %TEMP%/grok-build-gui-paste and return its absolute path. */
   savePasteImage(payload: SavePasteImageRequest): Promise<SavePasteImageResult>
   exportSession(sessionId: string): Promise<string | null>
+  /**
+   * Reveal an export path in the OS file manager.
+   * Main only accepts paths registered from a successful export in this process.
+   */
+  revealExport(filePath: string): Promise<boolean>
   openTui(cwd: string): Promise<void>
   openExternal(url: string): Promise<void>
   /** OS notification (suppressed when the main window is focused). */

@@ -28,6 +28,7 @@ const api: GrokBridgeApi = {
   chooseFiles: () => ipcRenderer.invoke('dialog:files'),
   savePasteImage: (payload) => ipcRenderer.invoke('paste:save-image', payload),
   exportSession: (sessionId) => ipcRenderer.invoke('grok:export', sessionId),
+  revealExport: (filePath) => ipcRenderer.invoke('grok:export-reveal', filePath),
   openTui: (cwd) => ipcRenderer.invoke('grok:tui', cwd),
   openExternal: (url) => ipcRenderer.invoke('shell:external', url),
   notify: (payload) => ipcRenderer.invoke('app:notify', payload),

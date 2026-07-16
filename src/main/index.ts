@@ -31,6 +31,7 @@ import {
   selectPasteFilesToDelete
 } from '../shared/paste-image'
 import type { AppSettings, CliStatus, PromptBlock } from '../shared/types'
+import { assertRevealAllowed, ExportPathAllowlist } from '../shared/export-reveal'
 
 const pasteImageDirectory = (): string => path.join(tmpdir(), PASTE_IMAGE_DIR_NAME)
 
@@ -309,14 +310,21 @@ function registerIpc(): void {
     await writeFile(filePath, buffer)
     return { path: filePath }
   })
+  const exportAllowlist = new ExportPathAllowlist()
   ipcMain.handle('grok:export', async (_event, sessionId: string) => {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) throw new Error('Invalid session id')
     const chosen = await dialog.showSaveDialog(mainWindow!, { defaultPath: `grok-${sessionId}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] })
     if (chosen.canceled || !chosen.filePath) return null
     return lifecycleOperation.runShared('Grok 對話匯出', async () => {
       await execFileAsync(settings().grokExecutable, ['export', sessionId, chosen.filePath!], { windowsHide: true, timeout: 30_000 })
-      return chosen.filePath
+      // F1: only paths from successful export may later be revealed.
+      return exportAllowlist.register(chosen.filePath!)
     })
+  })
+  ipcMain.handle('grok:export-reveal', async (_event, filePath: string) => {
+    const allowed = assertRevealAllowed(exportAllowlist, filePath)
+    shell.showItemInFolder(allowed)
+    return true
   })
   ipcMain.handle('grok:tui', async (_event, cwd: string) => {
     const child = spawn('wt.exe', ['new-tab', '--startingDirectory', cwd, settings().grokExecutable, '--cwd', cwd], { detached: true, stdio: 'ignore', windowsHide: false, shell: false })
