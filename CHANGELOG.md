@@ -18,6 +18,7 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 ### Added
 
 - Clipboard paste fallback when ACP does not advertise image support: save to `%TEMP%\grok-build-gui-paste\` and insert the absolute path into the draft (path chip + notice; no auto “請讀取此圖” phrase).
+- Pre-decode paste size gate, optional magic-byte check, and automatic cleanup of paste files older than 7 days (on save and app start).
 - UI regression locks for permission-mode busy states, YOLO confirm, pin group, batch delete, sidebar reopen, and paste-path behavior.
 
 ### Changed

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { execFile, spawn } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -22,8 +22,43 @@ import {
 import { listLocalSessions, readSessionUsage } from './session-index'
 import { createDefaultSettings, normalizeSettings } from '../shared/settings'
 import { normalizeBilling } from '../shared/billing'
-import { extensionForImageMime, PASTE_IMAGE_MAX_BYTES } from '../shared/paste-image'
+import {
+  looksLikeImageBuffer,
+  PASTE_IMAGE_DIR_NAME,
+  PASTE_IMAGE_MAX_AGE_MS,
+  PASTE_IMAGE_MAX_BYTES,
+  preparePasteImagePayload,
+  selectPasteFilesToDelete
+} from '../shared/paste-image'
 import type { AppSettings, CliStatus, PromptBlock } from '../shared/types'
+
+const pasteImageDirectory = (): string => path.join(tmpdir(), PASTE_IMAGE_DIR_NAME)
+
+/** Best-effort prune of aged paste files; never throws to callers. */
+export async function cleanupPasteImageDirectory(
+  directory = pasteImageDirectory(),
+  nowMs = Date.now(),
+  maxAgeMs = PASTE_IMAGE_MAX_AGE_MS
+): Promise<number> {
+  try {
+    const names = await readdir(directory)
+    const entries = await Promise.all(names.map(async (name) => {
+      try {
+        const info = await stat(path.join(directory, name))
+        return { name, mtimeMs: info.mtimeMs }
+      } catch {
+        return null
+      }
+    }))
+    const doomed = selectPasteFilesToDelete(entries.filter((item): item is { name: string; mtimeMs: number } => item !== null), nowMs, maxAgeMs)
+    await Promise.all(doomed.map(async (name) => {
+      try { await unlink(path.join(directory, name)) } catch { /* ignore single-file failures */ }
+    }))
+    return doomed.length
+  } catch {
+    return 0
+  }
+}
 
 const execFileAsync = promisify(execFile)
 const defaults = createDefaultSettings(homedir())
@@ -238,21 +273,22 @@ function registerIpc(): void {
     if (!payload || typeof payload.mimeType !== 'string' || typeof payload.data !== 'string') {
       throw new Error('無效的貼圖資料')
     }
-    const ext = extensionForImageMime(payload.mimeType)
-    if (!ext) throw new Error(`不支援的圖片格式：${payload.mimeType}`)
-    // Strip accidental data-URL prefix if a caller ever forwards one.
-    const raw = payload.data.includes(',') ? payload.data.slice(payload.data.indexOf(',') + 1) : payload.data
+    // Pre-decode size gate lives in preparePasteImagePayload (no huge Buffer.from for oversize pastes).
+    const prepared = preparePasteImagePayload(payload.mimeType, payload.data, PASTE_IMAGE_MAX_BYTES)
     let buffer: Buffer
     try {
-      buffer = Buffer.from(raw, 'base64')
+      buffer = Buffer.from(prepared.rawBase64, 'base64')
     } catch {
       throw new Error('貼圖資料解碼失敗')
     }
     if (!buffer.length) throw new Error('貼圖資料為空')
     if (buffer.length > PASTE_IMAGE_MAX_BYTES) throw new Error('貼圖超過 20MB 上限')
-    const directory = path.join(tmpdir(), 'grok-build-gui-paste')
+    if (!looksLikeImageBuffer(buffer, prepared.ext)) throw new Error('貼圖內容與宣告格式不符')
+    const directory = pasteImageDirectory()
     await mkdir(directory, { recursive: true })
-    const filePath = path.join(directory, `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`)
+    // Opportunistic cleanup of aged pastes (does not block on failure).
+    void cleanupPasteImageDirectory(directory)
+    const filePath = path.join(directory, `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${prepared.ext}`)
     await writeFile(filePath, buffer)
     return { path: filePath }
   })
@@ -298,5 +334,10 @@ function createWindow(): void {
   else mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
 }
 
-app.whenReady().then(() => { registerIpc(); createWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() }) })
+app.whenReady().then(() => {
+  registerIpc()
+  void cleanupPasteImageDirectory()
+  createWindow()
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+})
 app.on('window-all-closed', () => { acpConnecting?.client.stop(); acpConnection.current?.stop(); if (process.platform !== 'darwin') app.quit() })
