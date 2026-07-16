@@ -218,6 +218,9 @@ function registerIpc(): void {
   ipcMain.handle('grok:session:create', async (_event, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => (await connectAcp()).createSession(cwd)))
   ipcMain.handle('grok:session:load', async (_event, sessionId: string, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => (await connectAcp()).loadSession(sessionId, cwd)))
   ipcMain.handle('grok:prompt', async (_event, sessionId: string, blocks: PromptBlock[]) => lifecycleOperation.runShared('Grok 工作', async () => (await connectAcp()).prompt(sessionId, blocks)))
+  // Interject must share the lifecycle pool so it can run while a prompt is in-flight; it never cancels.
+  ipcMain.handle('grok:interject', async (_event, sessionId: string, text: string, options?: { interjectionId?: string; content?: unknown[] }) =>
+    lifecycleOperation.runShared('Grok 工作', async () => (await connectAcp()).interject(sessionId, text, options)))
   ipcMain.handle('grok:cancel', async (_event, sessionId: string) => lifecycleOperation.runShared('Grok 工作', async () => (await connectAcp()).cancel(sessionId)))
   ipcMain.handle('grok:mode', async (_event, sessionId: string, modeId: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setMode(sessionId, modeId)))
   ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort)))

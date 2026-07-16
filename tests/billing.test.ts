@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { formatBillingReset, normalizeBilling, quotaAlertStorageKey, quotaLevel, selectCrossedQuotaThreshold } from '../src/shared/billing'
+import {
+  formatBillingReset,
+  normalizeBilling,
+  productUsagePercent,
+  quotaAlertStorageKey,
+  quotaLevel,
+  selectCrossedQuotaThreshold,
+  shouldShowUnifiedBillingNotice,
+  UNIFIED_BILLING_NOTICE
+} from '../src/shared/billing'
 import { BillingCache } from '../src/main/billing-cache'
 
 const sample = {
@@ -67,6 +76,25 @@ describe('billing presentation', () => {
     expect(selectCrossedQuotaThreshold(79, 82, new Set())).toBe(80)
     expect(selectCrossedQuotaThreshold(90, 97, new Set([80]))).toBe(95)
     expect(selectCrossedQuotaThreshold(96, 97, new Set([80, 95]))).toBeNull()
+  })
+
+  it('shows the unified weekly notice only when all three fixed products lack data (P1-3)', () => {
+    expect(shouldShowUnifiedBillingNotice({ productUsage: [] })).toBe(true)
+    expect(shouldShowUnifiedBillingNotice({
+      productUsage: [{ product: 'GrokBuild', usagePercent: 50 }]
+    })).toBe(false)
+    expect(shouldShowUnifiedBillingNotice({
+      productUsage: [
+        { product: 'GrokBuild', usagePercent: 50 },
+        { product: 'GrokImagine', usagePercent: 23 },
+        { product: 'Api', usagePercent: 6 }
+      ]
+    })).toBe(false)
+    expect(productUsagePercent({ productUsage: [{ product: 'GrokBuild', usagePercent: 50 }] }, 'GrokImagine')).toBeUndefined()
+    expect(UNIFIED_BILLING_NOTICE).toContain('統一週額度')
+    expect(UNIFIED_BILLING_NOTICE).toContain('Build')
+    expect(UNIFIED_BILLING_NOTICE).toContain('Imagine（Image）')
+    expect(UNIFIED_BILLING_NOTICE).toContain('API')
   })
 })
 

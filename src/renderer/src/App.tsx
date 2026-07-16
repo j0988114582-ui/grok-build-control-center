@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import {
   Activity, Archive, Bot, Check, ChevronDown, ChevronRight, CircleAlert, Command, Cpu, FilePlus2,
-  FolderOpen, Gauge, Keyboard, ListTodo, LoaderCircle, Moon, Paperclip, PanelLeft, PanelLeftClose, Pencil, Pin, Play, Search, Send,
+  FolderOpen, Gauge, Keyboard, ListTodo, LoaderCircle, MessageSquare, Moon, Paperclip, PanelLeft, PanelLeftClose, Pencil, Pin, Play, Search, Send,
   Settings, Square, Sun, TerminalSquare, Trash2, UserRound, Wrench, X, Zap
 } from 'lucide-react'
 import type { SelectedFile } from '../../shared/bridge'
@@ -14,6 +14,12 @@ import { selectedFilesToPrompt } from '../../shared/attachments'
 import { DEFAULT_SHORTCUTS, commandForEvent, findShortcutConflicts } from '../../shared/shortcuts'
 import { sessionReducer } from '../../shared/session-state'
 import { quotaAlertStorageKey, selectCrossedQuotaThreshold } from '../../shared/billing'
+import {
+  INTERJECT_QUEUED_NOTICE,
+  INTERJECT_UNSUPPORTED_NOTICE,
+  isMethodNotFoundError,
+  type InterjectUiState
+} from '../../shared/interject'
 import { QuotaRings } from './components/QuotaRings'
 import { ModelPicker } from './components/ModelPicker'
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette'
@@ -175,6 +181,9 @@ export function App(): React.JSX.Element {
   const [yoloBusy, setYoloBusy] = useState(false)
   const [loadingSessionIds, setLoadingSessionIds] = useState<string[]>([])
   const [pastePathChip, setPastePathChip] = useState<string | null>(null)
+  /** Mid-turn interjection lifecycle (queued → cleared on turn end / cancel discard). */
+  const [interjectState, setInterjectState] = useState<InterjectUiState>(null)
+  const [interjectBusy, setInterjectBusy] = useState(false)
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [usage, setUsage] = useState<SessionUsage | null>(null)
@@ -204,6 +213,7 @@ export function App(): React.JSX.Element {
   const permissionReturnFocusRef = useRef<HTMLElement | null>(null)
   const setupReturnFocusRef = useRef<HTMLElement | null>(null)
   const deletingSessionsRef = useRef(false)
+  const cancelActiveTurnRef = useRef<(sessionId: string) => Promise<void>>(async () => {})
   followTailRef.current = followTail
   activeIdRef.current = active?.id ?? null
 
@@ -314,6 +324,9 @@ export function App(): React.JSX.Element {
         setRunningMap((current) => ({ ...current, [event.sessionId]: event.status === 'running' }))
         if (event.status !== 'running') {
           setPermissions((current) => current.filter((item) => item.sessionId !== event.sessionId))
+          // P1-1: no drain evidence via SDK closed union — clear queued without claiming delivered.
+          setInterjectState((current) =>
+            current?.status === 'queued' && current.sessionId === event.sessionId ? null : current)
           void refreshUsageRef.current(event.sessionId)
           void refreshSessionsRef.current()
           window.setTimeout(() => { void refreshBillingRef.current() }, 800)
@@ -386,7 +399,7 @@ export function App(): React.JSX.Element {
       }
       if (command === 'cancelTurn') {
         event.preventDefault()
-        if (running && active) void window.grokApi.cancel(active.id)
+        if (running && active) void cancelActiveTurnRef.current(active.id).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
         return
       }
       if (event.key === '?' && !editing && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); setPanel('shortcuts') }
@@ -713,13 +726,21 @@ export function App(): React.JSX.Element {
       setCollapsingSessionId(null)
     }
   }
-  const sendPrompt = async (): Promise<void> => {
-    if (!active || running) return
-    const sessionId = active.id
-    const text = drafts[sessionId]?.trim()
-    if (!text && !attachments.length) return
-    const blocks: PromptBlock[] = [...(text ? [{ type: 'text' as const, text }] : []), ...attachments]
-    const pendingAttachments = attachments
+  const discardQueuedInterject = (sessionId: string): void => {
+    // Clear queued UI claim immediately (cancel discards agent-side buffer). No "delivered" claim.
+    setInterjectState((current) =>
+      current?.status === 'queued' && current.sessionId === sessionId ? null : current)
+  }
+
+  const cancelActiveTurn = async (sessionId: string): Promise<void> => {
+    // Cancel discards any buffered interjection on the agent side; clear local "queued" claim.
+    discardQueuedInterject(sessionId)
+    await window.grokApi.cancel(sessionId)
+  }
+  cancelActiveTurnRef.current = cancelActiveTurn
+
+  const dispatchPrompt = (sessionId: string, text: string | undefined, pendingAttachments: PromptBlock[]): void => {
+    const blocks: PromptBlock[] = [...(text ? [{ type: 'text' as const, text }] : []), ...pendingAttachments]
     setDrafts((current) => ({ ...current, [sessionId]: '' }))
     setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
     void window.grokApi.sendPrompt(sessionId, blocks).catch((error) => {
@@ -733,6 +754,68 @@ export function App(): React.JSX.Element {
       setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...pendingAttachments, ...(current[sessionId] ?? [])] }))
     })
   }
+
+  const sendPrompt = async (): Promise<void> => {
+    if (!active || running) return
+    const sessionId = active.id
+    const text = drafts[sessionId]?.trim()
+    if (!text && !attachments.length) return
+    dispatchPrompt(sessionId, text, attachments)
+  }
+
+  /** F-INT-2: queue mid-turn guidance without cancelling. */
+  const sendInterject = async (): Promise<void> => {
+    if (!active || !running || interjectBusy) return
+    const sessionId = active.id
+    const text = drafts[sessionId]?.trim()
+    if (!text) return
+    setInterjectBusy(true)
+    try {
+      const result = await window.grokApi.interject(sessionId, text)
+      if (result.status === 'queued') {
+        setInterjectState({ status: 'queued', sessionId, text })
+        setNotice(INTERJECT_QUEUED_NOTICE)
+        setDrafts((current) => ({ ...current, [sessionId]: '' }))
+      }
+    } catch (error) {
+      // Method not found → degrade notice only; never fall back to cancel.
+      if (isMethodNotFoundError(error)) setNotice(INTERJECT_UNSUPPORTED_NOTICE)
+      else setNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      setInterjectBusy(false)
+    }
+  }
+
+  /** F-INT-3: cancel active turn then send a fresh prompt (separate control from interject). */
+  const doThisNow = async (): Promise<void> => {
+    if (!active || !running || interjectBusy) return
+    const sessionId = active.id
+    const text = drafts[sessionId]?.trim()
+    if (!text && !attachments.length) return
+    const pendingAttachments = attachments
+    setInterjectBusy(true)
+    discardQueuedInterject(sessionId)
+    setDrafts((current) => ({ ...current, [sessionId]: '' }))
+    setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
+    try {
+      await window.grokApi.cancel(sessionId)
+      const blocks: PromptBlock[] = [...(text ? [{ type: 'text' as const, text }] : []), ...pendingAttachments]
+      setRunningMap((current) => ({ ...current, [sessionId]: true }))
+      await window.grokApi.sendPrompt(sessionId, blocks)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+      setRunningMap((current) => ({ ...current, [sessionId]: false }))
+      setDrafts((current) => {
+        const newer = current[sessionId] ?? ''
+        const restored = text && newer.trim() ? `${text}\n${newer}` : newer || text || ''
+        return { ...current, [sessionId]: restored }
+      })
+      setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...pendingAttachments, ...(current[sessionId] ?? [])] }))
+    } finally {
+      setInterjectBusy(false)
+    }
+  }
+
   const chooseFiles = async (): Promise<void> => { try { const files = await window.grokApi.chooseFiles(); addSelectedFiles(files) } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) } }
   const addSelectedFiles = (files: SelectedFile[]): void => { if (!active) return; const sessionId = active.id; const { blocks, paths } = selectedFilesToPrompt(files, caps.promptCapabilities.image === true); setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), ...blocks] })); if (paths) setDrafts((current) => ({ ...current, [sessionId]: `${current[sessionId] ?? ''}${current[sessionId] ? '\n' : ''}${paths}` })) }
   const jumpToLatest = (): void => { virtuoso.current?.scrollToIndex({ index: Math.max(0, activeEvents.length - 1), align: 'end', behavior: 'smooth' }); setFollowTail(true); setUnread(0) }
@@ -741,7 +824,13 @@ export function App(): React.JSX.Element {
   const composerKey = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.nativeEvent.isComposing) return
     const command = commandForEvent(settings.shortcuts, event, ['composer'])
-    if (command === 'sendPrompt') { event.preventDefault(); void sendPrompt(); return }
+    if (command === 'sendPrompt') {
+      event.preventDefault()
+      // While a turn is running, Enter queues an interjection (never cancels).
+      if (running) void sendInterject()
+      else void sendPrompt()
+      return
+    }
     if (command === 'newline' && active) {
       event.preventDefault()
       const sessionId = active.id
@@ -793,7 +882,8 @@ export function App(): React.JSX.Element {
     setSettings(next)
     void window.grokApi.saveSettings(next).then(setSettings)
   }
-  const readClipboardImage = (file: File): Promise<{ data: string; mimeType: string } | null> => new Promise((resolve) => {
+  const readFileAsImage = (file: File): Promise<{ data: string; mimeType: string } | null> => new Promise((resolve) => {
+    if (!file.type.startsWith('image/') && file.type !== '') { resolve(null); return }
     const reader = new FileReader()
     reader.onload = () => {
       const result = String(reader.result ?? '')
@@ -805,15 +895,17 @@ export function App(): React.JSX.Element {
     reader.onabort = () => resolve(null)
     reader.readAsDataURL(file)
   })
-  const paste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
-    const files = [...event.clipboardData.files]
+
+  /** Shared paste / drag-drop image pipeline (path-only when ACP image capability is false). */
+  const ingestImageFiles = (files: File[], source: 'paste' | 'drop'): void => {
     if (!files.length || !active) return
     const sessionId = active.id
-    event.preventDefault()
-    // Future-compatible: when ACP advertises image support, keep embedded image blocks.
+    const imageFiles = files.filter((file) => file.type.startsWith('image/') || (!file.type && source === 'paste'))
+    if (!imageFiles.length) return
+
     if (caps.promptCapabilities.image === true) {
-      void Promise.all(files.map(async (file): Promise<PromptBlock | null> => {
-        const image = await readClipboardImage(file)
+      void Promise.all(imageFiles.map(async (file): Promise<PromptBlock | null> => {
+        const image = await readFileAsImage(file)
         if (!image) return null
         return { type: 'image', data: image.data, mimeType: image.mimeType, name: file.name || undefined }
       })).then((blocks) => {
@@ -823,12 +915,12 @@ export function App(): React.JSX.Element {
       })
       return
     }
-    // Default path (image:false): save to %TEMP%\grok-build-gui-paste and insert absolute path only.
+
     void (async () => {
       const paths: string[] = []
       let failed = 0
-      for (const file of files) {
-        const image = await readClipboardImage(file)
+      for (const file of imageFiles) {
+        const image = await readFileAsImage(file)
         if (!image) { failed += 1; continue }
         try {
           const saved = await window.grokApi.savePasteImage(image)
@@ -838,7 +930,9 @@ export function App(): React.JSX.Element {
         }
       }
       if (!paths.length) {
-        setNotice(failed ? '貼圖儲存失敗，草稿未變更' : '無法讀取剪貼簿圖片')
+        setNotice(failed
+          ? (source === 'drop' ? '拖放圖片儲存失敗，草稿未變更' : '貼圖儲存失敗，草稿未變更')
+          : (source === 'drop' ? '無法讀取拖放圖片' : '無法讀取剪貼簿圖片'))
         return
       }
       setDrafts((current) => {
@@ -851,6 +945,26 @@ export function App(): React.JSX.Element {
         ? `已改以本機路徑附上（ACP 目前不支援內嵌圖片）；${failed} 張失敗`
         : '已改以本機路徑附上（ACP 目前不支援內嵌圖片）')
     })()
+  }
+
+  const paste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = [...event.clipboardData.files]
+    if (!files.length || !active) return
+    event.preventDefault()
+    ingestImageFiles(files, 'paste')
+  }
+
+  const onComposerDragOver = (event: React.DragEvent<HTMLElement>): void => {
+    if (![...event.dataTransfer.types].includes('Files')) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const onComposerDrop = (event: React.DragEvent<HTMLElement>): void => {
+    const files = [...event.dataTransfer.files]
+    if (!files.length || !active) return
+    event.preventDefault()
+    ingestImageFiles(files, 'drop')
   }
   const dismissPastePathChip = (): void => {
     if (!active || !pastePathChip) { setPastePathChip(null); return }
@@ -885,7 +999,7 @@ export function App(): React.JSX.Element {
     <CursorFX enabled={settings.effects.cursor} reducedMotion={settings.effects.reducedMotion} />
     <header className="titlebar"><div className="brand-mark"><span>G</span></div><strong>GROK BUILD</strong><i>DESKTOP WORKBENCH</i><div className="drag-region" />
       <QuotaRings billing={billing} unavailable={billingUnavailable} />
-      {active && <div className="usage-pill" title={`Context 額度${usage?.turnCount !== undefined ? ` · ${usage.turnCount} 回合` : ''}${usage?.toolCallCount !== undefined ? ` · ${usage.toolCallCount} 次工具` : ''} · 訂閱用量請至 grok.com 查看`}><Gauge /><span>{usagePercent !== undefined ? `${usagePercent}%` : '—'}</span><div className="usage-bar"><i className={usageLevel} style={{ width: `${Math.min(100, usagePercent ?? 0)}%` }} /></div><em>{formatTokens(usage?.contextTokensUsed)} / {formatTokens(usageTotal)}</em></div>}
+      {active && <div className="usage-pill" data-context-zone="session" aria-label="Context 視窗用量" title={`Context 視窗（本 session，非訂閱週額度）${usage?.turnCount !== undefined ? ` · ${usage.turnCount} 回合` : ''}${usage?.toolCallCount !== undefined ? ` · ${usage.toolCallCount} 次工具` : ''}`}><Gauge /><b className="usage-pill-label">Context</b><span>{usagePercent !== undefined ? `${usagePercent}%` : '—'}</span><div className="usage-bar"><i className={usageLevel} style={{ width: `${Math.min(100, usagePercent ?? 0)}%` }} /></div><em>{formatTokens(usage?.contextTokensUsed)} / {formatTokens(usageTotal)}</em></div>}
       <label title={permissionModeTitle}><select aria-label="權限模式" value={permissionMode} disabled={permissionControlsLocked} onChange={(event) => requestPermissionMode(event.target.value as AgentPermissionMode)}><option value="ask">每次詢問</option><option value="always-approve">一律核准（YOLO）</option></select></label>
       {status.found && <button className="account-pill" aria-label="切換 Grok 帳號" title={running ? '請先停止目前執行中的回合' : '切換 Grok 帳號'} disabled={lifecycleBusy || running} onClick={() => openSetupDialog('account')}><UserRound />切換帳號</button>}
       <button className={`status-pill ${status.connected ? 'online' : ''}`} disabled={lifecycleBusy} onClick={() => { if (status.found) void connect(); else openSetupDialog('install') }}><span />{status.found ? `Grok ${status.version ?? ''}` : 'CLI not found'} · {status.connected ? 'Connected' : status.found ? 'Connect' : 'Setup'}</button></header>
@@ -918,7 +1032,34 @@ export function App(): React.JSX.Element {
           <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{caps.modes.length > 0 && <select aria-label="Mode" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>Mode</option>{caps.modes.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}</select>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) setNotice(`已匯出到 ${path}`) }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
           <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
-          <footer className="composer-wrap"><div className="composer-status">{running ? <><LoaderCircle className="spin" />Grok 正在執行工具或生成回覆</> : lifecycleBusy || sessionLoading ? <><LoaderCircle className="spin" />系統忙碌中（連線或載入）</> : <><span className="ready-dot" />準備就緒</>}<span>{shortcutLabel('sendPrompt')} 傳送 · {shortcutLabel('newline')} 換行 · {shortcutLabel('cancelTurn')} 取消</span></div>{attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}{pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip}><Paperclip /><em>{pastePathChip}</em><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}<div className="composer"><button className="attach-button" aria-label="加入檔案" onClick={() => void chooseFiles()}><Paperclip /></button><textarea value={drafts[active.id] ?? ''} onChange={(event) => setDrafts((current) => ({ ...current, [active.id]: event.target.value }))} onKeyDown={composerKey} onPaste={paste} placeholder="交給 Grok 一個任務，或貼上圖片與檔案路徑…" rows={3} />{running ? <button className="stop-button" data-nova-tone="danger" onClick={() => void window.grokApi.cancel(active.id)}><Square />停止</button> : <button className="send-button" data-magnetic data-nova-tone="primary" onClick={() => void sendPrompt()}><Send />送出</button>}</div></footer>
+          <footer className="composer-wrap" onDragOver={onComposerDragOver} onDrop={onComposerDrop}>
+            <div className="composer-status">
+              {running
+                ? <><LoaderCircle className="spin" />Grok 正在執行工具或生成回覆{interjectState?.status === 'queued' && interjectState.sessionId === active.id ? <em className="interject-queued" data-testid="interject-status"> · {INTERJECT_QUEUED_NOTICE}</em> : null}</>
+                : lifecycleBusy || sessionLoading
+                  ? <><LoaderCircle className="spin" />系統忙碌中（連線或載入）</>
+                  : <><span className="ready-dot" />準備就緒</>}
+              <span>{running ? `${shortcutLabel('sendPrompt')} 插話 · ${shortcutLabel('cancelTurn')} 停止` : `${shortcutLabel('sendPrompt')} 傳送 · ${shortcutLabel('newline')} 換行 · ${shortcutLabel('cancelTurn')} 取消`}</span>
+            </div>
+            {attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}
+            {pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip}><Paperclip /><em>{pastePathChip}</em><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}
+            <div className="composer">
+              <button className="attach-button" aria-label="加入檔案" onClick={() => void chooseFiles()}><Paperclip /></button>
+              <textarea
+                value={drafts[active.id] ?? ''}
+                onChange={(event) => setDrafts((current) => ({ ...current, [active.id]: event.target.value }))}
+                onKeyDown={composerKey}
+                onPaste={paste}
+                placeholder={running ? '回合進行中可輸入插話，或改用「立刻改做」…' : '交給 Grok 一個任務，或貼上／拖放圖片與檔案路徑…'}
+                rows={3}
+              />
+              {running ? <div className="composer-actions running">
+                <button type="button" className="interject-button" data-testid="interject-button" title="在下一個安全點插入指示（不取消目前回合）" disabled={interjectBusy || !(drafts[active.id] ?? '').trim()} onClick={() => void sendInterject()}><MessageSquare />插話</button>
+                <button type="button" className="do-now-button" data-testid="do-this-now-button" title="取消目前回合並立刻送出新指示" disabled={interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => void doThisNow()}><Zap />立刻改做</button>
+                <button type="button" className="stop-button" data-nova-tone="danger" data-testid="stop-button" onClick={() => void cancelActiveTurn(active.id).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Square />停止</button>
+              </div> : <button className="send-button" data-magnetic data-nova-tone="primary" onClick={() => void sendPrompt()}><Send />送出</button>}
+            </div>
+          </footer>
         </>}
       </main>
       {panel === 'settings' && <SettingsPanel settings={settings} onClose={() => setPanel('none')} onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none') })} />}

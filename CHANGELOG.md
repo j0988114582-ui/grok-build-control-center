@@ -13,6 +13,28 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
 
+## [0.5.0] - 2026-07-16
+
+### Added
+
+- Mid-turn **插話** via ACP `_x.ai/interject` (never cancels the active turn); status copy「已排入，下一個安全點生效」.
+- **立刻改做** control: `session/cancel` then a fresh `session/prompt` (separate from interject).
+- Composer stays usable while a turn is `running` (type, paste, drag-drop, interject).
+- Unified weekly quota notice when Build／Imagine（Image）／API product breakdown is absent (not a read failure).
+- Windows process-tree termination on disconnect/quit/executable swap (`taskkill /PID /T /F`).
+- Spawn env `GROK_CLIENT_VERSION` set to the app version.
+- Drag-and-drop images into the composer use the same paste → temp path pipeline; path chip retained.
+
+### Changed
+
+- Context window pill is explicitly labeled **Context** and separated from subscription quota rings.
+- Quota popover header wording clarifies 訂閱週額度 vs session context.
+
+### Notes
+
+- Thumbnail preview for path chips deferred to 0.5.1 (path chip kept).
+- Session cancel remains ACP-level and does **not** kill the grok process tree.
+
 ## [0.4.1] - 2026-07-16
 
 ### Added

@@ -25,7 +25,7 @@ const createApiMock = (): GrokBridgeApi => ({
   }),
   listSessions: vi.fn().mockResolvedValue([{ id: 's1', cwd: 'C:\\repo', title: 'Fix tests', updatedAt: '2026-07-11T00:00:00Z' }]),
   getSettings: vi.fn().mockResolvedValue(createDefaultSettings('C:\\Users\\demo')),
-  saveSettings: vi.fn().mockImplementation(async (settings) => settings), createSession: vi.fn(), sendPrompt: vi.fn(), cancel: vi.fn(), setMode: vi.fn(), setModel: vi.fn(), setConfigOption: vi.fn(),
+  saveSettings: vi.fn().mockImplementation(async (settings) => settings), createSession: vi.fn(), sendPrompt: vi.fn(), interject: vi.fn().mockResolvedValue({ status: 'queued' }), cancel: vi.fn(), setMode: vi.fn(), setModel: vi.fn(), setConfigOption: vi.fn(),
   loadSession: vi.fn().mockResolvedValue({ sessionId: 's1' }),
   deleteSession: vi.fn().mockResolvedValue(true),
   getUsage: vi.fn().mockResolvedValue({ sessionId: 's1', contextTokensUsed: 186783, contextWindowTokens: 500000, contextWindowUsage: 37, turnCount: 7 }),
@@ -786,5 +786,130 @@ describe('App', () => {
     expect(await screen.findByText(/貼圖儲存失敗/)).toBeInTheDocument()
     expect(composer).toHaveValue('保留這段')
     expect(screen.queryByRole('button', { name: '移除貼圖路徑' })).not.toBeInTheDocument()
+  })
+
+  // --- v0.5.0 interject / do-this-now ---
+
+  it('F-INT: keeps composer usable while running and interject does not cancel', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.interject = vi.fn().mockResolvedValue({ status: 'queued' })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
+
+    const composer = await screen.findByPlaceholderText(/回合進行中可輸入插話/)
+    expect(composer).not.toBeDisabled()
+    await user.type(composer, '改做這件事')
+    await user.click(screen.getByTestId('interject-button'))
+
+    await waitFor(() => expect(api.interject).toHaveBeenCalledWith('s1', '改做這件事'))
+    expect(api.cancel).not.toHaveBeenCalled()
+    expect(await screen.findByText('已排入，下一個安全點生效')).toBeInTheDocument()
+    expect(screen.getByTestId('interject-status')).toHaveTextContent('已排入，下一個安全點生效')
+  })
+
+  it('F-INT-3: 立刻改做 cancels then sends a new prompt', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.cancel = vi.fn().mockResolvedValue(undefined)
+    api.sendPrompt = vi.fn().mockResolvedValue(undefined)
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
+    const composer = await screen.findByPlaceholderText(/回合進行中可輸入插話/)
+    await user.type(composer, '立刻換任務')
+    await user.click(screen.getByTestId('do-this-now-button'))
+
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith('s1'))
+    await waitFor(() => expect(api.sendPrompt).toHaveBeenCalledWith('s1', [{ type: 'text', text: '立刻換任務' }]))
+    expect(api.interject).not.toHaveBeenCalled()
+  })
+
+  it('T-INT-3: method not found shows degrade notice and never cancels', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.interject = vi.fn().mockRejectedValue(new Error('Method not found'))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
+    const composer = await screen.findByPlaceholderText(/回合進行中可輸入插話/)
+    await user.type(composer, 'hello')
+    await user.click(screen.getByTestId('interject-button'))
+
+    expect(await screen.findByText(/不支援插話/)).toBeInTheDocument()
+    expect(api.cancel).not.toHaveBeenCalled()
+  })
+
+  it('T-INT-5: cancel after queued interject clears the queued status', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.interject = vi.fn().mockResolvedValue({ status: 'queued' })
+    api.cancel = vi.fn().mockResolvedValue(undefined)
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
+    const composer = await screen.findByPlaceholderText(/回合進行中可輸入插話/)
+    await user.type(composer, 'queued text')
+    await user.click(screen.getByTestId('interject-button'))
+    expect(await screen.findByTestId('interject-status')).toBeInTheDocument()
+
+    await user.click(screen.getByTestId('stop-button'))
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith('s1'))
+    await waitFor(() => expect(screen.queryByTestId('interject-status')).not.toBeInTheDocument())
+  })
+
+  it('T-MED-1: drag-drop image uses the same paste save path pipeline', async () => {
+    const api = createApiMock()
+    const savedPath = 'C:\\Users\\demo\\AppData\\Local\\Temp\\grok-build-gui-paste\\paste-drop.png'
+    api.savePasteImage = vi.fn().mockResolvedValue({ path: savedPath })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    const composer = screen.getByPlaceholderText(/交給 Grok 一個任務/) as HTMLTextAreaElement
+    const wrap = composer.closest('.composer-wrap') as HTMLElement
+    const file = new File([Uint8Array.from([137, 80, 78, 71])], 'drop.png', { type: 'image/png' })
+
+    await act(async () => {
+      fireEvent.drop(wrap, {
+        dataTransfer: {
+          files: [file],
+          types: ['Files'],
+          items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }]
+        }
+      })
+    })
+
+    await waitFor(() => expect(api.savePasteImage).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(composer).toHaveValue(savedPath))
+    expect(screen.getByRole('button', { name: '移除貼圖路徑' })).toBeInTheDocument()
+  })
+
+  it('T-RT-6: context pill is labeled separately from subscription quota rings', async () => {
+    window.grokApi = createApiMock()
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByText('Fix tests'))
+    expect(screen.getByLabelText('Context 視窗用量')).toBeInTheDocument()
+    expect(screen.getByTestId('quota-reactor')).toHaveAttribute('data-billing-zone', 'subscription')
+    expect(screen.getByLabelText('訂閱週額度摘要')).toBeInTheDocument()
   })
 })

@@ -23,6 +23,8 @@ export interface GrokBridgeApi {
   getUsage(sessionId: string): Promise<SessionUsage | null>
   getBilling(): Promise<BillingInfo | null>
   sendPrompt(sessionId: string, blocks: PromptBlock[]): Promise<void>
+  /** Mid-turn interjection via `_x.ai/interject`. Never cancels the turn. */
+  interject(sessionId: string, text: string, options?: { interjectionId?: string; content?: unknown[] }): Promise<{ status: 'queued' }>
   cancel(sessionId: string): Promise<void>
   setMode(sessionId: string, modeId: string): Promise<void>
   setModel(sessionId: string, modelId: string, reasoningEffort?: string): Promise<void>

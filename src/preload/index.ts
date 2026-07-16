@@ -16,6 +16,7 @@ const api: GrokBridgeApi = {
   getUsage: (sessionId) => ipcRenderer.invoke('grok:usage', sessionId),
   getBilling: () => ipcRenderer.invoke('grok:billing'),
   sendPrompt: (sessionId, blocks) => ipcRenderer.invoke('grok:prompt', sessionId, blocks),
+  interject: (sessionId, text, options) => ipcRenderer.invoke('grok:interject', sessionId, text, options),
   cancel: (sessionId) => ipcRenderer.invoke('grok:cancel', sessionId),
   setMode: (sessionId, modeId) => ipcRenderer.invoke('grok:mode', sessionId, modeId),
   setModel: (sessionId, modelId, reasoningEffort) => ipcRenderer.invoke('grok:model', sessionId, modelId, reasoningEffort),

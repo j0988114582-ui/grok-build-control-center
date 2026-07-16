@@ -45,6 +45,30 @@ export function normalizeBilling(value: unknown): BillingInfo | null {
 
 export type QuotaLevel = 'normal' | 'warn' | 'danger'
 
+/** Fixed product rings shown in the reactor UI (never fabricate values for these). */
+export const FIXED_BILLING_PRODUCTS = ['GrokBuild', 'GrokImagine', 'Api'] as const
+export type FixedBillingProduct = (typeof FIXED_BILLING_PRODUCTS)[number]
+
+/**
+ * Traditional Chinese notice for unified weekly quota when product breakdown is absent.
+ * Shown only when all three fixed products lack data (P1-3) — never when partial products exist.
+ */
+export const UNIFIED_BILLING_NOTICE =
+  '此帳號為統一週額度，總用量已涵蓋 Build、Imagine（Image）、API。服務未提供分項百分比，故顯示「—」，並非讀取失敗。'
+
+export function productUsagePercent(billing: Pick<BillingInfo, 'productUsage'>, product: string): number | undefined {
+  return billing.productUsage.find((item) => item.product === product)?.usagePercent
+}
+
+/**
+ * Main unified-quota banner: only when GrokBuild, GrokImagine, and Api are all missing.
+ * Partial product data → show real % where present and — for missing; no main banner.
+ * Does not consult isUnifiedBillingUser alone — product presence wins (T-Billing-2).
+ */
+export function shouldShowUnifiedBillingNotice(billing: Pick<BillingInfo, 'productUsage'>): boolean {
+  return FIXED_BILLING_PRODUCTS.every((product) => productUsagePercent(billing, product) === undefined)
+}
+
 export function quotaLevel(percent: number): QuotaLevel {
   if (percent >= 95) return 'danger'
   if (percent >= 80) return 'warn'

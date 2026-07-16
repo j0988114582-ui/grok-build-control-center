@@ -12,8 +12,15 @@ import type {
 } from '@agentclientprotocol/sdk'
 import type { AgentCapabilities, ModelState, PermissionOption, PermissionRequest, PromptBlock, UiSessionEvent } from '../shared/types'
 import { normalizeAcpUpdate } from '../shared/event-adapter'
+import { buildInterjectParams, INTERJECT_METHOD, parseInterjectResult, type InterjectResult } from '../shared/interject'
 import { buildAgentArgs } from './grok-cli'
+import { killProcessTree } from './process-tree'
 import { selectPermissionOutcome } from './permissions'
+
+/** Env passed to the grok agent child so official telemetry can identify this host. */
+export function buildGrokSpawnEnv(clientVersion: string, baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...baseEnv, GROK_CLIENT_VERSION: clientVersion }
+}
 
 type RawCapabilities = {
   loadSession?: boolean
@@ -87,7 +94,12 @@ export class GrokAcpClient {
   async start(): Promise<AgentCapabilities> {
     if (this.connection) return this.capabilities
     this.exitNotified = false
-    this.child = spawn(this.executable, buildAgentArgs({ alwaysApprove: this.alwaysApprove }), { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+    this.child = spawn(this.executable, buildAgentArgs({ alwaysApprove: this.alwaysApprove }), {
+      shell: false,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: buildGrokSpawnEnv(this.clientVersion)
+    })
     this.child.stderr.setEncoding('utf8')
     this.child.stderr.on('data', (chunk: string) => {
       const trimmed = chunk.trim()
@@ -212,6 +224,16 @@ export class GrokAcpClient {
     return this.requireContext().request('_x.ai/billing', {})
   }
 
+  /**
+   * Queue a mid-turn interjection. Never cancels the active turn.
+   * Wire: `_x.ai/interject` (underscore prefix, same convention as billing).
+   */
+  async interject(sessionId: string, text: string, options?: { interjectionId?: string; content?: unknown[] }): Promise<InterjectResult> {
+    const params = buildInterjectParams(sessionId, text, options)
+    const response = await this.requireContext().request(INTERJECT_METHOD, params)
+    return parseInterjectResult(response)
+  }
+
   respondPermission(requestId: string, optionId: string): void {
     const pending = this.permissions.get(requestId)
     if (!pending) throw new Error('Permission request is no longer active')
@@ -223,9 +245,12 @@ export class GrokAcpClient {
   stop(): void {
     this.cancelPermissions()
     this.connection?.close()
-    this.child?.kill()
+    const pid = this.child?.pid
+    this.child = undefined
     this.connection = undefined
     this.context = undefined
+    // F-RT-1: kill the full process tree (taskkill /T /F on Windows). Not the same as session/cancel.
+    if (pid !== undefined) void killProcessTree(pid)
   }
 
   private requireContext(): acp.ClientContext {
