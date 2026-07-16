@@ -62,7 +62,8 @@ export function parseSessionUsage(sessionId: string, value: unknown): SessionUsa
     ...(number(source.contextWindowTokens) !== undefined ? { contextWindowTokens: number(source.contextWindowTokens) } : {}),
     ...(number(source.contextWindowUsage) !== undefined ? { contextWindowUsage: number(source.contextWindowUsage) } : {}),
     ...(number(source.turnCount) !== undefined ? { turnCount: number(source.turnCount) } : {}),
-    ...(number(source.toolCallCount) !== undefined ? { toolCallCount: number(source.toolCallCount) } : {})
+    ...(number(source.toolCallCount) !== undefined ? { toolCallCount: number(source.toolCallCount) } : {}),
+    ...(number(source.compactionCount) !== undefined ? { compactionCount: number(source.compactionCount) } : {})
   }
 }
 

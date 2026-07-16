@@ -86,6 +86,11 @@ import {
 import {
   probeSessionCapabilities
 } from '../../shared/session-capabilities'
+import {
+  formatInferredCompactSummary,
+  formatOfficialCompactTitle,
+  shouldEmitInferredCompact
+} from '../../shared/compact-infer'
 import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock,
   SessionSummary, SessionUsage, UiSessionEvent
@@ -135,7 +140,10 @@ const eventTitle = (event: Exclude<UiSessionEvent, { kind: 'message' } | { kind:
     case 'commands': return 'Commands updated'
     case 'mode': return `Mode · ${event.modeId}`
     case 'usage': return 'Context usage'
-    case 'compact': return 'Context compacted'
+    case 'compact':
+      return event.source === 'inferred'
+        ? '可能已壓縮上下文'
+        : formatOfficialCompactTitle(event.before, event.after)
     case 'retry': return `Retry ${event.attempt}/${event.maxRetries}`
     case 'unknown': return event.summary
   }
@@ -188,7 +196,19 @@ function EventCard({ event, query, preview }: { event: UiSessionEvent; query: st
       {event.kind === 'commands' && <p>{event.commands.length} commands available</p>}
       {event.kind === 'mode' && <p>Current mode: {event.modeId}</p>}
       {event.kind === 'usage' && <p>{event.used ?? '—'} / {event.size ?? '—'} tokens</p>}
-      {event.kind === 'compact' && <p>{event.before ?? '—'} → {event.after ?? '—'} tokens</p>}
+      {event.kind === 'compact' && (
+        <p>
+          {event.summary
+            ? event.summary
+            : event.source === 'inferred'
+              ? formatInferredCompactSummary({
+                  before: event.before,
+                  after: event.after,
+                  reason: 'token_drop'
+                })
+              : `${event.before ?? '—'} → ${event.after ?? '—'} tokens`}
+        </p>
+      )}
       {event.kind === 'retry' && <p>{event.reason}</p>}
     </div>}
   </article>
@@ -299,6 +319,12 @@ export function App(): React.JSX.Element {
   const [teamEnabled, setTeamEnabled] = useState(false)
   const [team, setTeam] = useState<AgentsTeamState>(() => emptyAgentsTeam())
   const [usage, setUsage] = useState<SessionUsage | null>(null)
+  /** Per-session last official (Scheme A) compact wall time — suppresses Fallback C double-notice. */
+  const lastOfficialCompactAtRef = useRef<Record<string, number>>({})
+  /** Per-session last inferred (Fallback C) episode — debounce spam. */
+  const lastInferredCompactAtRef = useRef<Record<string, number>>({})
+  /** Last usage sample per session for sharp-drop detection. */
+  const usageSampleRef = useRef<Record<string, SessionUsage>>({})
   const [billing, setBilling] = useState<BillingInfo | null>(null)
   const [billingUnavailable, setBillingUnavailable] = useState(false)
   const [errorPulse, setErrorPulse] = useState(0)
@@ -344,7 +370,36 @@ export function App(): React.JSX.Element {
   const refreshUsage = async (sessionId: string): Promise<void> => {
     try {
       const next = await window.grokApi.getUsage(sessionId)
+      if (!next) return
+      const previous = usageSampleRef.current[sessionId]
+      usageSampleRef.current[sessionId] = next
       if (activeIdRef.current === sessionId) setUsage(next)
+
+      // Fallback C: sharp signals.json drop without recent official compact → hedged notice.
+      const inferred = shouldEmitInferredCompact(previous, next, {
+        lastOfficialCompactAt: lastOfficialCompactAtRef.current[sessionId],
+        lastInferredEpisodeAt: lastInferredCompactAtRef.current[sessionId]
+      })
+      if (inferred) {
+        lastInferredCompactAtRef.current[sessionId] = Date.now()
+        const event: UiSessionEvent = {
+          id: `${sessionId}:compact:inferred:${Date.now()}`,
+          sessionId,
+          kind: 'compact',
+          before: inferred.before,
+          after: inferred.after,
+          summary: formatInferredCompactSummary(inferred),
+          source: 'inferred'
+        }
+        setEvents((current) => {
+          const prior = current[sessionId] ?? []
+          const reduced = sessionReducer(
+            { sessionId, events: prior, running: false, followTail: true, unread: 0 },
+            { type: 'event', event }
+          )
+          return { ...current, [sessionId]: reduced.events }
+        })
+      }
     } catch { /* usage 屬輔助資訊，讀不到不打斷操作 */ }
   }
   const refreshUsageRef = useRef(refreshUsage)
@@ -445,6 +500,9 @@ export function App(): React.JSX.Element {
       })
       if (event.kind === 'commands') setCaps((current) => ({ ...current, commands: event.commands }))
       if (event.kind === 'mode') setCaps((current) => ({ ...current, currentModeId: event.modeId }))
+      if (event.kind === 'compact' && event.source !== 'inferred') {
+        lastOfficialCompactAtRef.current[event.sessionId] = Date.now()
+      }
       if (event.kind === 'error') setErrorPulse((value) => value + 1)
       if (event.kind === 'turn') {
         setRunningMap((current) => ({ ...current, [event.sessionId]: event.status === 'running' }))

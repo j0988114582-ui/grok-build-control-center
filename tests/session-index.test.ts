@@ -31,10 +31,11 @@ describe('parseSessionUsage', () => {
       contextWindowUsage: 37,
       turnCount: 7,
       toolCallCount: 79,
+      compactionCount: 2,
       toolsUsed: ['grep']
     })).toEqual({
       sessionId: 's1', contextTokensUsed: 186783, contextWindowTokens: 500000,
-      contextWindowUsage: 37, turnCount: 7, toolCallCount: 79
+      contextWindowUsage: 37, turnCount: 7, toolCallCount: 79, compactionCount: 2
     })
   })
 

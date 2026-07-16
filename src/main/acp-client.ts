@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { Readable, Writable } from 'node:stream'
+import { PassThrough, Readable, Writable } from 'node:stream'
 import * as acp from '@agentclientprotocol/sdk'
 import type {
   ContentBlock,
@@ -14,6 +14,7 @@ import type { AgentCapabilities, ModelState, PermissionOption, PermissionRequest
 import { normalizeAcpUpdate } from '../shared/event-adapter'
 import { buildInterjectParams, INTERJECT_METHOD, parseInterjectResult, type InterjectResult } from '../shared/interject'
 import { normalizeAvailableCommands } from '../shared/palette-commands'
+import { isAutoCompactUpdate, parseXaiSessionNotificationLine } from '../shared/xai-session-notification'
 import { buildAgentArgs } from './grok-cli'
 import { killProcessTree } from './process-tree'
 import { selectPermissionOutcome } from './permissions'
@@ -84,6 +85,8 @@ export class GrokAcpClient {
   private lastStderr = ''
   private exitNotified = false
   private startupReject?: (error: Error) => void
+  /** Partial NDJSON line buffer for Scheme A raw tee. */
+  private rawLineBuffer = ''
 
   constructor(
     private executable: string,
@@ -95,6 +98,7 @@ export class GrokAcpClient {
   async start(): Promise<AgentCapabilities> {
     if (this.connection) return this.capabilities
     this.exitNotified = false
+    this.rawLineBuffer = ''
     this.child = spawn(this.executable, buildAgentArgs({ alwaysApprove: this.alwaysApprove }), {
       shell: false,
       windowsHide: true,
@@ -123,9 +127,20 @@ export class GrokAcpClient {
         this.callbacks.onEvent(normalizeAcpUpdate(params.sessionId, params.update as unknown as Record<string, unknown>))
       })
 
+    // Scheme A: tee stdout NDJSON before SDK parse. Grok emits auto_compact_completed
+    // on `_x.ai/session_notification` (not session/update); SDK closed-union never sees it.
+    const sdkStdout = new PassThrough()
+    this.child.stdout.on('data', (chunk: Buffer | string) => {
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk
+      sdkStdout.write(buf)
+      this.consumeRawStdoutChunk(typeof chunk === 'string' ? chunk : chunk.toString('utf8'))
+    })
+    this.child.stdout.on('end', () => sdkStdout.end())
+    this.child.stdout.on('error', (error) => sdkStdout.destroy(error))
+
     const stream = acp.ndJsonStream(
       Writable.toWeb(this.child.stdin) as WritableStream<Uint8Array>,
-      Readable.toWeb(this.child.stdout) as ReadableStream<Uint8Array>
+      Readable.toWeb(sdkStdout) as ReadableStream<Uint8Array>
     )
     this.connection = app.connect(stream)
     this.context = this.connection.agent
@@ -294,4 +309,32 @@ export class GrokAcpClient {
     if (models) this.capabilities.modelState = models
     return models
   }
+
+  /**
+   * Scheme A raw tee: scan NDJSON for `_x.ai/session_notification` compact events
+   * and forward through the same normalizeAcpUpdate path as standard session/update.
+   */
+  private consumeRawStdoutChunk(text: string): void {
+    this.rawLineBuffer += text
+    let newline = this.rawLineBuffer.indexOf('\n')
+    while (newline >= 0) {
+      const line = this.rawLineBuffer.slice(0, newline).replace(/\r$/, '')
+      this.rawLineBuffer = this.rawLineBuffer.slice(newline + 1)
+      if (line) this.handleRawAcpLine(line)
+      newline = this.rawLineBuffer.indexOf('\n')
+    }
+  }
+
+  private handleRawAcpLine(line: string): void {
+    const parsed = parseXaiSessionNotificationLine(line)
+    if (!parsed || !isAutoCompactUpdate(parsed.update)) return
+    this.callbacks.onEvent(normalizeAcpUpdate(parsed.sessionId, parsed.update))
+  }
+}
+
+/** Test seam: process one raw NDJSON line the same way as the live tee. */
+export function mapRawAcpLineToEvent(line: string): UiSessionEvent | null {
+  const parsed = parseXaiSessionNotificationLine(line)
+  if (!parsed || !isAutoCompactUpdate(parsed.update)) return null
+  return normalizeAcpUpdate(parsed.sessionId, parsed.update)
 }

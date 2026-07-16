@@ -74,8 +74,19 @@ export function normalizeAcpUpdate(sessionId: string, update: Record<string, unk
       return { id: eventId, sessionId, kind: 'mode', modeId: stringOf(update.currentModeId) }
     case 'usage_update':
       return { id: eventId, sessionId, kind: 'usage', used: numberOf(update.used), size: numberOf(update.size), cost: numberOf(update.cost) }
-    case 'auto_compact_completed':
-      return { id: eventId, sessionId, kind: 'compact', before: numberOf(update.tokens_before), after: numberOf(update.tokens_after), summary: stringOf(update.summary_preview) }
+    case 'auto_compact_completed': {
+      const summaryRaw = update.summary_preview
+      const summary = typeof summaryRaw === 'string' && summaryRaw.trim() ? summaryRaw : undefined
+      return {
+        id: eventId,
+        sessionId,
+        kind: 'compact',
+        before: numberOf(update.tokens_before),
+        after: numberOf(update.tokens_after),
+        ...(summary ? { summary } : {}),
+        source: 'official'
+      }
+    }
     case 'retry_state':
       return { id: eventId, sessionId, kind: 'retry', attempt: numberOf(update.attempt) ?? 0, maxRetries: numberOf(update.max_retries) ?? 0, reason: stringOf(update.reason) }
     case 'turn_completed': {

@@ -17,7 +17,16 @@ export type UiSessionEvent =
   | { id: string; sessionId: string; kind: 'commands'; commands: Array<{ name: string; description?: string; inputHint?: string }> }
   | { id: string; sessionId: string; kind: 'mode'; modeId: string }
   | { id: string; sessionId: string; kind: 'usage'; used?: number; size?: number; cost?: number }
-  | { id: string; sessionId: string; kind: 'compact'; before?: number; after?: number; summary?: string }
+  | {
+      id: string
+      sessionId: string
+      kind: 'compact'
+      before?: number
+      after?: number
+      summary?: string
+      /** `official` = wire `_x.ai/session_notification` auto_compact_completed; `inferred` = Fallback C signals drop. */
+      source?: 'official' | 'inferred'
+    }
   | { id: string; sessionId: string; kind: 'retry'; attempt: number; maxRetries: number; reason: string }
   | { id: string; sessionId: string; kind: 'turn'; status: 'running' | 'completed' | 'cancelled' | 'error'; stopReason?: string }
   | { id: string; sessionId: string; kind: 'error'; message: string }
@@ -76,6 +85,8 @@ export type SessionUsage = {
   contextWindowUsage?: number
   turnCount?: number
   toolCallCount?: number
+  /** From signals.json; bumps on real compaction (Fallback C signal). */
+  compactionCount?: number
 }
 
 export type BillingProductUsage = {
