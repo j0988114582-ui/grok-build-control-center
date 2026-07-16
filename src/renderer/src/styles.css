@@ -3,7 +3,7 @@
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; }
-.app { --bg: #050a16; --panel: rgba(8,15,29,.88); --panel-2: rgba(17,30,49,.9); --paper: #e7e1d4; --ink: #25251f; --muted: #8592a1; --line: rgba(139,169,196,.22); --accent: #e9ad47; --accent-2: #d87a45; --danger: #e2655b; position: relative; isolation: isolate; width: 100%; height: 100%; overflow: hidden; background: #030711; color: #e7edf4; font-size: var(--font-size); line-height: var(--line-height); }
+.app { --bg: #030711; --panel: rgba(13, 21, 39, 0.75); --panel-2: #0b1120; --paper: #e7e1d4; --ink: #25251f; --muted: #8592a1; --line: rgba(139,169,196,.22); --accent: #e9ad47; --accent-2: #d87a45; --danger: #e2655b; position: relative; isolation: isolate; width: 100%; height: 100%; overflow: hidden; background: #030711; color: #e7edf4; font-size: var(--font-size); line-height: var(--line-height); }
 .app[data-theme='light'] { --bg: #e7e1d4; --panel: #f3eee4; --panel-2: #ddd6c8; --paper: #fffaf0; --ink: #282820; --muted: #67695f; --line: #c9c1b3; color: #282820; }
 button { border: 0; background: none; cursor: pointer; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -479,4 +479,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .status-orb-label { display: none; }
   .status-orb { min-width: 48px; padding: 0 4px; }
   .agents-team-board { grid-template-columns: 1fr; }
+}
+
+.composer-wrap { position: relative; }
+.composer-wrap.dragging {
+  border: 1px dashed var(--accent) !important;
+  background: rgba(233, 173, 71, 0.05) !important;
+}
+.drag-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 7, 17, 0.85);
+  border: 2px dashed var(--accent);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  z-index: 100;
+  pointer-events: none;
 }

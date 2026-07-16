@@ -6,6 +6,8 @@ import {
 import type { PromptBlock, SessionSummary, UiSessionEvent } from '../../../shared/types'
 import { sessionDisplayTitle } from './session-groups'
 
+import { PROMPT_TEMPLATES } from '../../../shared/prompt-templates'
+
 type Props = {
   session: SessionSummary
   titleOverride?: string
@@ -13,6 +15,8 @@ type Props = {
   draft: string
   running: boolean
   focused: boolean
+  /** When omitted, treated as ready (handoff default until App wires T5). */
+  ready?: boolean
   onFocus: () => void
   onRemoveFromTeam: () => void
   onDraftChange: (value: string) => void
@@ -30,6 +34,7 @@ export function SessionTeamPane({
   draft,
   running,
   focused,
+  ready = true,
   onFocus,
   onRemoveFromTeam,
   onDraftChange,
@@ -57,7 +62,7 @@ export function SessionTeamPane({
           <p>{session.cwd}</p>
         </div>
         <div className="team-pane-tools">
-          {running ? <em className="team-running"><LoaderCircle className="spin" />執行中</em> : <em className="team-idle">待命</em>}
+          {running ? <em className="team-running"><LoaderCircle className="spin" />執行中</em> : <em className="team-idle">準備就緒</em>}
           <button type="button" className="icon-button" title="移出 Agents Team" aria-label="移出 Agents Team" onClick={(e) => { e.stopPropagation(); onRemoveFromTeam() }}><X /></button>
         </div>
       </header>
@@ -74,10 +79,27 @@ export function SessionTeamPane({
         />
       </div>
       <footer className="team-pane-composer">
+        {!running && (
+          <div className="template-row team-template-row" data-testid="prompt-templates">
+            {PROMPT_TEMPLATES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="template-chip"
+                title={item.description}
+                disabled={!ready}
+                onClick={() => onDraftChange(`${draft ?? ''}${draft ? '\n' : ''}${item.body}`)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
           value={draft}
           rows={3}
-          placeholder={running ? '對此 agent 插話…' : '對此 agent 下指令…'}
+          disabled={!ready}
+          placeholder={!ready ? '此對話尚未在目前連線就緒（載入中、失敗或已斷線）' : running ? '對此 agent 插話…' : '對此 agent 下指令…'}
           onFocus={onFocus}
           onChange={(e) => onDraftChange(e.target.value)}
           onKeyDown={(e) => {
@@ -91,12 +113,12 @@ export function SessionTeamPane({
         />
         {running ? (
           <div className="composer-actions running team-actions">
-            <button type="button" className="interject-button" disabled={!draft.trim()} onClick={onInterject}><MessageSquare />插話</button>
-            <button type="button" className="do-now-button" disabled={!draft.trim()} onClick={onDoNow}><Zap />改做</button>
-            <button type="button" className="stop-button" onClick={onStop}><Square />停</button>
+            <button type="button" className="interject-button" disabled={!ready || !draft.trim()} onClick={onInterject}><MessageSquare />插話</button>
+            <button type="button" className="do-now-button" disabled={!ready || !draft.trim()} onClick={onDoNow}><Zap />立刻改做</button>
+            <button type="button" className="stop-button" disabled={!ready} onClick={onStop}><Square />停止</button>
           </div>
         ) : (
-          <button type="button" className="send-button" onClick={onSend}><Send />送出</button>
+          <button type="button" className="send-button" disabled={!ready || !draft.trim()} onClick={onSend}><Send />送出</button>
         )}
       </footer>
     </section>
