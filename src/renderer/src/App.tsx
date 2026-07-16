@@ -325,6 +325,8 @@ export function App(): React.JSX.Element {
   const lastInferredCompactAtRef = useRef<Record<string, number>>({})
   /** Last usage sample per session for sharp-drop detection. */
   const usageSampleRef = useRef<Record<string, SessionUsage>>({})
+  /** Smoke harness / late binding for openPreviewPath. */
+  const openPreviewPathRef = useRef<(path: string) => void>(() => {})
   const [billing, setBilling] = useState<BillingInfo | null>(null)
   const [billingUnavailable, setBillingUnavailable] = useState(false)
   const [errorPulse, setErrorPulse] = useState(0)
@@ -476,6 +478,26 @@ export function App(): React.JSX.Element {
     if (!setupDialog && document.activeElement instanceof HTMLElement) setupReturnFocusRef.current = document.activeElement
     setSetupDialog(dialog)
   }
+
+  // Electron smoke harness (preview C13): activate a session without folder dialog.
+  useEffect(() => {
+    const api = {
+      activateSession: (session: SessionSummary) => {
+        if (!session?.id || !session.cwd) return
+        setSessions((current) => current.some((item) => item.id === session.id) ? current : [session, ...current])
+        setActive(session)
+        setEvents((current) => current[session.id] ? current : { ...current, [session.id]: [] })
+        setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, connectionGenerationRef.current, connectionGenerationRef.current))
+      },
+      openPreviewPath: (filePath: string) => {
+        openPreviewPathRef.current?.(filePath)
+      }
+    }
+    window.__grokSmoke = api
+    return () => {
+      if (window.__grokSmoke === api) delete window.__grokSmoke
+    }
+  }, [])
 
   useEffect(() => {
     void Promise.all([
@@ -1558,6 +1580,7 @@ export function App(): React.JSX.Element {
     ensurePreviewOpen()
     void loadPreviewItem(item)
   }, [previewSessionId, sessions, active, upsertPreviewItems, ensurePreviewOpen, loadPreviewItem])
+  openPreviewPathRef.current = openPreviewPath
 
   const openPreviewRemote = useCallback((url: string): void => {
     if (!previewSessionId) {
