@@ -425,3 +425,57 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 @media (max-width: 1200px) { .quota-reactor-main time, .usage-pill em { display: none; } .quota-ring { width: 64px; } .usage-bar { width: 38px; } .account-pill { width: 30px; padding: 0; justify-content: center; font-size: 0; } }
 @media (max-width: 1100px) { .workspace { grid-template-columns: 240px minmax(0,1fr); } .empty-state h1 { font-size: 45px; } .titlebar i { display: none; } }
+
+/* ── v0.6 Galaxy + Agents Team + L2 StatusOrb ── */
+.status-orb { -webkit-app-region: no-drag; height: 46px; min-width: 92px; padding: 0 10px 0 4px; border: 1px solid rgba(137,170,199,.28); border-radius: 24px; display: inline-flex; align-items: center; gap: 6px; background: rgba(8,14,25,.78); color: #aab6c3; }
+.status-orb:hover { border-color: rgba(233,173,71,.45); color: var(--accent); }
+.status-orb-canvas { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; flex: none; }
+.status-orb-canvas canvas { width: 40px !important; height: 40px !important; display: block; }
+.status-orb-label { font-size: 9px; letter-spacing: .04em; white-space: nowrap; font-weight: 650; }
+.status-orb.mode-running .status-orb-label { color: #e9ad47; }
+.status-orb.mode-error .status-orb-label { color: #ef6b61; }
+.status-orb.mode-idle .status-orb-label { color: #86b987; }
+.status-orb.mode-offline .status-orb-label { color: #6b7582; }
+
+.sidebar-team-bar { padding: 0 14px 10px; }
+.team-toggle { width: 100%; height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .04em; background: rgba(8,14,25,.45); }
+.team-toggle:hover, .team-toggle.active { color: var(--accent); border-color: rgba(233,173,71,.45); background: rgba(233,173,71,.08); }
+.team-badge { margin-left: 6px; padding: 1px 5px; border: 1px solid rgba(233,173,71,.45); border-radius: 3px; color: var(--accent); font-size: 8px; font-style: normal; letter-spacing: .08em; vertical-align: middle; }
+.session-row.in-team { box-shadow: inset 2px 0 0 var(--accent); }
+.session-team { width: 28px; height: 28px; display: inline-grid; place-items: center; color: var(--muted); border-radius: 3px; }
+.session-team:hover, .session-team.active { color: var(--accent); background: rgba(233,173,71,.1); }
+.session-team svg { width: 14px; height: 14px; }
+
+.agents-team-board { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; padding: 10px; }
+.team-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: rgba(8,15,29,.72); box-shadow: inset 0 0 28px rgba(67,132,183,.05); overflow: hidden; }
+.team-pane.focused { border-color: rgba(233,173,71,.55); box-shadow: 0 0 0 1px rgba(233,173,71,.2), inset 0 0 28px rgba(233,173,71,.04); }
+.team-pane.running { border-color: rgba(134,185,135,.4); }
+.team-pane-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: rgba(4,9,20,.45); }
+.team-pane-head h2 { margin: 2px 0 0; font: 560 15px 'Newsreader Variable', serif; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-pane-head p { margin: 2px 0 0; color: var(--muted); font-size: 10px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-pane-tools { display: flex; align-items: center; gap: 6px; }
+.team-running, .team-idle { font-style: normal; font-size: 10px; display: inline-flex; align-items: center; gap: 4px; }
+.team-running { color: #e9ad47; }
+.team-idle { color: #86b987; }
+.team-pane-transcript { flex: 1; min-height: 120px; }
+.team-pane-composer { display: grid; gap: 6px; padding: 8px; border-top: 1px solid var(--line); background: rgba(4,9,20,.5); }
+.team-pane-composer textarea { width: 100%; min-height: 52px; resize: vertical; border: 1px solid var(--line); border-radius: 4px; background: rgba(3,7,17,.8); color: inherit; padding: 8px; font-size: 12px; }
+.team-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-actions .interject-button, .team-actions .do-now-button, .team-actions .stop-button, .team-pane-composer .send-button { height: 30px; padding: 0 10px; font-size: 11px; }
+
+.template-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.template-chip { height: 26px; padding: 0 10px; border: 1px solid var(--line); border-radius: 14px; color: var(--muted); font-size: 11px; background: rgba(8,14,25,.55); }
+.template-chip:hover { color: var(--accent); border-color: rgba(233,173,71,.4); }
+.command-rail { gap: 8px; }
+.composer-actions.running { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.session-header h1 { font-family: 'Newsreader Variable', serif; letter-spacing: .01em; }
+.empty-state { perspective: 900px; }
+.empty-orbit { transform: rotateX(8deg); }
+.agents-team-board { grid-row: 1 / -1; }
+
+@media (max-width: 900px) {
+  .status-orb-label { display: none; }
+  .status-orb { min-width: 48px; padding: 0 4px; }
+  .agents-team-board { grid-template-columns: 1fr; }
+}

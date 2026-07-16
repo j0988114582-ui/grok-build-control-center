@@ -1,6 +1,6 @@
 {
   "name": "grok-build-gui",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "description": "Unofficial Windows-first control center for Grok Build CLI",
   "author": "Grok Build Control Center contributors",
@@ -23,6 +23,8 @@
     "@agentclientprotocol/sdk": "1.2.1",
     "@fontsource-variable/ibm-plex-sans": "^5.2.7",
     "@fontsource-variable/newsreader": "^5.2.8",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
     "electron-store": "^10.1.0",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.468.0",
@@ -32,6 +34,7 @@
     "react-virtuoso": "^4.12.3",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.0",
+    "three": "^0.185.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -44,6 +47,7 @@
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
+    "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^4.3.4",
     "axe-core": "^4.12.1",
     "electron": "^43.1.0",

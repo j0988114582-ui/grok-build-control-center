@@ -13,6 +13,25 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
 
+## [0.6.0] - 2026-07-16
+
+### Added
+
+- **Agents Team**：多 session 並排（最多 3 格），每格獨立 draft／插話／立刻改做／停止。
+- **L2 Status Orb**：titlebar 程序化狀態球（R3F + drei；jsdom/無 WebGL 時 canvas fallback）。
+- **Prompt 範本**：composer 開場白 chips（審查／修錯／解釋／計畫／測試）。
+- 銀河座艙文案與 team 側欄控制；匯出成功提示含路徑。
+
+### Changed
+
+- 版本 **0.6.0** 合併原 0.5.2 功能波次與 0.6 視覺（Style A Galaxy L1+L2）。
+- 依賴：`three`、`@react-three/fiber`、`@react-three/drei`。
+
+### Notes
+
+- L3 角色 glTF、fork 官方 harness、假多模態仍不做。
+- 計畫權威：`docs/plans/2026-07-16-v0.6-mega-upgrade.md`。
+
 ## [0.5.1] - 2026-07-16
 
 ### Added

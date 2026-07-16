@@ -6,7 +6,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import {
   Activity, Archive, Bot, Check, ChevronDown, ChevronRight, CircleAlert, Command, Cpu, FilePlus2,
   FolderOpen, Gauge, Keyboard, ListTodo, LoaderCircle, MessageSquare, Moon, Paperclip, PanelLeft, PanelLeftClose, Pencil, Pin, Play, Search, Send,
-  Settings, Square, Sun, TerminalSquare, Trash2, UserRound, Wrench, X, Zap
+  Settings, Square, Sun, TerminalSquare, Trash2, UserRound, Users, Wrench, X, Zap
 } from 'lucide-react'
 import type { SelectedFile } from '../../shared/bridge'
 import { createDefaultSettings } from '../../shared/settings'
@@ -35,8 +35,20 @@ import { QuotaRings } from './components/QuotaRings'
 import { ModelPicker } from './components/ModelPicker'
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette'
 import { CodeBlock } from './components/CodeBlock'
+import { AgentsTeamToolbar, SessionTeamPane } from './components/SessionTeamPane'
 import { StarfieldCanvas } from './fx/StarfieldCanvas'
 import { CursorFX } from './fx/CursorFX'
+import { StatusOrb, type StatusOrbMode } from './fx/StatusOrb'
+import {
+  AGENTS_TEAM_MAX,
+  emptyAgentsTeam,
+  isInTeam,
+  pruneTeamSlots,
+  setTeamFocus,
+  toggleTeamSlot,
+  type AgentsTeamState
+} from '../../shared/agents-team'
+import { PROMPT_TEMPLATES } from '../../shared/prompt-templates'
 import {
   groupSessionsByProject,
   partitionPinnedSessions,
@@ -204,6 +216,9 @@ export function App(): React.JSX.Element {
   localQueueRef.current = localQueue
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  /** Agents Team: multi-session side-by-side (opt-in). */
+  const [teamEnabled, setTeamEnabled] = useState(false)
+  const [team, setTeam] = useState<AgentsTeamState>(() => emptyAgentsTeam())
   const [usage, setUsage] = useState<SessionUsage | null>(null)
   const [billing, setBilling] = useState<BillingInfo | null>(null)
   const [billingUnavailable, setBillingUnavailable] = useState(false)
@@ -460,17 +475,21 @@ export function App(): React.JSX.Element {
   const sessionGroups = useMemo(() => groupSessionsByProject(unpinned), [unpinned])
   const selectedCount = selectedIds.size
   const selectedSessions = useMemo(() => sessions.filter((session) => selectedIds.has(session.id)), [sessions, selectedIds])
+  const showTeamBoard = teamEnabled && team.slots.length >= 2
+  const orbMode: StatusOrbMode = !status.connected ? 'offline' : errorPulse > 0 && !running ? 'error' : running || Object.values(runningMap).some(Boolean) ? 'running' : 'idle'
   const renderSessionRow = (session: SessionSummary): React.JSX.Element => {
     const title = sessionDisplayTitle(session, settings.sessionTitles)
     const isPinned = settings.pinnedSessions.includes(session.id)
     const isSelected = selectedIds.has(session.id)
-    return <div key={session.id} className={`session-row ${active?.id === session.id ? 'active' : ''} ${collapsingSessionId === session.id ? 'collapsing' : ''} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''}`}>
+    const inTeam = isInTeam(team, session.id)
+    return <div key={session.id} className={`session-row ${active?.id === session.id ? 'active' : ''} ${inTeam ? 'in-team' : ''} ${collapsingSessionId === session.id ? 'collapsing' : ''} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''}`}>
       {selectMode && <input className="session-check" type="checkbox" aria-label={`選擇對話 ${title}`} checked={isSelected} onChange={(event) => toggleSessionSelection(session.id, event.currentTarget.checked)} />}
       <button className="session-open" disabled={lifecycleBusy || loadingSessionIds.includes(session.id)} onClick={() => void loadSession(session)}>
         <span className="session-dot" />
-        <div><strong>{title}</strong><small>{session.cwd}</small><time>{formatDate(session.updatedAt)}</time></div>
+        <div><strong>{title}{inTeam ? <em className="team-badge">TEAM</em> : null}</strong><small>{session.cwd}</small><time>{formatDate(session.updatedAt)}</time></div>
       </button>
       {!selectMode && <>
+        {teamEnabled && <button className={`session-team ${inTeam ? 'active' : ''}`} title={inTeam ? '移出 Agents Team' : '加入 Agents Team'} aria-label={inTeam ? `移出 Team ${title}` : `加入 Team ${title}`} onClick={() => setTeam((current) => toggleTeamSlot(current, session.id))}><Users /></button>}
         <button className={`session-pin ${isPinned ? 'pinned' : ''}`} title={isPinned ? '取消釘選' : '釘選'} aria-label={isPinned ? `取消釘選 ${title}` : `釘選 ${title}`} onClick={() => togglePinned(session)}><Pin /></button>
         <button className="session-rename" title="重新命名" aria-label={`重新命名 ${title}`} onClick={() => { setRenameTarget(session); setRenameDraft(title) }}><Pencil /></button>
         <button className="session-delete" data-nova-tone="danger" title="刪除對話" aria-label={`刪除對話 ${title}`} onClick={() => setDeleteTarget(session)}><Trash2 /></button>
@@ -643,6 +662,12 @@ export function App(): React.JSX.Element {
       const summary = { id: response.sessionId, cwd, title: 'New session', updatedAt: new Date().toISOString() }
       setSessions((current) => [summary, ...current])
       setActive(summary)
+      if (teamEnabled) {
+        setTeam((current) => {
+          if (isInTeam(current, summary.id)) return setTeamFocus(current, summary.id)
+          return toggleTeamSlot(current, summary.id)
+        })
+      }
       setPastePathChip(null)
       setUsage(null)
       setFollowTail(true)
@@ -665,6 +690,12 @@ export function App(): React.JSX.Element {
       setActive(session)
       // Eagerly align the ref so post-await mode/model apply is not raced away by render timing.
       activeIdRef.current = session.id
+      if (teamEnabled) {
+        setTeam((current) => {
+          if (isInTeam(current, session.id)) return setTeamFocus(current, session.id)
+          return toggleTeamSlot(current, session.id)
+        })
+      }
       setPastePathChip(null)
       setUsage(null)
       setFollowTail(true)
@@ -743,6 +774,7 @@ export function App(): React.JSX.Element {
           return next
         })
         if (active && succeededSet.has(active.id)) { setActive(null); setUsage(null) }
+        setTeam((current) => pruneTeamSlots(current, sessions.map((s) => s.id).filter((id) => !succeededSet.has(id))))
         setSelectedIds((current) => {
           const next = new Set(current)
           succeeded.forEach((id) => next.delete(id))
@@ -797,18 +829,22 @@ export function App(): React.JSX.Element {
     })
   }
 
+  const sendPromptFor = async (sessionId: string): Promise<void> => {
+    if (runningMap[sessionId]) return
+    const text = drafts[sessionId]?.trim()
+    const pending = attachmentsBySession[sessionId] ?? []
+    if (!text && !pending.length) return
+    dispatchPrompt(sessionId, text, pending)
+  }
+
   const sendPrompt = async (): Promise<void> => {
     if (!active || running) return
-    const sessionId = active.id
-    const text = drafts[sessionId]?.trim()
-    if (!text && !attachments.length) return
-    dispatchPrompt(sessionId, text, attachments)
+    await sendPromptFor(active.id)
   }
 
   /** F-INT-2: queue mid-turn guidance without cancelling. */
-  const sendInterject = async (): Promise<void> => {
-    if (!active || !running || interjectBusy) return
-    const sessionId = active.id
+  const sendInterjectFor = async (sessionId: string): Promise<void> => {
+    if (!runningMap[sessionId] || interjectBusy) return
     const text = drafts[sessionId]?.trim()
     if (!text) return
     setInterjectBusy(true)
@@ -828,13 +864,17 @@ export function App(): React.JSX.Element {
     }
   }
 
-  /** F-INT-3: cancel active turn then send a fresh prompt (separate control from interject). */
-  const doThisNow = async (): Promise<void> => {
+  const sendInterject = async (): Promise<void> => {
     if (!active || !running || interjectBusy) return
-    const sessionId = active.id
+    await sendInterjectFor(active.id)
+  }
+
+  /** F-INT-3: cancel active turn then send a fresh prompt (separate control from interject). */
+  const doThisNowFor = async (sessionId: string): Promise<void> => {
+    if (!runningMap[sessionId] || interjectBusy) return
     const text = drafts[sessionId]?.trim()
-    if (!text && !attachments.length) return
-    const pendingAttachments = attachments
+    const pendingAttachments = attachmentsBySession[sessionId] ?? []
+    if (!text && !pendingAttachments.length) return
     setInterjectBusy(true)
     discardQueuedInterject(sessionId)
     // Immediately-send supersedes a local next-turn queue for this session.
@@ -861,6 +901,11 @@ export function App(): React.JSX.Element {
     } finally {
       setInterjectBusy(false)
     }
+  }
+
+  const doThisNow = async (): Promise<void> => {
+    if (!active || !running || interjectBusy) return
+    await doThisNowFor(active.id)
   }
 
   /** F-INT-4: queue a full next-turn prompt to auto-send when the current turn ends. */
@@ -1104,7 +1149,8 @@ export function App(): React.JSX.Element {
   return <div className="app" data-theme={settings.theme} data-immersion={effectiveImmersion} data-cursor={settings.effects.cursor && !settings.effects.reducedMotion ? 'true' : undefined} data-fx-off={settings.effects.reducedMotion ? 'true' : undefined} style={{ '--font-size': `${settings.fontSize}px`, '--line-height': settings.lineHeight, '--content-width': `${settings.contentWidth}px` } as React.CSSProperties}>
     <StarfieldCanvas enabled={settings.effects.galaxy} theme={settings.theme} density={settings.effects.density} reducedMotion={settings.effects.reducedMotion} running={running} connected={status.connected} errorPulse={errorPulse} />
     <CursorFX enabled={settings.effects.cursor} reducedMotion={settings.effects.reducedMotion} />
-    <header className="titlebar"><div className="brand-mark"><span>G</span></div><strong>GROK BUILD</strong><i>DESKTOP WORKBENCH</i><div className="drag-region" />
+    <header className="titlebar"><div className="brand-mark"><span>G</span></div><strong>GROK BUILD</strong><i>GALAXY COCKPIT</i><div className="drag-region" />
+      <StatusOrb mode={orbMode} reducedMotion={settings.effects.reducedMotion || !settings.effects.galaxy} />
       <QuotaRings billing={billing} unavailable={billingUnavailable} />
       {active && <div className="usage-pill" data-context-zone="session" aria-label="Context 視窗用量" title={`Context 視窗（本 session，非訂閱週額度）${usage?.turnCount !== undefined ? ` · ${usage.turnCount} 回合` : ''}${usage?.toolCallCount !== undefined ? ` · ${usage.toolCallCount} 次工具` : ''}`}><Gauge /><b className="usage-pill-label">Context</b><span>{usagePercent !== undefined ? `${usagePercent}%` : '—'}</span><div className="usage-bar"><i className={usageLevel} style={{ width: `${Math.min(100, usagePercent ?? 0)}%` }} /></div><em>{formatTokens(usage?.contextTokensUsed)} / {formatTokens(usageTotal)}</em></div>}
       <label title={permissionModeTitle}><select aria-label="權限模式" value={permissionMode} disabled={permissionControlsLocked} onChange={(event) => requestPermissionMode(event.target.value as AgentPermissionMode)}><option value="ask">每次詢問</option><option value="always-approve">一律核准（YOLO）</option></select></label>
@@ -1113,8 +1159,22 @@ export function App(): React.JSX.Element {
     <div className={`workspace ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
       <aside className="sidebar">
         <div className="sidebar-actions"><button className="primary" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => void createSession()}><FilePlus2 />新 Session</button><button className="icon-button sidebar-rail-expand" aria-label="展開側欄" onClick={() => setSidebarOpen(true)}><PanelLeft /></button><button className="icon-button" aria-label="收合側欄" onClick={() => setSidebarOpen(false)}><PanelLeftClose /></button></div>
+        <div className="sidebar-team-bar">
+          <AgentsTeamToolbar
+            enabled={teamEnabled}
+            count={team.slots.length}
+            max={AGENTS_TEAM_MAX}
+            onToggle={() => {
+              setTeamEnabled((value) => {
+                const next = !value
+                if (next && active) setTeam((current) => (isInTeam(current, active.id) ? setTeamFocus(current, active.id) : toggleTeamSlot(current, active.id)))
+                return next
+              })
+            }}
+          />
+        </div>
         <label className="searchbox"><Search /><input ref={sessionSearchRef} placeholder={`搜尋 sessions  ${shortcutFor('searchSessions').replaceAll('+', ' ')}`} value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} /></label>
-        <div className="session-caption"><span>RECENT SESSIONS</span><em>{filteredSessions.length}</em></div>
+        <div className="session-caption"><span>{teamEnabled ? 'AGENTS · SESSIONS' : 'RECENT SESSIONS'}</span><em>{filteredSessions.length}</em></div>
         <div className="sidebar-select-bar">
           {!selectMode && <button onClick={() => setSelectMode(true)}>多選</button>}
           {selectMode && <>
@@ -1135,8 +1195,35 @@ export function App(): React.JSX.Element {
       <main className="main">
         {!sidebarOpen && <button className="icon-button sidebar-expand-float" aria-label="展開側欄" onClick={() => setSidebarOpen(true)}><PanelLeft /></button>}
         {permissionMode === 'always-approve' && <div className="yolo-banner">⚠️ <strong>YOLO</strong> 模式：已啟用一律核准，可能會自動通過風險操作。</div>}
-        {!active ? <section className="empty-state"><div className="empty-orbit"><Cpu /><span /></div><span className="eyebrow">WINDOWS GROK BUILD CONTROL CENTER</span><h1>{status.found ? <>選一個專案資料夾，<br/><em>就可以開始。</em></> : <>第一次使用？<br/><em>一鍵準備 Grok。</em></>}</h1><p>{status.found ? '不用輸入終端指令。這裡會替你連接本機 Grok、保留未送出的文字，並在執行前顯示權限確認。' : '不用先學終端，也不用安裝 Node.js。程式會在你確認後，從 x.ai 官方來源安裝 Grok CLI。'}</p><div className="onboarding-steps">{status.found ? <><span><b>1</b>按「選擇專案開始」</span><span><b>2</b>選擇你的工作資料夾</span><span><b>3</b>用白話交代任務</span></> : <><span><b>1</b>確認安裝 Grok CLI</span><span><b>2</b>在瀏覽器登入 Grok</span><span><b>3</b>選資料夾開始</span></>}</div><div>{status.found ? <><button className="primary large" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => void createSession()}><FolderOpen />選擇專案開始</button><button className="secondary large" disabled={lifecycleBusy} onClick={() => void connect()}><Play />連接本機 Grok</button></> : <button className="primary large" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => openSetupDialog('install')}><TerminalSquare />安裝 Grok CLI</button>}</div><div className="empty-stats"><span><b>{sessions.length}</b>個本機對話</span><span><b>{status.version ?? '—'}</b>Grok CLI 版本</span><span><b>ACP</b>不模擬終端</span></div></section> : <>
-          <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) setNotice(`已匯出到 ${path}`) }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
+        {!active && !showTeamBoard ? <section className="empty-state"><div className="empty-orbit"><Cpu /><span /></div><span className="eyebrow">GALAXY COCKPIT · WINDOWS</span><h1>{status.found ? <>選一個專案資料夾，<br/><em>就可以開始。</em></> : <>第一次使用？<br/><em>一鍵準備 Grok。</em></>}</h1><p>{status.found ? '不用輸入終端指令。這裡會替你連接本機 Grok、保留未送出的文字，並在執行前顯示權限確認。可開啟 Agents Team 並排多個 session。' : '不用先學終端，也不用安裝 Node.js。程式會在你確認後，從 x.ai 官方來源安裝 Grok CLI。'}</p><div className="onboarding-steps">{status.found ? <><span><b>1</b>按「選擇專案開始」</span><span><b>2</b>選擇你的工作資料夾</span><span><b>3</b>用白話交代任務</span></> : <><span><b>1</b>確認安裝 Grok CLI</span><span><b>2</b>在瀏覽器登入 Grok</span><span><b>3</b>選資料夾開始</span></>}</div><div>{status.found ? <><button className="primary large" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => void createSession()}><FolderOpen />選擇專案開始</button><button className="secondary large" disabled={lifecycleBusy} onClick={() => void connect()}><Play />連接本機 Grok</button></> : <button className="primary large" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => openSetupDialog('install')}><TerminalSquare />安裝 Grok CLI</button>}</div><div className="empty-stats"><span><b>{sessions.length}</b>個本機對話</span><span><b>{status.version ?? '—'}</b>Grok CLI 版本</span><span><b>L1+L2</b>銀河座艙</span></div></section> : showTeamBoard ? <section className="agents-team-board" data-testid="agents-team-board" data-count={team.slots.length}>
+          {team.slots.map((sessionId) => {
+            const session = sessions.find((item) => item.id === sessionId) ?? (active?.id === sessionId ? active : null)
+            if (!session) return null
+            const focused = (team.focusId ?? active?.id) === sessionId
+            return <SessionTeamPane
+              key={sessionId}
+              session={session}
+              titleOverride={settings.sessionTitles[sessionId]}
+              events={events[sessionId] ?? []}
+              draft={drafts[sessionId] ?? ''}
+              running={runningMap[sessionId] === true}
+              focused={focused}
+              EventCard={MemoEventCard}
+              onFocus={() => {
+                setTeam((current) => setTeamFocus(current, sessionId))
+                setActive(session)
+                activeIdRef.current = sessionId
+              }}
+              onRemoveFromTeam={() => setTeam((current) => toggleTeamSlot(current, sessionId))}
+              onDraftChange={(value) => setDrafts((current) => ({ ...current, [sessionId]: value }))}
+              onSend={() => void sendPromptFor(sessionId)}
+              onInterject={() => void sendInterjectFor(sessionId)}
+              onDoNow={() => void doThisNowFor(sessionId)}
+              onStop={() => void cancelActiveTurn(sessionId).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}
+            />
+          })}
+        </section> : active ? <>
+          <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION · PROJECT</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) setNotice(`已匯出：${path}（可在檔案總管開啟該路徑）`) }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
           <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
           <footer className="composer-wrap" onDragOver={onComposerDragOver} onDrop={onComposerDrop}>
@@ -1150,6 +1237,17 @@ export function App(): React.JSX.Element {
             </div>
             {attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}
             {pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip.path} data-testid="path-chip">{pastePathChip.previewUrl ? <img className="path-chip-thumb" data-testid="path-chip-thumb" src={pastePathChip.previewUrl} alt="" width={28} height={28} /> : <Paperclip />}<em>{pastePathChip.path}</em><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}
+            {!running && <div className="template-row" data-testid="prompt-templates">
+              {PROMPT_TEMPLATES.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="template-chip"
+                  title={item.description}
+                  onClick={() => setDrafts((current) => ({ ...current, [active.id]: `${current[active.id] ?? ''}${current[active.id] ? '\n' : ''}${item.body}` }))}
+                >{item.label}</button>
+              ))}
+            </div>}
             <div className="composer">
               <button className="attach-button" aria-label="加入檔案" onClick={() => void chooseFiles()}><Paperclip /></button>
               <textarea
@@ -1160,7 +1258,7 @@ export function App(): React.JSX.Element {
                 placeholder={running ? '回合進行中可插話、排隊下一輪，或立刻改做…' : '交給 Grok 一個任務，或貼上／拖放圖片與檔案路徑…'}
                 rows={3}
               />
-              {running ? <div className="composer-actions running">
+              {running ? <div className="composer-actions running command-rail" data-testid="command-rail">
                 <button type="button" className="interject-button" data-testid="interject-button" title="在下一個安全點插入指示（不取消目前回合）" disabled={interjectBusy || !(drafts[active.id] ?? '').trim()} onClick={() => void sendInterject()}><MessageSquare />插話</button>
                 <button type="button" className="queue-next-button" data-testid="queue-next-button" title="目前回合結束後自動送出（本機排隊，非官方 queue API）" disabled={interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => queueNextTurn()}><ListTodo />排隊下一輪</button>
                 {localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue) ? <button type="button" className="queue-clear-button" data-testid="queue-clear-button" title="取消已排隊的下一輪" onClick={() => clearLocalQueue()}><X />取消排隊</button> : null}
@@ -1169,7 +1267,7 @@ export function App(): React.JSX.Element {
               </div> : <button className="send-button" data-magnetic data-nova-tone="primary" onClick={() => void sendPrompt()}><Send />送出</button>}
             </div>
           </footer>
-        </>}
+        </> : null}
       </main>
       {panel === 'settings' && <SettingsPanel settings={settings} cliVersion={status.version} onClose={() => setPanel('none')} onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none') })} />}
       {panel === 'features' && <aside className="drawer"><div className="drawer-head"><div><span className="eyebrow">CAPABILITY ROUTER</span><h2>功能矩陣</h2></div><button className="icon-button" onClick={() => setPanel('none')}><X /></button></div><p className="drawer-intro">有結構化 ACP 介面才在 GUI 原生操作；其餘明確回到 TUI，不模擬終端按鍵。</p><div className="feature-list">{FEATURES.map(([name, route, state]) => <div key={name}><span className={state}>{state === 'native' ? <Check /> : state === 'conditional' ? <Cpu /> : <TerminalSquare />}</span><strong>{name}</strong><small>{route}</small></div>)}</div>{active && <button className="secondary wide" onClick={() => openTui(active.cwd)}><TerminalSquare />在 GROK TUI 開啟</button>}</aside>}

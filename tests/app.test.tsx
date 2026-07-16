@@ -1009,6 +1009,26 @@ describe('App', () => {
     expect(screen.getByTestId('cli-update-hint')).toHaveTextContent('0.2.93')
   })
 
+  it('Agents Team: enables side-by-side board for two sessions', async () => {
+    const api = createApiMock()
+    api.listSessions = vi.fn().mockResolvedValue([
+      { id: 's1', cwd: 'C:\\repo-a', title: 'Agent Alpha', updatedAt: '2026-07-11T00:00:00Z' },
+      { id: 's2', cwd: 'C:\\repo-b', title: 'Agent Beta', updatedAt: '2026-07-11T01:00:00Z' }
+    ])
+    api.loadSession = vi.fn().mockImplementation(async (sessionId: string) => ({ sessionId }))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByText('Agent Alpha')).toBeInTheDocument()
+    await user.click(screen.getByTestId('agents-team-toggle'))
+    await user.click(screen.getByText('Agent Alpha'))
+    await waitFor(() => expect(api.loadSession).toHaveBeenCalled())
+    await user.click(screen.getByText('Agent Beta'))
+    await waitFor(() => expect(api.loadSession).toHaveBeenCalledWith('s2', 'C:\\repo-b'))
+    expect(await screen.findByTestId('agents-team-board')).toBeInTheDocument()
+    expect(screen.getAllByTestId('team-pane')).toHaveLength(2)
+  })
+
   it('F-RT-5: command palette lists all availableCommands entries', async () => {
     const api = createApiMock()
     api.connect = vi.fn().mockResolvedValue({
