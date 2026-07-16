@@ -1,3 +1,5 @@
+> **2026-07-17 更新 — C13 COMPLETE；本輪已由整合審查取代。** `8e47e6f` 已補齊四種類型在 1040／1280、rail 與共 11 張 screenshot；因此下方舊報告的 C13 FAIL 只保留作歷史紀錄，不再代表目前狀態。最新重評、compact A+C 與 0.7.x verdict 見 [`v070-compact-and-preview-codex-fullaccess-review.md`](./v070-compact-and-preview-codex-fullaccess-review.md)。整合審查將 C13 改評為 PASS-with-nit，並記錄 video fixture／pass condition 的證據品質 follow-up。
+
 # Grok Build Control Center 0.7.0 Preview Dock — Codex Full-Access Smoke Report
 
 **日期**：2026-07-17  
