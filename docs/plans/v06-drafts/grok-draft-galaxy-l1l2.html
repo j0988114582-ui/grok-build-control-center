@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>v0.6 Draft · Grok · Galaxy L1+L2</title>
+  <style>
+    :root {
+      --bg: #030711;
+      --panel: rgba(8, 15, 29, 0.9);
+      --panel2: rgba(17, 30, 49, 0.92);
+      --paper: #e7e1d4;
+      --ink: #25251f;
+      --muted: #8592a1;
+      --line: rgba(139, 169, 196, 0.22);
+      --accent: #e9ad47;
+      --danger: #e2655b;
+      --ok: #86b987;
+      --font: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; font-family: var(--font);
+      background: var(--bg); color: #e7edf4;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(80,140,200,.18), transparent),
+        radial-gradient(circle at 80% 20%, rgba(233,173,71,.06), transparent 40%);
+    }
+    .badge {
+      position: fixed; top: 10px; right: 12px; z-index: 50;
+      padding: 6px 12px; border: 1px solid var(--accent); border-radius: 999px;
+      font-size: 11px; letter-spacing: .08em; color: var(--accent);
+      background: rgba(3,7,17,.85);
+    }
+    .app {
+      max-width: 1280px; margin: 0 auto; min-height: 100vh;
+      display: grid; grid-template-rows: 56px 1fr; border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+    }
+    header {
+      display: flex; align-items: center; gap: 10px; padding: 0 14px;
+      border-bottom: 1px solid var(--line); background: rgba(4,9,20,.72); backdrop-filter: blur(8px);
+    }
+    .brand { width: 20px; height: 20px; border: 1px solid var(--accent); transform: rotate(45deg); display: grid; place-items: center; }
+    .brand span { transform: rotate(-45deg); color: var(--accent); font-weight: 700; font-size: 11px; }
+    header strong { font-size: 11px; letter-spacing: .16em; }
+    header .spacer { flex: 1; }
+    .pill {
+      height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 16px;
+      display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted);
+    }
+    .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .reactor-wrap { position: relative; width: 44px; height: 44px; }
+    canvas#reactor { width: 44px; height: 44px; display: block; filter: drop-shadow(0 0 10px rgba(147,199,231,.45)); }
+    .body { display: grid; grid-template-columns: 260px 1fr; min-height: 0; height: calc(100vh - 56px); }
+    aside {
+      border-right: 1px solid var(--line); background: var(--panel);
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    .aside-actions { padding: 12px; display: flex; gap: 8px; border-bottom: 1px solid var(--line); }
+    .btn-primary {
+      flex: 1; padding: 9px 12px; border: 0; border-radius: 4px; cursor: pointer;
+      background: var(--accent); color: #252016; font-weight: 700; font-size: 12px;
+    }
+    .search {
+      margin: 10px 12px; height: 34px; border: 1px solid var(--line); border-radius: 4px;
+      background: #050a16; display: flex; align-items: center; padding: 0 10px; color: var(--muted); font-size: 12px;
+    }
+    .group { padding: 10px 12px 4px; font-size: 12px; font-weight: 700; color: #c5cdd6; }
+    .group.pin { color: var(--accent); }
+    .session {
+      margin: 2px 8px; padding: 10px 10px; border-radius: 4px; border: 1px solid transparent; cursor: default;
+    }
+    .session.active { background: #050a16; border-color: var(--line); }
+    .session strong { display: block; font-size: 12px; font-weight: 600; }
+    .session small { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
+    main { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; min-height: 0; }
+    .session-head {
+      height: 72px; padding: 10px 18px; border-bottom: 1px solid var(--line);
+      background: rgba(7,14,27,.68); display: flex; align-items: center; gap: 12px;
+    }
+    .session-head h1 { margin: 0; font-size: 18px; font-weight: 560; }
+    .session-head p { margin: 2px 0 0; font-size: 10px; color: var(--muted); }
+    .transcript {
+      overflow: auto; background: var(--paper); color: var(--ink); padding: 18px 28px;
+    }
+    .msg { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 14px 0; border-bottom: 1px solid rgba(35,35,30,.1); }
+    .msg .rail {
+      width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(35,35,30,.2);
+      display: grid; place-items: center; font-size: 10px;
+    }
+    .msg.assistant .rail { background: var(--ink); color: var(--accent); border-color: var(--ink); }
+    .composer {
+      border-top: 1px solid var(--line); background: rgba(7,14,27,.85); padding: 10px 16px 14px;
+    }
+    .status-line { font-size: 11px; color: var(--muted); margin-bottom: 8px; display: flex; gap: 10px; align-items: center; }
+    .status-line em { color: var(--accent); font-style: normal; }
+    .chips { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .chip {
+      display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line);
+      border-radius: 6px; font-size: 11px; color: #c5cdd6; background: #050a16;
+    }
+    .chip .thumb {
+      width: 36px; height: 36px; border-radius: 4px;
+      background: linear-gradient(135deg, #1a3a5c, #e9ad47 120%);
+      border: 1px solid rgba(233,173,71,.4);
+    }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+    textarea {
+      width: 100%; height: 72px; resize: none; border: 1px solid #484c41; border-radius: 6px;
+      background: #050a16; color: #e7edf4; padding: 12px; font: inherit; line-height: 1.45;
+    }
+    .actions { display: flex; gap: 8px; }
+    .actions button {
+      border: 0; border-radius: 4px; padding: 10px 12px; font-weight: 700; font-size: 11px; cursor: pointer;
+    }
+    .act-int { background: rgba(233,173,71,.2); color: var(--accent); border: 1px solid rgba(233,173,71,.5) !important; }
+    .act-now { background: #d87a45; color: #1a1008; }
+    .act-stop { background: rgba(226,101,91,.25); color: #ef9b8f; border: 1px solid rgba(226,101,91,.45) !important; }
+    .note {
+      margin-top: 8px; font-size: 10px; color: var(--muted); line-height: 1.4;
+    }
+    .quota-hint {
+      font-size: 9px; color: #a4b0bc; max-width: 160px; line-height: 1.3;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      canvas#reactor { animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="badge">DRAFT · GROK · Style A · L1+L2</div>
+  <div class="app">
+    <header>
+      <div class="brand"><span>G</span></div>
+      <strong>GROK BUILD</strong>
+      <span style="font-size:9px;color:var(--muted);letter-spacing:.12em">CONTROL CENTER · DRAFT</span>
+      <div class="spacer"></div>
+      <div class="pill" title="對話 context">CTX 42%</div>
+      <div class="reactor-wrap" title="L2 狀態球（程序化）">
+        <canvas id="reactor" width="88" height="88" aria-label="狀態球"></canvas>
+      </div>
+      <div class="quota-hint">統一週額度<br/>含 Build / Imagine / API</div>
+      <div class="pill"><span class="dot"></span>Connected</div>
+    </header>
+    <div class="body">
+      <aside>
+        <div class="aside-actions"><button class="btn-primary" type="button">新 Session</button></div>
+        <div class="search">搜尋 sessions…</div>
+        <div class="group pin">已釘選</div>
+        <div class="session"><strong>官方程式碼研究</strong><small>grok-build-GUI</small></div>
+        <div class="group">專案 · grok-build-GUI</div>
+        <div class="session active"><strong>v0.6 視覺草稿</strong><small>今日</small></div>
+        <div class="session"><strong>插話功能驗收</strong><small>昨日</small></div>
+      </aside>
+      <main>
+        <div class="session-head">
+          <div>
+            <div style="font-size:9px;color:var(--accent);letter-spacing:.14em">ACTIVE SESSION</div>
+            <h1>v0.6 銀河座艙 · L1/L2 草稿</h1>
+            <p>C:\Users\111\Documents\grok-build-GUI</p>
+          </div>
+        </div>
+        <div class="transcript">
+          <div class="msg assistant">
+            <div class="rail">G</div>
+            <div>
+              <div style="font-size:8px;letter-spacing:.14em;color:#8a867b;margin-bottom:4px">GROK</div>
+              <p style="margin:0">風格鎖定 <b>A 銀河座艙</b>。L1 強化星空與層級；L2 用右上角狀態球表達執行中（本頁為 Canvas 程序幾何示意，正式版建議 R3F）。</p>
+            </div>
+          </div>
+          <div class="msg">
+            <div class="rail">你</div>
+            <div>
+              <div style="font-size:8px;letter-spacing:.14em;color:#8a867b;margin-bottom:4px">YOU</div>
+              <p style="margin:0">底欄三鍵：插話 / 立刻改做 / 停止；貼圖路徑 chip 帶縮圖占位。</p>
+            </div>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="status-line">● 執行中 · <em>已排入，下一個安全點生效</em></div>
+          <div class="chips">
+            <div class="chip"><span class="thumb" aria-hidden="true"></span><span>…\grok-build-gui-paste\paste-demo.png</span></div>
+          </div>
+          <div class="row">
+            <textarea placeholder="任務進行中仍可輸入；插話不會先終止…"></textarea>
+            <div class="actions">
+              <button class="act-int" type="button">插話</button>
+              <button class="act-now" type="button">立刻改做</button>
+              <button class="act-stop" type="button">停止</button>
+            </div>
+          </div>
+          <p class="note">Grok 草稿頁 · 非產品建置 · 正式 0.6 另開對話用 React + R3F 落地。</p>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const c = document.getElementById('reactor');
+      const ctx = c.getContext('2d');
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const W = 88, H = 88;
+      c.width = W * dpr; c.height = H * dpr;
+      ctx.scale(dpr, dpr);
+      let t = 0;
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      function frame() {
+        t += reduce ? 0 : 0.03;
+        ctx.clearRect(0, 0, W, H);
+        const cx = 44, cy = 44;
+        // outer glow
+        const g = ctx.createRadialGradient(cx, cy, 8, cx, cy, 40);
+        g.addColorStop(0, 'rgba(147,199,231,0.35)');
+        g.addColorStop(0.5, 'rgba(233,173,71,0.12)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(cx, cy, 40, 0, Math.PI * 2); ctx.fill();
+        // rings
+        for (let i = 0; i < 3; i++) {
+          ctx.strokeStyle = i === 1 ? 'rgba(233,173,71,0.7)' : 'rgba(147,199,231,0.45)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, 28 - i * 6, 14 - i * 2, t + i * 0.6, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        // core
+        const core = ctx.createRadialGradient(cx - 4, cy - 4, 2, cx, cy, 12);
+        core.addColorStop(0, '#fff6d5');
+        core.addColorStop(0.4, '#e9ad47');
+        core.addColorStop(1, '#1a3a5c');
+        ctx.fillStyle = core;
+        ctx.beginPath(); ctx.arc(cx, cy, 10 + Math.sin(t * 2) * (reduce ? 0 : 1.2), 0, Math.PI * 2); ctx.fill();
+        if (!reduce) requestAnimationFrame(frame);
+      }
+      frame();
+    })();
+  </script>
+</body>
+</html>

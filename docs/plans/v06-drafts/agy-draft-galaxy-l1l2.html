@@ -1,0 +1,1468 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grok Build Control Center - Style A Galaxy Cockpit+ (L1+L2 Mockup)</title>
+  <style>
+    /* Design Tokens & Theme Variables */
+    :root {
+      --bg-space: #030711;
+      --bg-panel: rgba(13, 21, 39, 0.75);
+      --bg-panel-solid: #0b1120;
+      --bg-paper: #e7e1d4;
+      --color-gold: #e9ad47;
+      --color-gold-hover: #f1c272;
+      --color-gold-glow: rgba(233, 173, 71, 0.3);
+      --color-green: #10b981;
+      --color-green-glow: rgba(16, 185, 129, 0.25);
+      --color-red: #ef4444;
+      --color-red-glow: rgba(239, 68, 68, 0.25);
+      --color-text-light: #f8fafc;
+      --color-text-muted: #94a3b8;
+      --color-text-dark: #1e293b;
+      --color-text-dark-muted: #475569;
+      --border-color: rgba(233, 173, 71, 0.15);
+      --border-color-muted: rgba(148, 163, 184, 0.1);
+      
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Microsoft JhengHei", Arial, sans-serif;
+      --transition-fast: 0.15s ease;
+      --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Reset & Base styling */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-family);
+      background-color: var(--bg-space);
+      color: var(--color-text-light);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(3, 7, 17, 0.5);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(233, 173, 71, 0.2);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(233, 173, 71, 0.4);
+    }
+
+    /* Respect User prefers-reduced-motion settings */
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-delay: 0s !important;
+        animation-duration: 0s !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0s !important;
+        scroll-behavior: auto !important;
+      }
+      .orb-pulse {
+        animation: none !important;
+      }
+    }
+
+    /* Overall Layout Structure (Galaxy Cockpit) */
+    .cockpit-container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      width: 100vw;
+      border: 1px solid var(--border-color);
+      position: relative;
+    }
+
+    /* Stars Background decoration (CSS gradient simulation) */
+    .cockpit-container::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image: 
+        radial-gradient(white, rgba(255,255,255,.2) 2px, transparent 40px),
+        radial-gradient(white, rgba(255,255,255,.15) 1px, transparent 30px),
+        radial-gradient(white, rgba(255,255,255,.1) 2px, transparent 40px);
+      background-size: 550px 550px, 350px 350px, 250px 250px;
+      background-position: 0 0, 40px 60px, 130px 270px;
+      opacity: 0.08;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* Titlebar */
+    .titlebar {
+      height: 52px;
+      background: var(--bg-panel-solid);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      position: relative;
+      z-index: 10;
+    }
+
+    .titlebar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-icon {
+      color: var(--color-gold);
+      fill: currentColor;
+      width: 20px;
+      height: 20px;
+      filter: drop-shadow(0 0 6px var(--color-gold-glow));
+    }
+
+    .brand-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #ffffff;
+      text-transform: uppercase;
+    }
+
+    .brand-subtitle {
+      font-size: 11px;
+      color: var(--color-text-muted);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border-color-muted);
+    }
+
+    /* Animated status orb (L2 Motion Simulator) */
+    .status-orb-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border-color);
+    }
+
+    .orb-canvas-wrapper {
+      position: relative;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #l2-orb-canvas {
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+    }
+
+    .orb-status-text {
+      font-size: 11px;
+      color: var(--color-gold);
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+
+    /* Connected pill and Quota hint */
+    .titlebar-center {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .quota-hint {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(233, 173, 71, 0.05);
+      border: 1px solid rgba(233, 173, 71, 0.15);
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+    }
+
+    .quota-label {
+      color: var(--color-text-muted);
+    }
+
+    .quota-value {
+      color: var(--color-gold);
+      font-weight: 600;
+      font-family: monospace;
+    }
+
+    .quota-bar-bg {
+      width: 60px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .quota-bar-fill {
+      width: 72%;
+      height: 100%;
+      background: var(--color-gold);
+      border-radius: 2px;
+      box-shadow: 0 0 4px var(--color-gold);
+    }
+
+    .connected-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      padding: 3px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      color: var(--color-green);
+    }
+
+    .connected-dot {
+      width: 6px;
+      height: 6px;
+      background-color: var(--color-green);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--color-green);
+      animation: orb-pulse 1.8s infinite;
+    }
+
+    @keyframes orb-pulse {
+      0% {
+        transform: scale(0.9);
+        opacity: 0.6;
+      }
+      50% {
+        transform: scale(1.2);
+        opacity: 1;
+        box-shadow: 0 0 10px var(--color-green);
+      }
+      100% {
+        transform: scale(0.9);
+        opacity: 0.6;
+      }
+    }
+
+    .titlebar-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    /* Badge: top-right style */
+    .draft-badge {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: var(--color-gold);
+      border: 1px dashed var(--color-gold);
+      font-size: 10px;
+      font-family: monospace;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+
+    /* Windows Mock Buttons */
+    .win-controls {
+      display: flex;
+      gap: 4px;
+    }
+
+    .win-btn {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: none;
+      color: var(--color-text-muted);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+
+    .win-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+    }
+
+    .win-btn.close:hover {
+      background: var(--color-red);
+      color: #ffffff;
+    }
+
+    /* Main Window Layout Body */
+    .workspace-body {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Left Sidebar */
+    .sidebar {
+      width: 280px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(12px);
+      border-right: 1px solid var(--border-color-muted);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow-y: auto;
+    }
+
+    .sidebar-section {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-color-muted);
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--color-gold);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* File List Widget */
+    .file-tree-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-bottom: 4px;
+      transition: var(--transition-fast);
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid transparent;
+    }
+
+    .file-tree-item:hover {
+      background: rgba(233, 173, 71, 0.05);
+      border-color: rgba(233, 173, 71, 0.1);
+    }
+
+    .file-tree-item.active {
+      background: rgba(233, 173, 71, 0.1);
+      border-color: rgba(233, 173, 71, 0.3);
+      color: var(--color-gold);
+    }
+
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+    }
+
+    .file-icon {
+      color: var(--color-text-muted);
+      flex-shrink: 0;
+    }
+    .active .file-icon {
+      color: var(--color-gold);
+    }
+
+    .file-name {
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+    }
+
+    .file-status {
+      font-size: 10px;
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-family: monospace;
+    }
+    .file-status.modified {
+      background: rgba(233, 173, 71, 0.15);
+      color: var(--color-gold);
+    }
+    .file-status.synced {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--color-green);
+    }
+
+    /* Physics & Orbit Controls Panel */
+    .param-control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .param-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .param-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--color-text-muted);
+    }
+
+    .param-value {
+      font-family: monospace;
+      color: var(--color-gold);
+    }
+
+    .slider-input {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    .slider-input::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--color-gold);
+      cursor: pointer;
+      box-shadow: 0 0 6px var(--color-gold);
+      transition: transform var(--transition-fast);
+    }
+    .slider-input::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    /* Telemetry Display */
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+
+    .telemetry-card {
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border-color-muted);
+      padding: 8px;
+      border-radius: 6px;
+      text-align: center;
+    }
+
+    .telemetry-label {
+      font-size: 9px;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .telemetry-val {
+      font-size: 13px;
+      font-family: monospace;
+      font-weight: 700;
+      color: #ffffff;
+    }
+    .telemetry-val.accent {
+      color: var(--color-gold);
+    }
+
+    /* Main Transcript Area (Paper Transcript Theme) */
+    .transcript-container {
+      flex: 1;
+      background-color: var(--bg-paper);
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--border-color-muted);
+      position: relative;
+    }
+
+    /* Header for the Paper Log */
+    .transcript-header {
+      background: rgba(0,0,0,0.03);
+      border-bottom: 1px solid rgba(0,0,0,0.08);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--color-text-dark-muted);
+      font-size: 11px;
+    }
+
+    .transcript-scroller {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Log details layout */
+    .log-item {
+      display: flex;
+      flex-direction: column;
+      max-width: 85%;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .log-item.agent {
+      align-self: flex-start;
+    }
+
+    .log-item.user {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .log-meta {
+      font-size: 11px;
+      color: var(--color-text-dark-muted);
+      margin-bottom: 4px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .log-bubble {
+      background: #ffffff;
+      color: var(--color-text-dark);
+      padding: 12px 16px;
+      border-radius: 12px;
+      border-top-left-radius: 2px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .user .log-bubble {
+      background: #e1d9ca;
+      border-radius: 12px;
+      border-top-right-radius: 2px;
+    }
+
+    .log-bubble code {
+      font-family: monospace;
+      background: rgba(0, 0, 0, 0.05);
+      padding: 2px 4px;
+      border-radius: 3px;
+      font-size: 90%;
+    }
+
+    /* Code block inside log */
+    .log-code-block {
+      background: #1e1e24;
+      color: #f8f8f2;
+      border-radius: 8px;
+      padding: 12px;
+      font-family: monospace;
+      font-size: 12px;
+      margin-top: 6px;
+      overflow-x: auto;
+      border-left: 3px solid var(--color-gold);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    /* Empty state display option */
+    .empty-state-hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      text-align: center;
+      color: var(--color-text-dark-muted);
+      padding: 40px;
+    }
+
+    .hero-orb-simulation {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(233, 173, 71, 0.15) 0%, transparent 70%);
+      border: 1px dashed rgba(233, 173, 71, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      position: relative;
+    }
+
+    .hero-orb-inner {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--color-gold);
+      box-shadow: 0 0 20px var(--color-gold);
+    }
+
+    .hero-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--color-text-dark);
+      margin-bottom: 8px;
+    }
+
+    .hero-desc {
+      font-size: 12px;
+      max-width: 320px;
+      line-height: 1.6;
+    }
+
+    /* Composer (Bottom controls) */
+    .composer {
+      background: var(--bg-panel-solid);
+      border-top: 1px solid var(--border-color);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      position: relative;
+      z-index: 10;
+    }
+
+    /* Composer Status & Path row */
+    .composer-meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    /* Status Indicator */
+    .composer-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--color-gold);
+      font-weight: 600;
+    }
+
+    .status-pulse-dot {
+      width: 8px;
+      height: 8px;
+      background-color: var(--color-gold);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--color-gold);
+      animation: pulse-gold 2s infinite;
+    }
+
+    @keyframes pulse-gold {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(233, 173, 71, 0.7);
+      }
+      70% {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 6px rgba(233, 173, 71, 0);
+      }
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(233, 173, 71, 0);
+      }
+    }
+
+    /* Path Chip with Thumbnail */
+    .path-chip-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .path-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color-muted);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-family: monospace;
+      color: var(--color-text-muted);
+      max-width: 380px;
+    }
+
+    .path-thumbnail-placeholder {
+      width: 14px;
+      height: 14px;
+      background: rgba(233, 173, 71, 0.1);
+      border: 1px solid rgba(233, 173, 71, 0.3);
+      border-radius: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-gold);
+      font-size: 9px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .path-text {
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+    }
+
+    .path-chip-remove {
+      cursor: pointer;
+      color: var(--color-text-muted);
+      transition: var(--transition-fast);
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+    }
+    .path-chip-remove:hover {
+      color: var(--color-red);
+    }
+
+    /* Input & Control row */
+    .composer-input-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .input-textarea-wrapper {
+      flex: 1;
+      position: relative;
+    }
+
+    .composer-textarea {
+      width: 100%;
+      height: 54px;
+      background: rgba(3, 7, 17, 0.8);
+      border: 1px solid rgba(233, 173, 71, 0.25);
+      border-radius: 8px;
+      color: var(--color-text-light);
+      padding: 10px 12px;
+      font-size: 13px;
+      font-family: var(--font-family);
+      resize: none;
+      outline: none;
+      transition: var(--transition-normal);
+      line-height: 1.5;
+    }
+
+    .composer-textarea:focus {
+      border-color: var(--color-gold);
+      box-shadow: 0 0 8px rgba(233, 173, 71, 0.15);
+      background: rgba(3, 7, 17, 0.95);
+    }
+
+    /* Actions Panel */
+    .composer-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    /* Buttons styling */
+    .btn {
+      height: 38px;
+      padding: 0 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: var(--transition-normal);
+      border: 1px solid transparent;
+      outline: none;
+      white-space: nowrap;
+    }
+
+    /* Button variants */
+    .btn-gold {
+      background: var(--color-gold);
+      color: #000000;
+      border-color: var(--color-gold);
+    }
+    .btn-gold:hover {
+      background: var(--color-gold-hover);
+      box-shadow: 0 0 12px var(--color-gold-glow);
+    }
+    .btn-gold:active {
+      transform: scale(0.97);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--color-text-light);
+      border-color: var(--border-color-muted);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--border-color);
+    }
+    .btn-secondary:active {
+      transform: scale(0.97);
+    }
+
+    .btn-red {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+    .btn-red:hover {
+      background: rgba(239, 68, 68, 0.3);
+      border-color: var(--color-red);
+      color: #ffffff;
+      box-shadow: 0 0 10px var(--color-red-glow);
+    }
+    .btn-red:active {
+      transform: scale(0.97);
+    }
+
+    .keyboard-shortcut-hint {
+      font-size: 9px;
+      opacity: 0.5;
+      margin-left: 2px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="cockpit-container">
+    
+    <!-- Titlebar -->
+    <header class="titlebar">
+      <div class="titlebar-left">
+        <div class="brand-wrap">
+          <!-- Unofficial abstract logo -->
+          <svg class="brand-icon" viewBox="0 0 24 24">
+            <path d="M12 2L2 22h20L12 2zm0 4l6.5 13h-13L12 6zm-1 5h2v3h-2v-3zm0 4h2v2h-2v-2z"/>
+          </svg>
+          <span class="brand-title">Grok Build</span>
+        </div>
+        <span class="brand-subtitle">Style A Galaxy Cockpit+</span>
+        
+        <!-- Live Status Orb (L2 Motion Indicator) -->
+        <div class="status-orb-container" title="L2 Motion Status. 點擊切換運動型態">
+          <div class="orb-canvas-wrapper">
+            <canvas id="l2-orb-canvas" width="48" height="48"></canvas>
+          </div>
+          <span class="orb-status-text" id="orb-state-label">L2: Active</span>
+        </div>
+      </div>
+
+      <div class="titlebar-center">
+        <!-- Connected Pill -->
+        <div class="connected-pill">
+          <span class="connected-dot"></span>
+          <span>已連線</span>
+        </div>
+
+        <!-- Quota Hint -->
+        <div class="quota-hint" title="Build/Imagine/API 資源配額">
+          <span class="quota-label">統一週額度 · Build/Imagine/API</span>
+          <div class="quota-bar-bg">
+            <div class="quota-bar-fill" id="quota-fill-bar"></div>
+          </div>
+          <span class="quota-value" id="quota-text">72%</span>
+        </div>
+      </div>
+
+      <div class="titlebar-right">
+        <!-- Draft top-right Badge -->
+        <div class="draft-badge">DRAFT · AGY · Style A · L1+L2</div>
+        
+        <!-- Mock Windows Controls -->
+        <div class="win-controls">
+          <button class="win-btn" title="最小化">
+            <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
+          </button>
+          <button class="win-btn" title="最大化">
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <button class="win-btn close" title="關閉">
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace Area -->
+    <div class="workspace-body">
+      
+      <!-- Left Sidebar -->
+      <aside class="sidebar">
+        <div>
+          <!-- L1 Telemetry Panel -->
+          <div class="sidebar-section">
+            <h3 class="section-title">L1 狀態監視</h3>
+            <div class="telemetry-grid">
+              <div class="telemetry-card">
+                <div class="telemetry-label">編譯速度</div>
+                <div class="telemetry-val accent" id="val-speed">942 Hz</div>
+              </div>
+              <div class="telemetry-card">
+                <div class="telemetry-label">核心溫控</div>
+                <div class="telemetry-val" id="val-temp">42.8 °C</div>
+              </div>
+              <div class="telemetry-card">
+                <div class="telemetry-label">記憶體漂移</div>
+                <div class="telemetry-val" id="val-drift">0.02%</div>
+              </div>
+              <div class="telemetry-card">
+                <div class="telemetry-label">協同單元</div>
+                <div class="telemetry-val accent">L1+L2</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- L2 Motion Parameters Controls -->
+          <div class="sidebar-section">
+            <h3 class="section-title">L2 動態模擬參數</h3>
+            <div class="param-control-group">
+              <div class="param-row">
+                <div class="param-header">
+                  <span>軌道旋轉速率 (Spin)</span>
+                  <span class="param-value" id="val-spin">1.0x</span>
+                </div>
+                <input type="range" class="slider-input" id="slider-spin" min="0" max="4" step="0.1" value="1">
+              </div>
+
+              <div class="param-row">
+                <div class="param-header">
+                  <span>引力擾動因子 (Drift)</span>
+                  <span class="param-value" id="val-gravity">1.2</span>
+                </div>
+                <input type="range" class="slider-input" id="slider-gravity" min="0" max="3" step="0.1" value="1.2">
+              </div>
+
+              <div class="param-row">
+                <div class="param-header">
+                  <span>核心脈衝頻率 (Pulse)</span>
+                  <span class="param-value" id="val-pulse">0.8 Hz</span>
+                </div>
+                <input type="range" class="slider-input" id="slider-pulse" min="0.1" max="3" step="0.1" value="0.8">
+              </div>
+            </div>
+          </div>
+
+          <!-- File Explorer Mock -->
+          <div class="sidebar-section">
+            <div class="section-title">
+              <span>工作區檔案變更</span>
+              <span style="opacity:0.6; font-size:9px;">4 個檔案</span>
+            </div>
+            <div id="file-list">
+              <div class="file-tree-item active" onclick="selectFile(this)">
+                <div class="file-info">
+                  <span class="file-icon">📄</span>
+                  <span class="file-name" title="src/main.py">src/main.py</span>
+                </div>
+                <span class="file-status modified">M</span>
+              </div>
+              <div class="file-tree-item" onclick="selectFile(this)">
+                <div class="file-info">
+                  <span class="file-icon">📄</span>
+                  <span class="file-name" title="src/utils/compiler.py">compiler.py</span>
+                </div>
+                <span class="file-status synced">S</span>
+              </div>
+              <div class="file-tree-item" onclick="selectFile(this)">
+                <div class="file-info">
+                  <span class="file-icon">⚙️</span>
+                  <span class="file-name" title="config/build.json">build.json</span>
+                </div>
+                <span class="file-status modified">M</span>
+              </div>
+              <div class="file-tree-item" onclick="selectFile(this)">
+                <div class="file-info">
+                  <span class="file-icon">📄</span>
+                  <span class="file-name" title="tests/test_flow.py">test_flow.py</span>
+                </div>
+                <span class="file-status synced">S</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar footer info -->
+        <div class="sidebar-section" style="border-top:1px solid var(--border-color-muted); border-bottom:none; opacity:0.75;">
+          <div style="font-size:11px; display:flex; justify-content:space-between;">
+            <span>主機系統</span>
+            <span style="font-family:monospace; color:var(--color-gold);">WINDOWS 11 x64</span>
+          </div>
+          <div style="font-size:10px; color:var(--color-text-muted); margin-top:4px;">
+            AGY UI Framework v2.46.2
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Transcript Content (Paper Log style) -->
+      <main class="transcript-container">
+        
+        <!-- Header -->
+        <div class="transcript-header">
+          <span>對話與日誌串流 - C:\projects\grok-app</span>
+          <span>記錄模式: 安全點循序輸出</span>
+        </div>
+
+        <!-- Transcript Scroller -->
+        <div class="transcript-scroller" id="transcript-scroller">
+          
+          <!-- Message 1 -->
+          <div class="log-item agent">
+            <div class="log-meta">
+              <span style="font-weight:600; color:var(--color-text-dark);">Grok Build Agent</span>
+              <span>16:28:10</span>
+            </div>
+            <div class="log-bubble">
+              已成功載入專案工作區。偵測到變更項目：<code>src/main.py</code> (4 行變更) 以及 <code>config/build.json</code> (1 行變更)。
+              <br>目前的 L2 動態核心運作正常。請問要如何開始編譯或修正？
+            </div>
+          </div>
+
+          <!-- Message 2 -->
+          <div class="log-item user">
+            <div class="log-meta">
+              <span>使用者</span>
+              <span>16:29:05</span>
+            </div>
+            <div class="log-bubble">
+              幫我重構 <code>src/main.py</code> 中的編譯迴圈，將 L1 連接點調整為非同步載入，並且在 L2 運動超出邊界時自動發送安全中斷。
+            </div>
+          </div>
+
+          <!-- Message 3 -->
+          <div class="log-item agent">
+            <div class="log-meta">
+              <span style="font-weight:600; color:var(--color-text-dark);">Grok Build Agent</span>
+              <span>16:29:12</span>
+            </div>
+            <div class="log-bubble">
+              好的，我已擬定重構方案。以下是預計為 <code>src/main.py</code> 新增的異步回調與安全監聽器代碼：
+              <div class="log-code-block">
+async def initialize_l1_connection(endpoint: str):
+    # 連接 L1 狀態監聽器
+    try:
+        connection = await connect_sensor(endpoint)
+        log("L1 Sensor link acquired.")
+        return connection
+    except Exception as e:
+        log_error(f"L1 Fallback triggered: {e}")
+        # L2 安全中斷觸發點
+        trigger_l2_safety_brake()
+              </div>
+              重構代碼已就緒。如果沒有問題，我將在下一個安全編譯點執行此變更。
+            </div>
+          </div>
+
+        </div>
+
+      </main>
+
+    </div>
+
+    <!-- Bottom Composer Area -->
+    <footer class="composer">
+      
+      <!-- Composer meta details -->
+      <div class="composer-meta-row">
+        
+        <!-- Status Indicator -->
+        <div class="composer-status" title="安全策略提示">
+          <span class="status-pulse-dot"></span>
+          <span id="composer-status-text">已排入，下一個安全點生效</span>
+        </div>
+
+        <!-- Path Chip with Thumbnail placeholder -->
+        <div class="path-chip-wrap">
+          <div class="path-chip" id="active-path-chip" title="當前編輯/編譯檔案路徑">
+            <div class="path-thumbnail-placeholder" id="path-thumb">PY</div>
+            <span class="path-text" id="path-text-label">C:\Users\111\Documents\grok-build-GUI\src\main.py</span>
+            <span class="path-chip-remove" onclick="removePathChip()" title="清除選取">×</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Action row: Textarea and Buttons -->
+      <div class="composer-input-row">
+        
+        <!-- Input Textarea -->
+        <div class="input-textarea-wrapper">
+          <textarea 
+            class="composer-textarea" 
+            id="composer-input" 
+            placeholder="請輸入指令或編譯提示詞... (按下 Enter 發送插話)"
+            onkeydown="handleTextareaKey(event)"
+          ></textarea>
+        </div>
+
+        <!-- Actions -->
+        <div class="composer-actions">
+          
+          <!-- 插話 -->
+          <button class="btn btn-secondary" onclick="actionInterject()" title="在中途插入指令或補充資訊">
+            <span>插話</span>
+            <span class="keyboard-shortcut-hint">↵</span>
+          </button>
+
+          <!-- 立刻改做 -->
+          <button class="btn btn-gold" onclick="actionPivot()" title="立即捨棄當前進度並切換到新指令">
+            <span>立刻改做</span>
+            <span class="keyboard-shortcut-hint">⚡</span>
+          </button>
+
+          <!-- 停止 -->
+          <button class="btn btn-red" onclick="actionStop()" title="中斷編譯，停止一切 L1+L2 運動">
+            <span>停止</span>
+            <span class="keyboard-shortcut-hint">ESC</span>
+          </button>
+
+        </div>
+
+      </div>
+
+    </footer>
+
+  </div>
+
+  <script>
+    // Orbit parameters
+    let orbitParams = {
+      spin: 1.0,
+      gravity: 1.2,
+      pulse: 0.8,
+      isStopped: false,
+      isHighPriority: false
+    };
+
+    // DOM References
+    const canvas = document.getElementById('l2-orb-canvas');
+    const ctx = canvas.getContext('2d');
+    const scroller = document.getElementById('transcript-scroller');
+    const composerInput = document.getElementById('composer-input');
+    const orbLabel = document.getElementById('orb-state-label');
+    const composerStatusText = document.getElementById('composer-status-text');
+    const statusPulseDot = document.querySelector('.status-pulse-dot');
+    
+    // Sliders
+    const sliderSpin = document.getElementById('slider-spin');
+    const sliderGravity = document.getElementById('slider-gravity');
+    const sliderPulse = document.getElementById('slider-pulse');
+    
+    // Slider values label updater
+    sliderSpin.addEventListener('input', (e) => {
+      orbitParams.spin = parseFloat(e.target.value);
+      document.getElementById('val-spin').innerText = orbitParams.spin.toFixed(1) + 'x';
+    });
+    sliderGravity.addEventListener('input', (e) => {
+      orbitParams.gravity = parseFloat(e.target.value);
+      document.getElementById('val-gravity').innerText = orbitParams.gravity.toFixed(1);
+    });
+    sliderPulse.addEventListener('input', (e) => {
+      orbitParams.pulse = parseFloat(e.target.value);
+      document.getElementById('val-pulse').innerText = orbitParams.pulse.toFixed(1) + ' Hz';
+    });
+
+    // Handle prefers-reduced-motion check
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let reducedMotion = motionQuery.matches;
+    motionQuery.addEventListener('change', (e) => {
+      reducedMotion = e.matches;
+    });
+
+    // Canvas Orb L2 Motion Animation setup
+    let angle = 0;
+    let pulseScale = 1.0;
+    let pulseDir = 1;
+
+    function drawOrb() {
+      // Clear canvas with alpha for trail effect
+      ctx.fillStyle = '#030711';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      
+      // Handle "Stopped" or "Reduced Motion" state rendering
+      if (orbitParams.isStopped || reducedMotion) {
+        // Red dim core
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 8, 0, Math.PI * 2);
+        ctx.fillStyle = orbitParams.isStopped ? '#ef4444' : '#e9ad47';
+        ctx.fill();
+        
+        // Static ring
+        ctx.strokeStyle = orbitParams.isStopped ? 'rgba(239,68,68,0.3)' : 'rgba(233,173,71,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(centerX, centerY, 16, 6, Math.PI / 6, 0, Math.PI * 2);
+        ctx.stroke();
+        return;
+      }
+
+      // Compute pulse speed
+      pulseScale += 0.02 * orbitParams.pulse * pulseDir;
+      if (pulseScale > 1.2 || pulseScale < 0.8) {
+        pulseDir *= -1;
+      }
+
+      // 1. Draw glowing background aura
+      const radialGlow = ctx.createRadialGradient(centerX, centerY, 2, centerX, centerY, 18 * pulseScale);
+      if (orbitParams.isHighPriority) {
+        radialGlow.addColorStop(0, 'rgba(233, 173, 71, 0.8)');
+        radialGlow.addColorStop(0.5, 'rgba(233, 173, 71, 0.2)');
+        radialGlow.addColorStop(1, 'rgba(233, 173, 71, 0)');
+      } else {
+        radialGlow.addColorStop(0, 'rgba(16, 185, 129, 0.7)');
+        radialGlow.addColorStop(0.5, 'rgba(16, 185, 129, 0.2)');
+        radialGlow.addColorStop(1, 'rgba(16, 185, 129, 0)');
+      }
+      ctx.fillStyle = radialGlow;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 20 * pulseScale, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 2. Draw Orbit rings (L2 Motion Simulator)
+      angle += 0.05 * orbitParams.spin;
+      
+      // Orbit 1: Ellipse rotating
+      ctx.strokeStyle = orbitParams.isHighPriority ? 'rgba(233, 173, 71, 0.4)' : 'rgba(16, 185, 129, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      // center, radiusX, radiusY, rotation, startAngle, endAngle
+      ctx.ellipse(centerX, centerY, 18, 5, angle, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Orbit 2: Inverse rotation
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.beginPath();
+      ctx.ellipse(centerX, centerY, 15, 6, -angle * 0.7, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 3. Draw Orbit particle
+      const px = centerX + Math.cos(angle * 1.5) * 18;
+      const py = centerY + Math.sin(angle * 1.5) * 5;
+      
+      // Rotate the particle coordinates to match orbit 1
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+      const rotatedX = centerX + (px - centerX) * cosA - (py - centerY) * sinA;
+      const rotatedY = centerY + (px - centerX) * sinA + (py - centerY) * cosA;
+
+      ctx.beginPath();
+      ctx.arc(rotatedX, rotatedY, 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 4;
+      ctx.fill();
+      ctx.shadowBlur = 0; // reset
+
+      // 4. Draw Core
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 5, 0, Math.PI * 2);
+      ctx.fillStyle = orbitParams.isHighPriority ? '#e9ad47' : '#ffffff';
+      ctx.fill();
+    }
+
+    // Canvas animation loop ticker
+    function tick() {
+      drawOrb();
+      requestAnimationFrame(tick);
+    }
+    tick();
+
+    // Toggle orb state manually by clicking it
+    canvas.addEventListener('click', () => {
+      if (orbitParams.isStopped) {
+        // restart
+        orbitParams.isStopped = false;
+        orbitParams.isHighPriority = false;
+        orbLabel.innerText = "L2: Active";
+        orbLabel.style.color = "var(--color-green)";
+        composerStatusText.innerText = "已排入，下一個安全點生效";
+        composerStatusText.style.color = "var(--color-gold)";
+        statusPulseDot.style.backgroundColor = "var(--color-gold)";
+      } else {
+        // pause/stop
+        orbitParams.isStopped = true;
+        orbLabel.innerText = "L2: Stopped";
+        orbLabel.style.color = "var(--color-red)";
+      }
+    });
+
+    // Keyboard event handler for composer textarea (Enter keys)
+    function handleTextareaKey(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        actionInterject();
+      }
+      if (event.key === 'Escape') {
+        actionStop();
+      }
+    }
+
+    // Add UI feedback when switching files in the mock explorer
+    function selectFile(element) {
+      document.querySelectorAll('.file-tree-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      element.classList.add('active');
+      
+      const fileName = element.querySelector('.file-name').title;
+      const fileLabel = fileName.split('/').pop().toUpperCase();
+      
+      document.getElementById('path-text-label').innerText = `C:\\Users\\111\\Documents\\grok-build-GUI\\${fileName.replace(/\//g, '\\')}`;
+      const thumb = document.getElementById('path-thumb');
+      thumb.innerText = fileLabel.substring(0, 2);
+      
+      // Update telemetry speeds representing file loading spikes
+      const randSpeed = Math.floor(Math.random() * 400) + 700;
+      const randTemp = (40 + Math.random() * 8).toFixed(1);
+      document.getElementById('val-speed').innerText = randSpeed + " Hz";
+      document.getElementById('val-temp').innerText = randTemp + " °C";
+    }
+
+    // Clear path chip helper
+    function removePathChip() {
+      const chip = document.getElementById('active-path-chip');
+      chip.style.opacity = '0.5';
+      setTimeout(() => {
+        chip.style.display = 'none';
+      }, 150);
+    }
+
+    // Composer Actions
+    
+    // 1. 插話 (Interject)
+    function actionInterject() {
+      const text = composerInput.value.trim();
+      if (!text) return;
+
+      appendMessage("user", text);
+      composerInput.value = "";
+
+      // Orb pulse reaction
+      const oldSpin = orbitParams.spin;
+      orbitParams.spin = 3.0; // speed up orbit momentarily
+      setTimeout(() => {
+        orbitParams.spin = oldSpin;
+      }, 800);
+
+      // Agent mock response after delay
+      setTimeout(() => {
+        appendMessage("agent", `已接收您的插話指令： 「<code>${text}</code>」。正在將安全點排入 L1 編譯流...`);
+        // Randomize some variables
+        document.getElementById('val-drift').innerText = (Math.random() * 0.1).toFixed(2) + "%";
+      }, 1000);
+    }
+
+    // 2. 立刻改做 (Pivot)
+    function actionPivot() {
+      const text = composerInput.value.trim() || "立即變更為當前主要修正任務";
+      
+      orbitParams.isStopped = false;
+      orbitParams.isHighPriority = true;
+      orbLabel.innerText = "L2: Heavy Duty";
+      orbLabel.style.color = "var(--color-gold)";
+      
+      composerStatusText.innerText = "高優先級任務介入！立刻執行中...";
+      composerStatusText.style.color = "var(--color-red)";
+      statusPulseDot.style.backgroundColor = "var(--color-red)";
+      
+      appendMessage("user", `【立刻改做】 ${text}`);
+      composerInput.value = "";
+
+      setTimeout(() => {
+        appendMessage("agent", `⚠️ <strong>緊急編譯覆寫</strong> ⚠️<br>已放棄前序待命線程，強制載入當前任務。L2 動態核心正在進行軌道傾斜修正...`);
+      }, 800);
+    }
+
+    // 3. 停止 (Stop)
+    function actionStop() {
+      orbitParams.isStopped = true;
+      orbLabel.innerText = "L2: Stopped";
+      orbLabel.style.color = "var(--color-red)";
+      
+      composerStatusText.innerText = "連線已掛起 · L1+L2 運動已中斷";
+      composerStatusText.style.color = "var(--color-text-muted)";
+      statusPulseDot.style.backgroundColor = "var(--color-red)";
+      
+      appendMessage("user", "【停止所有執行】");
+      
+      setTimeout(() => {
+        appendMessage("agent", `<span style="color:var(--color-red);">✖ <strong>中斷警告</strong></span><br>L2 核心已接收安全剎車。軌道粒子凍結，編譯暫停於安全點。請點擊上方 L2 狀態燈重置連接。`);
+      }, 500);
+    }
+
+    // Message appending helper
+    function appendMessage(sender, text) {
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0].substring(0, 5);
+      
+      const item = document.createElement('div');
+      item.className = `log-item ${sender}`;
+      
+      const meta = document.createElement('div');
+      meta.className = 'log-meta';
+      if (sender === 'agent') {
+        meta.innerHTML = `<span style="font-weight:600; color:var(--color-text-dark);">Grok Build Agent</span> <span>${timeStr}</span>`;
+      } else {
+        meta.innerHTML = `<span>使用者</span> <span>${timeStr}</span>`;
+      }
+
+      const bubble = document.createElement('div');
+      bubble.className = 'log-bubble';
+      bubble.innerHTML = text;
+
+      item.appendChild(meta);
+      item.appendChild(bubble);
+      scroller.appendChild(item);
+
+      // Scroll to bottom
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  </script>
+</body>
+</html>
