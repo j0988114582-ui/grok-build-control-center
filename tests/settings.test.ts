@@ -9,6 +9,7 @@ describe('settings', () => {
       effects: { galaxy: true, cursor: true, density: 'medium', reducedMotion: false },
       sessionTitles: {},
       drafts: {},
+      pinnedSessions: [],
       recentCommands: []
     })
   })

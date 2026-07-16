@@ -100,6 +100,9 @@ export type BillingInfo = {
 export type PermissionOption = { optionId: string; name: string; kind: string }
 export type PermissionRequest = { requestId: string; sessionId: string; title: string; options: PermissionOption[] }
 
+/** Runtime-only for the current process; always starts as `ask` on app launch. */
+export type AgentPermissionMode = 'ask' | 'always-approve'
+
 export type AppSettings = {
   grokExecutable: string
   theme: 'dark' | 'light'
@@ -112,6 +115,8 @@ export type AppSettings = {
   }
   sessionTitles: Record<string, string>
   drafts: Record<string, string>
+  /** Session ids pinned to the global top sidebar group (local preference only). */
+  pinnedSessions: string[]
   recentCommands: string[]
   fontSize: number
   lineHeight: number

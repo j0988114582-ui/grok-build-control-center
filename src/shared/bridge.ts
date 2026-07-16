@@ -1,5 +1,5 @@
 import type {
-  AgentCapabilities, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock, SessionSummary, SessionUsage, UiSessionEvent
+  AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock, SessionSummary, SessionUsage, UiSessionEvent
 } from './types'
 
 export type CliStatusUpdate = Partial<CliStatus> & { message?: string; stderr?: string }
@@ -26,6 +26,8 @@ export interface GrokBridgeApi {
   setModel(sessionId: string, modelId: string, reasoningEffort?: string): Promise<void>
   setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<unknown>
   respondPermission(requestId: string, optionId: string): Promise<void>
+  getPermissionMode(): Promise<AgentPermissionMode>
+  setPermissionMode(mode: AgentPermissionMode): Promise<AgentPermissionMode>
   chooseDirectory(): Promise<string | null>
   chooseFiles(): Promise<SelectedFile[]>
   exportSession(sessionId: string): Promise<string | null>

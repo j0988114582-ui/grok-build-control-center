@@ -10,6 +10,7 @@ export const createDefaultSettings = (homeDir: string): AppSettings => ({
   effects: { galaxy: true, cursor: true, density: 'medium', reducedMotion: false },
   sessionTitles: {},
   drafts: {},
+  pinnedSessions: [],
   recentCommands: [],
   fontSize: 15,
   lineHeight: 1.65,
@@ -71,6 +72,11 @@ const normalizeRecentCommands = (value: unknown): string[] => {
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()))].slice(0, 8)
 }
 
+const normalizePinnedSessions = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()))].slice(0, 200)
+}
+
 export function normalizeSettings(value: Partial<AppSettings> | undefined, homeDir: string): AppSettings {
   const defaults = createDefaultSettings(homeDir)
   return {
@@ -85,6 +91,7 @@ export function normalizeSettings(value: Partial<AppSettings> | undefined, homeD
     },
     sessionTitles: normalizeSessionTitles(value?.sessionTitles),
     drafts: normalizeDrafts(value?.drafts),
+    pinnedSessions: normalizePinnedSessions(value?.pinnedSessions),
     recentCommands: normalizeRecentCommands(value?.recentCommands),
     fontSize: clamp(value?.fontSize, 12, 22, defaults.fontSize),
     lineHeight: clamp(value?.lineHeight, 1.2, 2.1, defaults.lineHeight),

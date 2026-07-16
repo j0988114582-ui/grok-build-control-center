@@ -9,4 +9,14 @@ export function resolveGrokExecutable(configured: string | undefined, homeDir: s
   return configured?.trim() || path.join(homeDir, '.grok', 'bin', 'grok.exe')
 }
 
-export const buildAgentArgs = (): string[] => ['agent', '--no-leader', 'stdio']
+export type AgentLaunchOptions = {
+  /** Maps to `grok agent --always-approve` (YOLO). Default false. */
+  alwaysApprove?: boolean
+}
+
+export const buildAgentArgs = (options: AgentLaunchOptions = {}): string[] => [
+  'agent',
+  ...(options.alwaysApprove ? ['--always-approve'] as const : []),
+  '--no-leader',
+  'stdio'
+]

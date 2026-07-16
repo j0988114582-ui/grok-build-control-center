@@ -11,6 +11,8 @@ const createApiMock = (): GrokBridgeApi => ({
   getStatus: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
   installCli: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
   reauthenticate: vi.fn().mockResolvedValue({ loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [] }),
+  getPermissionMode: vi.fn().mockResolvedValue('ask' as const),
+  setPermissionMode: vi.fn((mode) => Promise.resolve(mode)),
   connect: vi.fn().mockResolvedValue({
     loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [{ name: 'compact', description: '壓縮目前 context' }],
     modelState: {

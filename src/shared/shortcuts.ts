@@ -5,6 +5,7 @@ export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
   { command: 'commandPalette', accelerator: 'Ctrl+Shift+P', scope: 'global' },
   { command: 'newSession', accelerator: 'Ctrl+N', scope: 'global' },
   { command: 'searchSessions', accelerator: 'Ctrl+K', scope: 'global' },
+  { command: 'toggleSidebar', accelerator: 'Ctrl+B', scope: 'global' },
   { command: 'cancelTurn', accelerator: 'Escape', scope: 'global' },
   { command: 'jumpToLatest', accelerator: 'Ctrl+End', scope: 'transcript' },
   { command: 'sendPrompt', accelerator: 'Enter', scope: 'composer' },

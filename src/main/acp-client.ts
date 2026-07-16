@@ -77,12 +77,17 @@ export class GrokAcpClient {
   private exitNotified = false
   private startupReject?: (error: Error) => void
 
-  constructor(private executable: string, private callbacks: AcpClientCallbacks, private clientVersion = '0.0.0') {}
+  constructor(
+    private executable: string,
+    private callbacks: AcpClientCallbacks,
+    private clientVersion = '0.0.0',
+    private alwaysApprove = false
+  ) {}
 
   async start(): Promise<AgentCapabilities> {
     if (this.connection) return this.capabilities
     this.exitNotified = false
-    this.child = spawn(this.executable, buildAgentArgs(), { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+    this.child = spawn(this.executable, buildAgentArgs({ alwaysApprove: this.alwaysApprove }), { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
     this.child.stderr.setEncoding('utf8')
     this.child.stderr.on('data', (chunk: string) => {
       const trimmed = chunk.trim()

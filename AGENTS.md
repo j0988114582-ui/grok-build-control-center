@@ -4,8 +4,7 @@
 
 狀態補充（2026-07-12）：啟動／連線競態、快捷鍵、Esc 優先序、prompt 失敗復原、額度提醒、task 合併與視窗導覽已完成審查加固。
 
-**下一輪升級 backlog（2026-07-15，僅記錄未實作）**：`docs/backlog/2026-07-15-next-upgrade.md`
-**v0.4 計畫（2026-07-16，待拍板）**：`docs/plans/2026-07-16-v0.4-upgrade-plan.md`  
+**v0.4.0（2026-07-16）**：側欄可重開、composer 固定高、專案標題層級、全域 pin、YOLO 權限模式（每次啟動重置為每次詢問）、批次刪除、orphan 清理、Ctrl+B。計畫見 `docs/plans/2026-07-16-v0.4-upgrade-plan.md`；舊 backlog `docs/backlog/2026-07-15-next-upgrade.md`。  
 P0 側欄主頁無法重開、composer 固定高度；P1 專案標題層級、批次刪除；P2 ACP 貼圖／多模態（本機 0.2.101 實測 `image:false`/`audio:false`/`embeddedContext:true`）。
 
 ## 發布前第二輪複審（2026-07-12，Claude 雙 agent 對抗式審查）

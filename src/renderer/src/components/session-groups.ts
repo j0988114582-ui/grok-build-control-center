@@ -13,4 +13,23 @@ export const groupSessionsByProject = (sessions: SessionSummary[]): SessionProje
   return [...groups.values()]
 }
 
-export const sessionDisplayTitle = (session: SessionSummary, overrides: Record<string, string>): string => overrides[session.id]?.trim() || session.title
+export const sessionDisplayTitle = (session: SessionSummary, overrides: Record<string, string>): string =>
+  overrides[session.id]?.trim() || session.title
+
+/** Global top pin group: order follows `pinnedIds`; missing ids are skipped. */
+export function partitionPinnedSessions(
+  sessions: SessionSummary[],
+  pinnedIds: readonly string[]
+): { pinned: SessionSummary[]; unpinned: SessionSummary[] } {
+  const byId = new Map(sessions.map((session) => [session.id, session]))
+  const pinned: SessionSummary[] = []
+  const pinnedSet = new Set<string>()
+  for (const id of pinnedIds) {
+    const session = byId.get(id)
+    if (!session || pinnedSet.has(id)) continue
+    pinned.push(session)
+    pinnedSet.add(id)
+  }
+  const unpinned = sessions.filter((session) => !pinnedSet.has(session.id))
+  return { pinned, unpinned }
+}

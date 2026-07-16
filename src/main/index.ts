@@ -9,6 +9,7 @@ import { GrokAcpClient } from './acp-client'
 import { BillingCache } from './billing-cache'
 import { AcpConnectionState, reportAsyncError } from './acp-connection-state'
 import { parseGrokVersion } from './grok-cli'
+import type { AgentPermissionMode } from '../shared/types'
 import {
   createGrokInstallerEnvironment,
   installGrokCli,
@@ -29,6 +30,8 @@ const settingsStore = new Store<AppSettings>({ name: 'settings', defaults, clear
 let mainWindow: BrowserWindow | null = null
 const acpConnection = new AcpConnectionState<GrokAcpClient>()
 let connectedExecutable = ''
+/** Always resets to `ask` when the process starts (not persisted). */
+let agentPermissionMode: AgentPermissionMode = 'ask'
 const billingCache = new BillingCache<unknown>()
 const lifecycleOperation = new SingleLifecycleOperation()
 
@@ -87,7 +90,7 @@ async function connectAcp(): Promise<GrokAcpClient> {
       connectedExecutable = ''
       send('grok:status-update', { connected: false, message })
     }
-  }, app.getVersion())
+  }, app.getVersion(), agentPermissionMode === 'always-approve')
   const promise = (async (): Promise<GrokAcpClient> => {
     await client.start()
     if (settings().grokExecutable !== executable || !acpConnection.commit(generation, client)) {
@@ -184,6 +187,35 @@ function registerIpc(): void {
   ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort)))
   ipcMain.handle('grok:config', async (_event, sessionId: string, configId: string, value: string | boolean) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setConfigOption(sessionId, configId, value)))
   ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => lifecycleOperation.runShared('Grok 權限回覆', async () => acpConnection.current?.respondPermission(requestId, optionId)))
+  ipcMain.handle('grok:permission-mode:get', () => agentPermissionMode)
+  ipcMain.handle('grok:permission-mode:set', async (_event, mode: AgentPermissionMode) => {
+    if (mode !== 'ask' && mode !== 'always-approve') throw new Error('Invalid permission mode')
+    if (agentPermissionMode === mode) return agentPermissionMode
+    agentPermissionMode = mode
+    const wasConnected = acpConnection.current !== null || acpConnecting !== null
+    disconnectAcp()
+    send('grok:status-update', {
+      connected: false,
+      message: mode === 'always-approve'
+        ? '已切換為一律核准（YOLO），需重新連線後生效'
+        : '已切換為每次詢問，需重新連線後生效'
+    })
+    if (wasConnected) {
+      try {
+        await connectAcp()
+        send('grok:status-update', {
+          connected: true,
+          message: mode === 'always-approve' ? 'YOLO 模式已啟用（高風險）' : '權限模式：每次詢問'
+        })
+      } catch (error) {
+        send('grok:status-update', {
+          connected: false,
+          message: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+    return agentPermissionMode
+  })
   ipcMain.handle('dialog:directory', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0]
