@@ -37,6 +37,7 @@ const createApiMock = (): GrokBridgeApi => ({
   respondPermission: vi.fn(), chooseDirectory: vi.fn(), chooseFiles: vi.fn(),
   savePasteImage: vi.fn().mockResolvedValue({ path: 'C:\\Users\\demo\\AppData\\Local\\Temp\\grok-build-gui-paste\\paste-1.png' }),
   exportSession: vi.fn(), openTui: vi.fn(), openExternal: vi.fn(),
+  notify: vi.fn().mockResolvedValue(false),
   onEvent: vi.fn().mockReturnValue(() => {}), onPermission: vi.fn().mockReturnValue(() => {}), onStatus: vi.fn().mockReturnValue(() => {})
 } as unknown as GrokBridgeApi)
 
@@ -273,13 +274,13 @@ describe('App', () => {
     render(<App />)
 
     await user.click(await screen.findByText('Fix tests'))
-    expect(screen.getByRole('combobox', { name: 'Mode' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '工作模式' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /Grok 0\.2\.93.*Connected/ }))
     await user.click(screen.getByTitle('命令'))
 
     expect(screen.queryByText('/legacy-command')).not.toBeInTheDocument()
-    expect(screen.queryByRole('combobox', { name: 'Mode' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '工作模式' })).not.toBeInTheDocument()
   })
 
   it('clears a stale mode when a session response explicitly reports an empty mode list', async () => {
@@ -300,7 +301,7 @@ describe('App', () => {
 
     await user.click(await screen.findByRole('button', { name: /新 Session/ }))
     expect(await screen.findByRole('heading', { name: 'New session' })).toBeInTheDocument()
-    expect(screen.queryByRole('combobox', { name: 'Mode' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '工作模式' })).not.toBeInTheDocument()
   })
 
   it('keeps rendering when a session summary has a corrupted timestamp', async () => {
@@ -802,7 +803,7 @@ describe('App', () => {
     await user.click(await screen.findByText('Fix tests'))
     act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
 
-    const composer = await screen.findByPlaceholderText(/回合進行中可輸入插話/)
+    const composer = await screen.findByPlaceholderText(/回合進行中可插話/)
     expect(composer).not.toBeDisabled()
     await user.type(composer, '改做這件事')
     await user.click(screen.getByTestId('interject-button'))
@@ -825,7 +826,7 @@ describe('App', () => {
 
     await user.click(await screen.findByText('Fix tests'))
     act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
-    const composer = await screen.findByPlaceholderText(/回合進行中可輸入插話/)
+    const composer = await screen.findByPlaceholderText(/回合進行中可插話/)
     await user.type(composer, '立刻換任務')
     await user.click(screen.getByTestId('do-this-now-button'))
 
@@ -845,7 +846,7 @@ describe('App', () => {
 
     await user.click(await screen.findByText('Fix tests'))
     act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
-    const composer = await screen.findByPlaceholderText(/回合進行中可輸入插話/)
+    const composer = await screen.findByPlaceholderText(/回合進行中可插話/)
     await user.type(composer, 'hello')
     await user.click(screen.getByTestId('interject-button'))
 
@@ -865,7 +866,7 @@ describe('App', () => {
 
     await user.click(await screen.findByText('Fix tests'))
     act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
-    const composer = await screen.findByPlaceholderText(/回合進行中可輸入插話/)
+    const composer = await screen.findByPlaceholderText(/回合進行中可插話/)
     await user.type(composer, 'queued text')
     await user.click(screen.getByTestId('interject-button'))
     expect(await screen.findByTestId('interject-status')).toBeInTheDocument()
@@ -911,5 +912,125 @@ describe('App', () => {
     expect(screen.getByLabelText('Context 視窗用量')).toBeInTheDocument()
     expect(screen.getByTestId('quota-reactor')).toHaveAttribute('data-billing-zone', 'subscription')
     expect(screen.getByLabelText('訂閱週額度摘要')).toBeInTheDocument()
+  })
+
+  it('F-MED-2: paste path chip shows optional thumbnail preview', async () => {
+    const api = createApiMock()
+    const savedPath = 'C:\\Users\\demo\\AppData\\Local\\Temp\\grok-build-gui-paste\\paste-thumb.png'
+    api.savePasteImage = vi.fn().mockResolvedValue({ path: savedPath })
+    const createObjectURL = vi.fn().mockReturnValue('blob:mock-preview')
+    const revokeObjectURL = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    const composer = screen.getByPlaceholderText(/交給 Grok 一個任務/) as HTMLTextAreaElement
+    const file = new File([Uint8Array.from([137, 80, 78, 71])], 'clip.png', { type: 'image/png' })
+    await act(async () => {
+      fireEvent.paste(composer, {
+        clipboardData: {
+          files: [file],
+          items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+          types: ['Files']
+        }
+      })
+    })
+
+    await waitFor(() => expect(composer).toHaveValue(savedPath))
+    expect(screen.getByTestId('path-chip')).toBeInTheDocument()
+    expect(screen.getByTestId('path-chip-thumb')).toHaveAttribute('src', 'blob:mock-preview')
+  })
+
+  it('F-RT-4: shows Chinese session mode labels when modes are available', async () => {
+    const api = createApiMock()
+    api.connect = vi.fn().mockResolvedValue({
+      loadSession: true,
+      promptCapabilities: {},
+      sessionCapabilities: {},
+      modes: [],
+      commands: []
+    })
+    api.loadSession = vi.fn().mockResolvedValue({
+      sessionId: 's1',
+      modes: {
+        currentModeId: 'plan',
+        availableModes: [
+          { id: 'plan', name: 'Plan' },
+          { id: 'code', name: 'Code' }
+        ]
+      }
+    })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByText('Fix tests'))
+    await waitFor(() => expect(api.loadSession).toHaveBeenCalled())
+    const select = await screen.findByTestId('session-mode-select')
+    expect(select).toHaveAttribute('aria-label', '工作模式')
+    expect(screen.getByRole('option', { name: '計畫模式' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '執行模式' })).toBeInTheDocument()
+  })
+
+  it('F-INT-4: queues next turn and auto-sends when the current turn completes', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.sendPrompt = vi.fn().mockResolvedValue(undefined)
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
+    const composer = await screen.findByPlaceholderText(/回合進行中可插話/)
+    await user.type(composer, '下一輪做這個')
+    await user.click(screen.getByTestId('queue-next-button'))
+
+    expect(await screen.findByTestId('local-queue-status')).toHaveTextContent('下一輪已排隊')
+    expect(api.interject).not.toHaveBeenCalled()
+    expect(api.cancel).not.toHaveBeenCalled()
+    expect(composer).toHaveValue('')
+
+    act(() => { onEvent?.({ id: 'turn-done', sessionId: 's1', kind: 'turn', status: 'completed' }) })
+    await waitFor(() => expect(api.sendPrompt).toHaveBeenCalledWith('s1', [{ type: 'text', text: '下一輪做這個' }]))
+    await waitFor(() => expect(screen.queryByTestId('local-queue-status')).not.toBeInTheDocument())
+    expect(api.notify).toHaveBeenCalled()
+  })
+
+  it('F-TOOL-3: settings show CLI update hint', async () => {
+    window.grokApi = createApiMock()
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: /設定/ }))
+    expect(await screen.findByTestId('cli-update-hint')).toHaveTextContent(/官方腳本更新/)
+    expect(screen.getByTestId('cli-update-hint')).toHaveTextContent('0.2.93')
+  })
+
+  it('F-RT-5: command palette lists all availableCommands entries', async () => {
+    const api = createApiMock()
+    api.connect = vi.fn().mockResolvedValue({
+      loadSession: true,
+      promptCapabilities: {},
+      sessionCapabilities: {},
+      modes: [],
+      commands: [
+        { name: 'compact', description: '壓縮 context' },
+        { name: 'context', description: '顯示用量', inputHint: 'detail' },
+        { name: 'session-info', description: 'Session 資訊' }
+      ]
+    })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByText(/Grok 0.2.93/))
+    await waitFor(() => expect(api.connect).toHaveBeenCalled())
+    await user.click(await screen.findByText('Fix tests'))
+    await user.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
+    expect(await screen.findByText('/compact')).toBeInTheDocument()
+    expect(screen.getByText('/context')).toBeInTheDocument()
+    expect(screen.getByText('/session-info')).toBeInTheDocument()
   })
 })

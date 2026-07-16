@@ -13,6 +13,28 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
 
+## [0.5.1] - 2026-07-16
+
+### Added
+
+- **F-MED-2**: path chip optional thumbnail preview for paste/drag-drop images.
+- **F-INT-4**: local **排隊下一輪** (client-side next-turn queue). Official research has no `x.ai/queue/*` prompt API; drains via `session/prompt` when the turn ends.
+- **F-RT-4**: Chinese session mode labels（計畫模式／執行模式…）and 工作模式 control copy.
+- **F-RT-5**: command palette consumes full `availableCommands` (name, description, `inputHint`).
+- **F-UX-1**: OS notification on turn complete when the main window is not focused.
+- **F-TOOL-3**: settings CLI update hint (official install script).
+- Interject / process-kill manual smoke checklist in `BETA_TESTING.md`.
+
+### Changed
+
+- Quit path **awaits** process-tree kill (`before-quit`) so grok children are less likely to orphan.
+- `GrokAcpClient.stop()` is async and awaits `killProcessTree`.
+
+### Notes
+
+- Heavy items slipped to **0.5.2**: multi-session side-by-side (F-SES-2), deep session admin (`x.ai/session/*`), headless side jobs, inspect panel, prompt templates.
+- No official `x.ai/queue/*` wrapper — local queue only (documented above).
+
 ## [0.5.0] - 2026-07-16
 
 ### Added
@@ -32,7 +54,6 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 
 ### Notes
 
-- Thumbnail preview for path chips deferred to 0.5.1 (path chip kept).
 - Session cancel remains ACP-level and does **not** kill the grok process tree.
 
 ## [0.4.1] - 2026-07-16

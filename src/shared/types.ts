@@ -14,7 +14,7 @@ export type UiSessionEvent =
   | { id: string; sessionId: string; kind: 'subagent'; subagentId: string; description: string; status: string; output?: string }
   | { id: string; sessionId: string; kind: 'task'; taskId: string; description: string; status: string }
   | { id: string; sessionId: string; kind: 'recap'; summary: string }
-  | { id: string; sessionId: string; kind: 'commands'; commands: Array<{ name: string; description?: string }> }
+  | { id: string; sessionId: string; kind: 'commands'; commands: Array<{ name: string; description?: string; inputHint?: string }> }
   | { id: string; sessionId: string; kind: 'mode'; modeId: string }
   | { id: string; sessionId: string; kind: 'usage'; used?: number; size?: number; cost?: number }
   | { id: string; sessionId: string; kind: 'compact'; before?: number; after?: number; summary?: string }
@@ -53,7 +53,7 @@ export type AgentCapabilities = {
   promptCapabilities: Record<string, unknown>
   sessionCapabilities: Record<string, unknown>
   modes: Array<{ id: string; name: string }>
-  commands: Array<{ name: string; description?: string }>
+  commands: Array<{ name: string; description?: string; inputHint?: string }>
   currentModeId?: string
   modelState?: ModelState
 }

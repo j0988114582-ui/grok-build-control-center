@@ -29,7 +29,7 @@ describe('normalizeAcpUpdate', () => {
   })
 
   it('maps commands, mode, usage and compaction updates for desktop controls', () => {
-    expect(normalizeAcpUpdate('s', { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'Compact context' }] })).toMatchObject({ kind: 'commands', commands: [{ name: 'compact', description: 'Compact context' }] })
+    expect(normalizeAcpUpdate('s', { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'Compact context', inputHint: 'optional' }] })).toMatchObject({ kind: 'commands', commands: [{ name: 'compact', description: 'Compact context', inputHint: 'optional' }] })
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'current_mode_update', currentModeId: 'plan' })).toMatchObject({ kind: 'mode', modeId: 'plan' })
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'usage_update', used: 120, size: 1000 })).toMatchObject({ kind: 'usage' })
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'auto_compact_completed', tokens_before: 900, tokens_after: 300 })).toMatchObject({ kind: 'compact', before: 900, after: 300 })

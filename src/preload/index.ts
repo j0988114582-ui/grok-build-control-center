@@ -30,6 +30,7 @@ const api: GrokBridgeApi = {
   exportSession: (sessionId) => ipcRenderer.invoke('grok:export', sessionId),
   openTui: (cwd) => ipcRenderer.invoke('grok:tui', cwd),
   openExternal: (url) => ipcRenderer.invoke('shell:external', url),
+  notify: (payload) => ipcRenderer.invoke('app:notify', payload),
   onEvent: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, value: UiSessionEvent): void => callback(value)
     ipcRenderer.on('grok:event', listener)

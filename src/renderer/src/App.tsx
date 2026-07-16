@@ -20,6 +20,17 @@ import {
   isMethodNotFoundError,
   type InterjectUiState
 } from '../../shared/interject'
+import {
+  hasQueuedPayload,
+  LOCAL_QUEUE_CLEARED_NOTICE,
+  LOCAL_QUEUE_NOTICE,
+  LOCAL_QUEUE_STATUS,
+  shouldDrainLocalQueue,
+  takeQueueForSession,
+  type LocalQueuedPrompt
+} from '../../shared/local-queue'
+import { buildSlashPaletteEntries } from '../../shared/palette-commands'
+import { localizeSessionModes, sessionModeControlTitle } from '../../shared/session-modes'
 import { QuotaRings } from './components/QuotaRings'
 import { ModelPicker } from './components/ModelPicker'
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette'
@@ -127,11 +138,13 @@ function EventCard({ event, query }: { event: UiSessionEvent; query: string }): 
 const MemoEventCard = React.memo(EventCard)
 const TranscriptFooter = (): React.JSX.Element => <div className="transcript-end">END OF CURRENT CONTEXT</div>
 
-function SettingsPanel({ settings, onSave, onClose }: { settings: AppSettings; onSave: (settings: AppSettings) => void; onClose: () => void }): React.JSX.Element {
+function SettingsPanel({ settings, onSave, onClose, cliVersion }: { settings: AppSettings; onSave: (settings: AppSettings) => void; onClose: () => void; cliVersion?: string }): React.JSX.Element {
   const [draft, setDraft] = useState(settings)
   const conflicts = findShortcutConflicts(draft.shortcuts)
   return <aside className="drawer"><div className="drawer-head"><div><span className="eyebrow">LOCAL PREFERENCES</span><h2>工作台設定</h2></div><button className="icon-button" onClick={onClose}><X /></button></div>
-    <div className="settings-section"><label>Grok 執行檔<input value={draft.grokExecutable} onChange={(event) => setDraft({ ...draft, grokExecutable: event.target.value })} /></label></div>
+    <div className="settings-section"><label>Grok 執行檔<input value={draft.grokExecutable} onChange={(event) => setDraft({ ...draft, grokExecutable: event.target.value })} /></label>
+      <p className="cli-update-hint" data-testid="cli-update-hint">目前 CLI{cliVersion ? ` ${cliVersion}` : ''}。若缺少插話、額度或新指令，請以官方腳本更新：<code>irm https://x.ai/cli/install.ps1 | iex</code></p>
+    </div>
     <div className="settings-grid">
       <label>字級 <output>{draft.fontSize}px</output><input type="range" min="12" max="22" value={draft.fontSize} onChange={(event) => setDraft({ ...draft, fontSize: Number(event.target.value) })} /></label>
       <label>行高 <output>{draft.lineHeight.toFixed(2)}</output><input type="range" min="1.2" max="2.1" step="0.05" value={draft.lineHeight} onChange={(event) => setDraft({ ...draft, lineHeight: Number(event.target.value) })} /></label>
@@ -180,10 +193,15 @@ export function App(): React.JSX.Element {
   const [yoloConfirm, setYoloConfirm] = useState(false)
   const [yoloBusy, setYoloBusy] = useState(false)
   const [loadingSessionIds, setLoadingSessionIds] = useState<string[]>([])
-  const [pastePathChip, setPastePathChip] = useState<string | null>(null)
+  /** F-MED-2: path chip with optional in-memory thumbnail (object/data URL). */
+  const [pastePathChip, setPastePathChip] = useState<{ path: string; previewUrl?: string } | null>(null)
   /** Mid-turn interjection lifecycle (queued → cleared on turn end / cancel discard). */
   const [interjectState, setInterjectState] = useState<InterjectUiState>(null)
   const [interjectBusy, setInterjectBusy] = useState(false)
+  /** F-INT-4: local next-turn queue (no official x.ai/queue/* method). */
+  const [localQueue, setLocalQueue] = useState<LocalQueuedPrompt | null>(null)
+  const localQueueRef = useRef<LocalQueuedPrompt | null>(null)
+  localQueueRef.current = localQueue
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [usage, setUsage] = useState<SessionUsage | null>(null)
@@ -327,6 +345,28 @@ export function App(): React.JSX.Element {
           // P1-1: no drain evidence via SDK closed union — clear queued without claiming delivered.
           setInterjectState((current) =>
             current?.status === 'queued' && current.sessionId === event.sessionId ? null : current)
+          // F-INT-4: drain local next-turn queue after the active turn ends.
+          if (shouldDrainLocalQueue(event.status)) {
+            const { next, drained } = takeQueueForSession(localQueueRef.current, event.sessionId)
+            if (drained) {
+              localQueueRef.current = next
+              setLocalQueue(next)
+              const blocks: PromptBlock[] = [
+                ...(drained.text ? [{ type: 'text' as const, text: drained.text }] : []),
+                ...drained.attachments
+              ]
+              setRunningMap((current) => ({ ...current, [event.sessionId]: true }))
+              void window.grokApi.sendPrompt(event.sessionId, blocks).catch((error) => {
+                setNotice(error instanceof Error ? error.message : String(error))
+                setRunningMap((current) => ({ ...current, [event.sessionId]: false }))
+              })
+            }
+          }
+          // F-UX-1: system notification when the turn finishes (main suppresses if focused).
+          if (event.status === 'completed' || event.status === 'cancelled' || event.status === 'error') {
+            const title = event.status === 'completed' ? 'Grok 回合完成' : event.status === 'cancelled' ? 'Grok 回合已取消' : 'Grok 回合結束（錯誤）'
+            void window.grokApi.notify({ title, body: '回到 Grok Build Control Center 查看結果' }).catch(() => undefined)
+          }
           void refreshUsageRef.current(event.sessionId)
           void refreshSessionsRef.current()
           window.setTimeout(() => { void refreshBillingRef.current() }, 800)
@@ -623,6 +663,8 @@ export function App(): React.JSX.Element {
       const previousUsage = usage
       const previousEvents = events[session.id]
       setActive(session)
+      // Eagerly align the ref so post-await mode/model apply is not raced away by render timing.
+      activeIdRef.current = session.id
       setPastePathChip(null)
       setUsage(null)
       setFollowTail(true)
@@ -795,6 +837,11 @@ export function App(): React.JSX.Element {
     const pendingAttachments = attachments
     setInterjectBusy(true)
     discardQueuedInterject(sessionId)
+    // Immediately-send supersedes a local next-turn queue for this session.
+    if (localQueue?.sessionId === sessionId) {
+      localQueueRef.current = null
+      setLocalQueue(null)
+    }
     setDrafts((current) => ({ ...current, [sessionId]: '' }))
     setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
     try {
@@ -814,6 +861,31 @@ export function App(): React.JSX.Element {
     } finally {
       setInterjectBusy(false)
     }
+  }
+
+  /** F-INT-4: queue a full next-turn prompt to auto-send when the current turn ends. */
+  const queueNextTurn = (): void => {
+    if (!active || !running || interjectBusy) return
+    const sessionId = active.id
+    const text = drafts[sessionId]?.trim()
+    if (!text && !attachments.length) return
+    const item: LocalQueuedPrompt = {
+      sessionId,
+      ...(text ? { text } : {}),
+      attachments: [...attachments]
+    }
+    localQueueRef.current = item
+    setLocalQueue(item)
+    setDrafts((current) => ({ ...current, [sessionId]: '' }))
+    setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
+    setNotice(LOCAL_QUEUE_NOTICE)
+  }
+
+  const clearLocalQueue = (): void => {
+    if (!localQueue) return
+    localQueueRef.current = null
+    setLocalQueue(null)
+    setNotice(LOCAL_QUEUE_CLEARED_NOTICE)
   }
 
   const chooseFiles = async (): Promise<void> => { try { const files = await window.grokApi.chooseFiles(); addSelectedFiles(files) } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) } }
@@ -940,7 +1012,21 @@ export function App(): React.JSX.Element {
         const joined = paths.join('\n')
         return { ...current, [sessionId]: previous ? `${previous}\n${joined}` : joined }
       })
-      setPastePathChip(paths[paths.length - 1] ?? null)
+      // F-MED-2: keep a small in-memory preview (object URL) next to the path chip.
+      const lastPath = paths[paths.length - 1]
+      if (lastPath) {
+        const lastFile = imageFiles[imageFiles.length - 1]
+        let previewUrl: string | undefined
+        try {
+          if (lastFile) previewUrl = URL.createObjectURL(lastFile)
+        } catch { /* preview is optional */ }
+        setPastePathChip((previous) => {
+          if (previous?.previewUrl?.startsWith('blob:')) {
+            try { URL.revokeObjectURL(previous.previewUrl) } catch { /* ignore */ }
+          }
+          return { path: lastPath, ...(previewUrl ? { previewUrl } : {}) }
+        })
+      }
       setNotice(failed
         ? `已改以本機路徑附上（ACP 目前不支援內嵌圖片）；${failed} 張失敗`
         : '已改以本機路徑附上（ACP 目前不支援內嵌圖片）')
@@ -967,9 +1053,18 @@ export function App(): React.JSX.Element {
     ingestImageFiles(files, 'drop')
   }
   const dismissPastePathChip = (): void => {
-    if (!active || !pastePathChip) { setPastePathChip(null); return }
+    if (!active || !pastePathChip) {
+      if (pastePathChip?.previewUrl?.startsWith('blob:')) {
+        try { URL.revokeObjectURL(pastePathChip.previewUrl) } catch { /* ignore */ }
+      }
+      setPastePathChip(null)
+      return
+    }
     const sessionId = active.id
-    const path = pastePathChip
+    const path = pastePathChip.path
+    if (pastePathChip.previewUrl?.startsWith('blob:')) {
+      try { URL.revokeObjectURL(pastePathChip.previewUrl) } catch { /* ignore */ }
+    }
     setPastePathChip(null)
     setDrafts((current) => {
       const previous = current[sessionId] ?? ''
@@ -988,10 +1083,22 @@ export function App(): React.JSX.Element {
   const usageLevel = usagePercent === undefined ? '' : usagePercent >= 85 ? 'danger' : usagePercent >= 60 ? 'warn' : ''
 
   const effectiveImmersion = settings.theme === 'light' ? 'focus' : settings.immersion
+  const localizedModes = useMemo(() => localizeSessionModes(caps.modes), [caps.modes])
+  // F-RT-5: full availableCommands (name/description/inputHint) + native GUI actions.
+  const slashPalette = buildSlashPaletteEntries(caps.commands)
   const paletteCommands: PaletteCommand[] = [
-    { id: 'new-session', label: '建立新對話', description: '選擇專案資料夾並啟動 Grok', keywords: 'new session 專案 資料夾', shortcut: shortcutFor('newSession').replaceAll('+', ' '), onRun: () => { void createSession() } },
+    { id: 'new-session', label: '建立新對話', description: '選擇專案資料夾並啟動 Grok', keywords: 'new session 專案 資料夾', shortcut: shortcutFor('newSession').replaceAll('+', ' '), onRun: () => { createSessionRef.current() } },
     { id: 'search-transcript', label: '搜尋目前對話', description: '在已載入的訊息中找文字', keywords: 'find search transcript 尋找', shortcut: shortcutFor('searchTranscript').replaceAll('+', ' '), onRun: () => { setSearchOpen(true); window.setTimeout(() => transcriptSearchRef.current?.focus(), 0) } },
-    ...caps.commands.map((command): PaletteCommand => ({ id: `slash:${command.name}`, label: `/${command.name}`, description: command.description, keywords: `${command.name} slash command`, onRun: () => { if (active) setDrafts((current) => ({ ...current, [active.id]: `/${command.name} ` })) } }))
+    ...slashPalette.map((entry): PaletteCommand => ({
+      id: entry.id,
+      label: entry.label,
+      description: entry.description,
+      keywords: entry.keywords,
+      onRun: () => {
+        if (!active) return
+        setDrafts((current) => ({ ...current, [active.id]: entry.insertText }))
+      }
+    }))
   ]
 
   return <div className="app" data-theme={settings.theme} data-immersion={effectiveImmersion} data-cursor={settings.effects.cursor && !settings.effects.reducedMotion ? 'true' : undefined} data-fx-off={settings.effects.reducedMotion ? 'true' : undefined} style={{ '--font-size': `${settings.fontSize}px`, '--line-height': settings.lineHeight, '--content-width': `${settings.contentWidth}px` } as React.CSSProperties}>
@@ -1029,20 +1136,20 @@ export function App(): React.JSX.Element {
         {!sidebarOpen && <button className="icon-button sidebar-expand-float" aria-label="展開側欄" onClick={() => setSidebarOpen(true)}><PanelLeft /></button>}
         {permissionMode === 'always-approve' && <div className="yolo-banner">⚠️ <strong>YOLO</strong> 模式：已啟用一律核准，可能會自動通過風險操作。</div>}
         {!active ? <section className="empty-state"><div className="empty-orbit"><Cpu /><span /></div><span className="eyebrow">WINDOWS GROK BUILD CONTROL CENTER</span><h1>{status.found ? <>選一個專案資料夾，<br/><em>就可以開始。</em></> : <>第一次使用？<br/><em>一鍵準備 Grok。</em></>}</h1><p>{status.found ? '不用輸入終端指令。這裡會替你連接本機 Grok、保留未送出的文字，並在執行前顯示權限確認。' : '不用先學終端，也不用安裝 Node.js。程式會在你確認後，從 x.ai 官方來源安裝 Grok CLI。'}</p><div className="onboarding-steps">{status.found ? <><span><b>1</b>按「選擇專案開始」</span><span><b>2</b>選擇你的工作資料夾</span><span><b>3</b>用白話交代任務</span></> : <><span><b>1</b>確認安裝 Grok CLI</span><span><b>2</b>在瀏覽器登入 Grok</span><span><b>3</b>選資料夾開始</span></>}</div><div>{status.found ? <><button className="primary large" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => void createSession()}><FolderOpen />選擇專案開始</button><button className="secondary large" disabled={lifecycleBusy} onClick={() => void connect()}><Play />連接本機 Grok</button></> : <button className="primary large" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => openSetupDialog('install')}><TerminalSquare />安裝 Grok CLI</button>}</div><div className="empty-stats"><span><b>{sessions.length}</b>個本機對話</span><span><b>{status.version ?? '—'}</b>Grok CLI 版本</span><span><b>ACP</b>不模擬終端</span></div></section> : <>
-          <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{caps.modes.length > 0 && <select aria-label="Mode" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>Mode</option>{caps.modes.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}</select>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) setNotice(`已匯出到 ${path}`) }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
+          <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) setNotice(`已匯出到 ${path}`) }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button><button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
           <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
           <footer className="composer-wrap" onDragOver={onComposerDragOver} onDrop={onComposerDrop}>
             <div className="composer-status">
               {running
-                ? <><LoaderCircle className="spin" />Grok 正在執行工具或生成回覆{interjectState?.status === 'queued' && interjectState.sessionId === active.id ? <em className="interject-queued" data-testid="interject-status"> · {INTERJECT_QUEUED_NOTICE}</em> : null}</>
+                ? <><LoaderCircle className="spin" />Grok 正在執行工具或生成回覆{interjectState?.status === 'queued' && interjectState.sessionId === active.id ? <em className="interject-queued" data-testid="interject-status"> · {INTERJECT_QUEUED_NOTICE}</em> : null}{localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue) ? <em className="local-queue-status" data-testid="local-queue-status"> · {LOCAL_QUEUE_STATUS}</em> : null}</>
                 : lifecycleBusy || sessionLoading
                   ? <><LoaderCircle className="spin" />系統忙碌中（連線或載入）</>
-                  : <><span className="ready-dot" />準備就緒</>}
+                  : <><span className="ready-dot" />準備就緒{localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue) ? <em className="local-queue-status" data-testid="local-queue-status"> · {LOCAL_QUEUE_STATUS}</em> : null}</>}
               <span>{running ? `${shortcutLabel('sendPrompt')} 插話 · ${shortcutLabel('cancelTurn')} 停止` : `${shortcutLabel('sendPrompt')} 傳送 · ${shortcutLabel('newline')} 換行 · ${shortcutLabel('cancelTurn')} 取消`}</span>
             </div>
             {attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}
-            {pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip}><Paperclip /><em>{pastePathChip}</em><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}
+            {pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip.path} data-testid="path-chip">{pastePathChip.previewUrl ? <img className="path-chip-thumb" data-testid="path-chip-thumb" src={pastePathChip.previewUrl} alt="" width={28} height={28} /> : <Paperclip />}<em>{pastePathChip.path}</em><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}
             <div className="composer">
               <button className="attach-button" aria-label="加入檔案" onClick={() => void chooseFiles()}><Paperclip /></button>
               <textarea
@@ -1050,11 +1157,13 @@ export function App(): React.JSX.Element {
                 onChange={(event) => setDrafts((current) => ({ ...current, [active.id]: event.target.value }))}
                 onKeyDown={composerKey}
                 onPaste={paste}
-                placeholder={running ? '回合進行中可輸入插話，或改用「立刻改做」…' : '交給 Grok 一個任務，或貼上／拖放圖片與檔案路徑…'}
+                placeholder={running ? '回合進行中可插話、排隊下一輪，或立刻改做…' : '交給 Grok 一個任務，或貼上／拖放圖片與檔案路徑…'}
                 rows={3}
               />
               {running ? <div className="composer-actions running">
                 <button type="button" className="interject-button" data-testid="interject-button" title="在下一個安全點插入指示（不取消目前回合）" disabled={interjectBusy || !(drafts[active.id] ?? '').trim()} onClick={() => void sendInterject()}><MessageSquare />插話</button>
+                <button type="button" className="queue-next-button" data-testid="queue-next-button" title="目前回合結束後自動送出（本機排隊，非官方 queue API）" disabled={interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => queueNextTurn()}><ListTodo />排隊下一輪</button>
+                {localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue) ? <button type="button" className="queue-clear-button" data-testid="queue-clear-button" title="取消已排隊的下一輪" onClick={() => clearLocalQueue()}><X />取消排隊</button> : null}
                 <button type="button" className="do-now-button" data-testid="do-this-now-button" title="取消目前回合並立刻送出新指示" disabled={interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => void doThisNow()}><Zap />立刻改做</button>
                 <button type="button" className="stop-button" data-nova-tone="danger" data-testid="stop-button" onClick={() => void cancelActiveTurn(active.id).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Square />停止</button>
               </div> : <button className="send-button" data-magnetic data-nova-tone="primary" onClick={() => void sendPrompt()}><Send />送出</button>}
@@ -1062,7 +1171,7 @@ export function App(): React.JSX.Element {
           </footer>
         </>}
       </main>
-      {panel === 'settings' && <SettingsPanel settings={settings} onClose={() => setPanel('none')} onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none') })} />}
+      {panel === 'settings' && <SettingsPanel settings={settings} cliVersion={status.version} onClose={() => setPanel('none')} onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none') })} />}
       {panel === 'features' && <aside className="drawer"><div className="drawer-head"><div><span className="eyebrow">CAPABILITY ROUTER</span><h2>功能矩陣</h2></div><button className="icon-button" onClick={() => setPanel('none')}><X /></button></div><p className="drawer-intro">有結構化 ACP 介面才在 GUI 原生操作；其餘明確回到 TUI，不模擬終端按鍵。</p><div className="feature-list">{FEATURES.map(([name, route, state]) => <div key={name}><span className={state}>{state === 'native' ? <Check /> : state === 'conditional' ? <Cpu /> : <TerminalSquare />}</span><strong>{name}</strong><small>{route}</small></div>)}</div>{active && <button className="secondary wide" onClick={() => openTui(active.cwd)}><TerminalSquare />在 GROK TUI 開啟</button>}</aside>}
     </div>
     {panel === 'commands' && <CommandPalette commands={paletteCommands} recentIds={settings.recentCommands} onUse={rememberCommand} onClose={() => setPanel('none')} />}

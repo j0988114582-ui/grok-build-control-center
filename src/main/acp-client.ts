@@ -13,6 +13,7 @@ import type {
 import type { AgentCapabilities, ModelState, PermissionOption, PermissionRequest, PromptBlock, UiSessionEvent } from '../shared/types'
 import { normalizeAcpUpdate } from '../shared/event-adapter'
 import { buildInterjectParams, INTERJECT_METHOD, parseInterjectResult, type InterjectResult } from '../shared/interject'
+import { normalizeAvailableCommands } from '../shared/palette-commands'
 import { buildAgentArgs } from './grok-cli'
 import { killProcessTree } from './process-tree'
 import { selectPermissionOutcome } from './permissions'
@@ -148,16 +149,12 @@ export class GrokAcpClient {
       const modelState = normalizeModelState(meta.modelState)
       if (modelState) this.capabilities.modelState = modelState
       if (Array.isArray(meta.availableCommands)) {
-        this.capabilities.commands = meta.availableCommands.flatMap((item) => {
-          if (!item || typeof item !== 'object') return []
-          const command = item as Record<string, unknown>
-          if (typeof command.name !== 'string') return []
-          return [{ name: command.name, ...(typeof command.description === 'string' ? { description: command.description } : {}) }]
-        })
+        // F-RT-5: consume full availableCommands (name, description, inputHint).
+        this.capabilities.commands = normalizeAvailableCommands(meta.availableCommands)
       }
       return this.capabilities
     } catch (error) {
-      this.stop()
+      void this.stop()
       throw error
     } finally {
       clearTimeout(startTimer)
@@ -242,15 +239,18 @@ export class GrokAcpClient {
     pending.resolve(outcome)
   }
 
-  stop(): void {
+  /**
+   * Close ACP and await process-tree kill so quit/disconnect can wait for cleanup.
+   * F-RT-1: taskkill /T /F on Windows. Not the same as session/cancel.
+   */
+  async stop(): Promise<void> {
     this.cancelPermissions()
     this.connection?.close()
     const pid = this.child?.pid
     this.child = undefined
     this.connection = undefined
     this.context = undefined
-    // F-RT-1: kill the full process tree (taskkill /T /F on Windows). Not the same as session/cancel.
-    if (pid !== undefined) void killProcessTree(pid)
+    if (pid !== undefined) await killProcessTree(pid)
   }
 
   private requireContext(): acp.ClientContext {

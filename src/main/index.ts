@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
 import { execFile, spawn } from 'node:child_process'
 import { access, mkdir, mkdtemp, readdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
@@ -87,12 +87,26 @@ const executeLifecycleFile: ExecuteFile = async (executable, args, options) => {
 
 function disconnectAcp(): void {
   const current = acpConnection.current
+  const connecting = acpConnecting?.client
   acpConnection.begin()
   connectedExecutable = ''
-  current?.stop()
-  acpConnecting?.client.stop()
   acpConnecting = null
   billingCache.clear()
+  // Fire-and-forget during normal disconnect; quit path awaits stopAllAcpClients.
+  void current?.stop()
+  void connecting?.stop()
+}
+
+/** Await process-tree kill for every live / connecting client (quit path). */
+async function stopAllAcpClients(): Promise<void> {
+  const clients = [acpConnection.current, acpConnecting?.client].filter((client): client is GrokAcpClient => Boolean(client))
+  acpConnection.begin()
+  acpConnecting = null
+  connectedExecutable = ''
+  billingCache.clear()
+  await Promise.all(clients.map(async (client) => {
+    try { await client.stop() } catch { /* best-effort on quit */ }
+  }))
 }
 
 async function cliStatus(): Promise<CliStatus> {
@@ -113,10 +127,10 @@ async function connectAcp(): Promise<GrokAcpClient> {
   const executable = settings().grokExecutable
   if (acpConnection.current && connectedExecutable === executable) return acpConnection.current
   if (acpConnecting?.executable === executable) return acpConnecting.promise
-  acpConnecting?.client.stop()
+  void acpConnecting?.client.stop()
   const previous = acpConnection.current
   const generation = acpConnection.begin()
-  previous?.stop()
+  void previous?.stop()
   const client = new GrokAcpClient(executable, {
     onEvent: (event) => send('grok:event', event),
     onPermission: (request) => send('grok:permission-request', request),
@@ -130,7 +144,7 @@ async function connectAcp(): Promise<GrokAcpClient> {
   const promise = (async (): Promise<GrokAcpClient> => {
     await client.start()
     if (settings().grokExecutable !== executable || !acpConnection.commit(generation, client)) {
-      client.stop()
+      void client.stop()
       throw new Error('Grok 執行檔設定已變更,請重新連線')
     }
     connectedExecutable = executable
@@ -317,6 +331,19 @@ function registerIpc(): void {
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Only HTTP(S) links are allowed')
     await shell.openExternal(parsed.toString())
   })
+  /** F-UX-1: OS notification when a turn completes and the window is not focused. */
+  ipcMain.handle('app:notify', (_event, payload: { title?: unknown; body?: unknown }) => {
+    if (!payload || typeof payload.title !== 'string' || !payload.title.trim()) return false
+    if (!Notification.isSupported()) return false
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) return false
+    const body = typeof payload.body === 'string' ? payload.body : ''
+    try {
+      new Notification({ title: payload.title.trim(), body, silent: false }).show()
+      return true
+    } catch {
+      return false
+    }
+  })
 }
 
 function createWindow(): void {
@@ -337,10 +364,25 @@ function createWindow(): void {
   else mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
 }
 
+let isQuitting = false
+
 app.whenReady().then(() => {
   registerIpc()
   void cleanupPasteImageDirectory()
   createWindow()
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
-app.on('window-all-closed', () => { acpConnecting?.client.stop(); acpConnection.current?.stop(); if (process.platform !== 'darwin') app.quit() })
+
+// Await process-tree kill before process exit so grok children are less likely to orphan.
+app.on('before-quit', (event) => {
+  if (isQuitting) return
+  event.preventDefault()
+  isQuitting = true
+  void stopAllAcpClients().finally(() => {
+    app.quit()
+  })
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})

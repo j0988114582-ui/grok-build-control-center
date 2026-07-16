@@ -54,9 +54,20 @@ export function normalizeAcpUpdate(sessionId: string, update: Record<string, unk
       return { id: eventId, sessionId, kind: 'recap', summary: stringOf(update.summary) }
     case 'available_commands_update': {
       const source = Array.isArray(update.availableCommands) ? update.availableCommands : Array.isArray(update.commands) ? update.commands : []
-      const commands = source.flatMap((item) => item && typeof item === 'object' && typeof (item as Record<string, unknown>).name === 'string'
-        ? [{ name: (item as Record<string, unknown>).name as string, ...(typeof (item as Record<string, unknown>).description === 'string' ? { description: (item as Record<string, unknown>).description as string } : {}) }]
-        : [])
+      const commands = source.flatMap((item) => {
+        if (!item || typeof item !== 'object' || typeof (item as Record<string, unknown>).name !== 'string') return []
+        const record = item as Record<string, unknown>
+        const inputHint = typeof record.inputHint === 'string'
+          ? record.inputHint
+          : typeof record.hint === 'string'
+            ? record.hint
+            : undefined
+        return [{
+          name: record.name as string,
+          ...(typeof record.description === 'string' ? { description: record.description } : {}),
+          ...(inputHint ? { inputHint } : {})
+        }]
+      })
       return { id: eventId, sessionId, kind: 'commands', commands }
     }
     case 'current_mode_update':

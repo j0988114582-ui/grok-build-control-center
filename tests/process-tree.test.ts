@@ -25,8 +25,8 @@ describe('process-tree kill (F-RT-1)', () => {
 
 describe('GROK_CLIENT_VERSION spawn env (F-RT-2 / T-RT-2)', () => {
   it('sets GROK_CLIENT_VERSION from the app version without dropping other env', () => {
-    const env = buildGrokSpawnEnv('0.5.0', { PATH: 'C:\\Windows', FOO: 'bar' })
-    expect(env.GROK_CLIENT_VERSION).toBe('0.5.0')
+    const env = buildGrokSpawnEnv('0.5.1', { PATH: 'C:\\Windows', FOO: 'bar' })
+    expect(env.GROK_CLIENT_VERSION).toBe('0.5.1')
     expect(env.PATH).toBe('C:\\Windows')
     expect(env.FOO).toBe('bar')
   })

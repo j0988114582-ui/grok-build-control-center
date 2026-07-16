@@ -39,6 +39,8 @@ export interface GrokBridgeApi {
   exportSession(sessionId: string): Promise<string | null>
   openTui(cwd: string): Promise<void>
   openExternal(url: string): Promise<void>
+  /** OS notification (suppressed when the main window is focused). */
+  notify(payload: { title: string; body?: string }): Promise<boolean>
   onEvent(callback: (event: UiSessionEvent) => void): () => void
   onPermission(callback: (request: PermissionRequest) => void): () => void
   onStatus(callback: (status: CliStatusUpdate) => void): () => void
