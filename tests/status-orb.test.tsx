@@ -10,7 +10,7 @@ describe('StatusOrb', () => {
     render(<StatusOrb mode="running" reducedMotion />)
     const orb = screen.getByTestId('status-orb')
     expect(orb).toHaveAttribute('data-mode', 'running')
-    expect(orb).toHaveAccessibleName(/L2/)
+    expect(orb).toHaveAccessibleName(/執行中|狀態/)
     expect(screen.getByTestId('status-orb-fallback')).toBeInTheDocument()
   })
 

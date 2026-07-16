@@ -813,8 +813,7 @@ describe('App', () => {
 
     await waitFor(() => expect(api.interject).toHaveBeenCalledWith('s1', '改做這件事'))
     expect(api.cancel).not.toHaveBeenCalled()
-    expect(await screen.findByText('已排入，下一個安全點生效')).toBeInTheDocument()
-    expect(screen.getByTestId('interject-status')).toHaveTextContent('已排入，下一個安全點生效')
+    expect(await screen.findByTestId('interject-status')).toHaveTextContent('已排入，下一個安全點生效')
   })
 
   it('F-INT-3: 立刻改做 cancels then sends a new prompt', async () => {

@@ -170,31 +170,49 @@ function EventCard({ event, query }: { event: UiSessionEvent; query: string }): 
 const MemoEventCard = React.memo(EventCard)
 const TranscriptFooter = (): React.JSX.Element => <div className="transcript-end">END OF CURRENT CONTEXT</div>
 
-function SettingsPanel({ settings, onSave, onClose, cliVersion }: { settings: AppSettings; onSave: (settings: AppSettings) => void; onClose: () => void; cliVersion?: string }): React.JSX.Element {
+function SettingsPanel({
+  settings,
+  onSave,
+  onLiveChange,
+  onClose,
+  cliVersion
+}: {
+  settings: AppSettings
+  onSave: (settings: AppSettings) => void
+  /** Instant preview for theme / font / cockpit (no need to hit Save first). */
+  onLiveChange?: (settings: AppSettings) => void
+  onClose: () => void
+  cliVersion?: string
+}): React.JSX.Element {
   const [draft, setDraft] = useState(settings)
   const conflicts = findShortcutConflicts(draft.shortcuts)
-  return <aside className="drawer"><div className="drawer-head"><div><span className="eyebrow">LOCAL PREFERENCES</span><h2>工作台設定</h2></div><button className="icon-button" onClick={onClose}><X /></button></div>
-    <div className="settings-section"><label>Grok 執行檔<input value={draft.grokExecutable} onChange={(event) => setDraft({ ...draft, grokExecutable: event.target.value })} /></label>
+  const update = (next: AppSettings): void => {
+    setDraft(next)
+    onLiveChange?.(next)
+  }
+  return <aside className="drawer" data-testid="settings-drawer"><div className="drawer-head"><div><span className="eyebrow">LOCAL PREFERENCES</span><h2>工作台設定</h2></div><button className="icon-button" onClick={onClose}><X /></button></div>
+    <p className="settings-live-hint">深色／亮色、字級、座艙開關會<strong>即時預覽</strong>；按「儲存設定」才寫入本機。</p>
+    <div className="settings-section"><label>Grok 執行檔<input value={draft.grokExecutable} onChange={(event) => update({ ...draft, grokExecutable: event.target.value })} /></label>
       <p className="cli-update-hint" data-testid="cli-update-hint">目前 CLI{cliVersion ? ` ${cliVersion}` : ''}。若缺少插話、額度或新指令，請以官方腳本更新：<code>irm https://x.ai/cli/install.ps1 | iex</code></p>
     </div>
     <div className="settings-grid">
-      <label>字級 <output>{draft.fontSize}px</output><input type="range" min="12" max="22" value={draft.fontSize} onChange={(event) => setDraft({ ...draft, fontSize: Number(event.target.value) })} /></label>
-      <label>行高 <output>{draft.lineHeight.toFixed(2)}</output><input type="range" min="1.2" max="2.1" step="0.05" value={draft.lineHeight} onChange={(event) => setDraft({ ...draft, lineHeight: Number(event.target.value) })} /></label>
-      <label>內容寬度 <output>{draft.contentWidth}px</output><input type="range" min="640" max="1400" step="20" value={draft.contentWidth} onChange={(event) => setDraft({ ...draft, contentWidth: Number(event.target.value) })} /></label>
+      <label>字級 <output>{draft.fontSize}px</output><input type="range" min="12" max="22" value={draft.fontSize} onChange={(event) => update({ ...draft, fontSize: Number(event.target.value) })} /></label>
+      <label>行高 <output>{draft.lineHeight.toFixed(2)}</output><input type="range" min="1.2" max="2.1" step="0.05" value={draft.lineHeight} onChange={(event) => update({ ...draft, lineHeight: Number(event.target.value) })} /></label>
+      <label>內容寬度 <output>{draft.contentWidth}px</output><input type="range" min="640" max="1400" step="20" value={draft.contentWidth} onChange={(event) => update({ ...draft, contentWidth: Number(event.target.value) })} /></label>
     </div>
-    <div className="theme-choice"><button className={draft.theme === 'dark' ? 'active' : ''} onClick={() => setDraft({ ...draft, theme: 'dark' })}><Moon />深色</button><button className={draft.theme === 'light' ? 'active' : ''} onClick={() => setDraft({ ...draft, theme: 'light' })}><Sun />亮色</button></div>
+    <div className="theme-choice"><button type="button" className={draft.theme === 'dark' ? 'active' : ''} onClick={() => update({ ...draft, theme: 'dark' })}><Moon />深色</button><button type="button" className={draft.theme === 'light' ? 'active' : ''} onClick={() => update({ ...draft, theme: 'light' })}><Sun />亮色</button></div>
     <div className="settings-section cockpit-settings"><div className="section-title"><h3>銀河座艙</h3><small>亮色主題自動停用星空</small></div>
-      <div className="immersion-choice"><button className={draft.immersion === 'focus' ? 'active' : ''} onClick={() => setDraft({ ...draft, immersion: 'focus' })}><strong>閱讀優先</strong><small>紙感對話區</small></button><button className={draft.immersion === 'deep' ? 'active' : ''} onClick={() => setDraft({ ...draft, immersion: 'deep' })}><strong>全沉浸</strong><small>深色玻璃對話區</small></button></div>
-      <label className="toggle-row"><span><strong>曲速星空</strong><small>執行狀態聯動與 Canvas 降級</small></span><input type="checkbox" checked={draft.effects.galaxy} onChange={(event) => setDraft({ ...draft, effects: { ...draft.effects, galaxy: event.target.checked } })} /></label>
-      <label className="toggle-row"><span><strong>星航游標</strong><small>拖尾、nova 與磁吸</small></span><input type="checkbox" checked={draft.effects.cursor} onChange={(event) => setDraft({ ...draft, effects: { ...draft.effects, cursor: event.target.checked } })} /></label>
-      <label className="toggle-row"><span><strong>停用全部動效</strong><small>保留靜態星圖與完整功能</small></span><input type="checkbox" checked={draft.effects.reducedMotion} onChange={(event) => setDraft({ ...draft, effects: { ...draft.effects, reducedMotion: event.target.checked } })} /></label>
-      <label className="density-row"><span>粒子密度</span><select value={draft.effects.density} onChange={(event) => setDraft({ ...draft, effects: { ...draft.effects, density: event.target.value as AppSettings['effects']['density'] } })}><option value="low">低 · 600</option><option value="medium">中 · 1000</option><option value="high">高 · 1500</option></select></label>
+      <div className="immersion-choice"><button type="button" className={draft.immersion === 'focus' ? 'active' : ''} onClick={() => update({ ...draft, immersion: 'focus' })}><strong>閱讀優先</strong><small>紙感對話區</small></button><button type="button" className={draft.immersion === 'deep' ? 'active' : ''} onClick={() => update({ ...draft, immersion: 'deep' })}><strong>全沉浸</strong><small>深色玻璃對話區</small></button></div>
+      <label className="toggle-row"><span><strong>曲速星空</strong><small>執行狀態聯動與 Canvas 降級</small></span><input type="checkbox" checked={draft.effects.galaxy} onChange={(event) => update({ ...draft, effects: { ...draft.effects, galaxy: event.target.checked } })} /></label>
+      <label className="toggle-row"><span><strong>星航游標</strong><small>拖尾、nova 與磁吸</small></span><input type="checkbox" checked={draft.effects.cursor} onChange={(event) => update({ ...draft, effects: { ...draft.effects, cursor: event.target.checked } })} /></label>
+      <label className="toggle-row"><span><strong>停用全部動效</strong><small>保留靜態星圖與完整功能</small></span><input type="checkbox" checked={draft.effects.reducedMotion} onChange={(event) => update({ ...draft, effects: { ...draft.effects, reducedMotion: event.target.checked } })} /></label>
+      <label className="density-row"><span>粒子密度</span><select value={draft.effects.density} onChange={(event) => update({ ...draft, effects: { ...draft.effects, density: event.target.value as AppSettings['effects']['density'] } })}><option value="low">低 · 600</option><option value="medium">中 · 1000</option><option value="high">高 · 1500</option></select></label>
     </div>
-    <div className="settings-section"><div className="section-title"><h3>快捷鍵</h3><button className="text-button" onClick={() => setDraft({ ...draft, shortcuts: DEFAULT_SHORTCUTS.map((binding) => ({ ...binding })) })}>恢復預設</button></div>
-      {draft.shortcuts.map((binding, index) => <label className="shortcut-row" key={binding.command}><span>{binding.command}</span><input value={binding.accelerator} onChange={(event) => setDraft({ ...draft, shortcuts: draft.shortcuts.map((item, i) => i === index ? { ...item, accelerator: event.target.value } : item) })} /><small>{binding.scope}</small></label>)}
+    <div className="settings-section"><div className="section-title"><h3>快捷鍵</h3><button type="button" className="text-button" onClick={() => update({ ...draft, shortcuts: DEFAULT_SHORTCUTS.map((binding) => ({ ...binding })) })}>恢復預設</button></div>
+      {draft.shortcuts.map((binding, index) => <label className="shortcut-row" key={binding.command}><span>{binding.command}</span><input value={binding.accelerator} onChange={(event) => update({ ...draft, shortcuts: draft.shortcuts.map((item, i) => i === index ? { ...item, accelerator: event.target.value } : item) })} /><small>{binding.scope}</small></label>)}
       {conflicts.length > 0 && <div className="warning"><CircleAlert />{conflicts.map((item) => item.accelerator).join('、')} 發生衝突</div>}
     </div>
-    <button className="primary wide" disabled={conflicts.length > 0} onClick={() => onSave(draft)}>儲存設定</button>
+    <button type="button" className="primary wide" disabled={conflicts.length > 0} onClick={() => onSave(draft)}>儲存設定</button>
   </aside>
 }
 
@@ -1382,13 +1400,21 @@ export function App(): React.JSX.Element {
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
           <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
           <footer className="composer-wrap" onDragOver={onComposerDragOver} onDrop={onComposerDrop}>
-            <div className="composer-status">
-              {running
-                ? <><LoaderCircle className="spin" />Grok 正在執行工具或生成回覆{interjectState?.status === 'queued' && interjectState.sessionId === active.id ? <em className="interject-queued" data-testid="interject-status"> · {INTERJECT_QUEUED_NOTICE}</em> : null}{localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue) ? <em className="local-queue-status" data-testid="local-queue-status"> · {LOCAL_QUEUE_STATUS}</em> : null}</>
-                : lifecycleBusy || sessionLoading
-                  ? <><LoaderCircle className="spin" />系統忙碌中（連線或載入）</>
-                  : <><span className="ready-dot" />準備就緒{localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue) ? <em className="local-queue-status" data-testid="local-queue-status"> · {LOCAL_QUEUE_STATUS}</em> : null}</>}
-              <span>{running ? `${shortcutLabel('sendPrompt')} 插話 · ${shortcutLabel('cancelTurn')} 停止` : `${shortcutLabel('sendPrompt')} 傳送 · ${shortcutLabel('newline')} 換行 · ${shortcutLabel('cancelTurn')} 取消`}</span>
+            <div className="composer-status" data-testid="composer-status">
+              <span className={`composer-status-pill ${running ? 'is-running' : lifecycleBusy || sessionLoading ? 'is-busy' : 'is-ready'}`}>
+                {running
+                  ? <><LoaderCircle className="spin" /><strong>執行中</strong><em>Grok 工作中</em></>
+                  : lifecycleBusy || sessionLoading
+                    ? <><LoaderCircle className="spin" /><strong>忙碌</strong><em>連線或載入</em></>
+                    : <><span className="ready-dot" /><strong>就緒</strong><em>可送出任務</em></>}
+              </span>
+              {interjectState?.status === 'queued' && interjectState.sessionId === active.id
+                ? <em className="interject-queued" data-testid="interject-status">{INTERJECT_QUEUED_NOTICE}</em>
+                : null}
+              {localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue)
+                ? <em className="local-queue-status" data-testid="local-queue-status">{LOCAL_QUEUE_STATUS}</em>
+                : null}
+              <span className="composer-status-keys">{running ? `${shortcutLabel('sendPrompt')} 插話 · ${shortcutLabel('cancelTurn')} 停止` : `${shortcutLabel('sendPrompt')} 傳送 · ${shortcutLabel('newline')} 換行`}</span>
             </div>
             {attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}
             {pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip.path} data-testid="path-chip">{pastePathChip.previewUrl ? <img className="path-chip-thumb" data-testid="path-chip-thumb" src={pastePathChip.previewUrl} alt="" width={28} height={28} /> : <Paperclip />}<em>{pastePathChip.path}</em><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}
@@ -1426,7 +1452,23 @@ export function App(): React.JSX.Element {
           </footer>
         </> : null}
       </main>
-      {panel === 'settings' && <SettingsPanel settings={settings} cliVersion={status.version} onClose={() => setPanel('none')} onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none') })} />}
+      {panel === 'settings' && <SettingsPanel
+        settings={settings}
+        cliVersion={status.version}
+        onClose={() => setPanel('none')}
+        onLiveChange={(next) => setSettings((current) => ({
+          ...current,
+          theme: next.theme,
+          immersion: next.immersion,
+          effects: next.effects,
+          fontSize: next.fontSize,
+          lineHeight: next.lineHeight,
+          contentWidth: next.contentWidth,
+          grokExecutable: next.grokExecutable,
+          shortcuts: next.shortcuts
+        }))}
+        onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none'); setNotice('設定已儲存') })}
+      />}
       {panel === 'features' && (
         <aside className="drawer">
           <div className="drawer-head">

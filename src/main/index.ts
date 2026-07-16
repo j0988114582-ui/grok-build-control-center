@@ -34,6 +34,13 @@ import type { AppSettings, CliStatus, PromptBlock } from '../shared/types'
 import { assertRevealAllowed, ExportPathAllowlist } from '../shared/export-reveal'
 import { SessionReadyGate } from './session-ready-gate'
 
+// Avoid noisy Windows GPU/disk-cache errors when cache dir is locked (multiple instances / AV).
+// App still runs; shader/disk GPU cache is optional.
+try {
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
+  app.commandLine.appendSwitch('disk-cache-size', '1')
+} catch { /* app may already be ready in tests */ }
+
 const pasteImageDirectory = (): string => path.join(tmpdir(), PASTE_IMAGE_DIR_NAME)
 
 /** Best-effort prune of aged paste files; never throws to callers. */
