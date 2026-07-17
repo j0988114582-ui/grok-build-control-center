@@ -30,8 +30,9 @@ describe('remote-web SPA (wave4)', () => {
   it('SPA uses fragment pair secret strip and double-confirm logout', () => {
     expect(js).toMatch(/history\.replaceState/)
     expect(js).toMatch(/consumePairingFragment/)
-    expect(js).toMatch(/pair\?/)
+    expect(js).toMatch(/pairingSecret/)
     expect(js).toMatch(/window\.confirm/)
+    expect(js).toMatch(/再次確認/)
     expect(js).toMatch(/\/api\/session\/focus/)
     expect(js).toMatch(/\/api\/yolo\/enable/)
     expect(js).toMatch(/\/api\/interject/)
