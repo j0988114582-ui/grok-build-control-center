@@ -214,4 +214,36 @@ describe('remote-controller (v0.9 coexistence)', () => {
     const result = await controller.handleCreateSession('C:\\repo')
     expect(result.ok).toBe(false)
   })
+
+  it('rejects relative cwd paths', async () => {
+    const controller = makeController()
+    controller.enable()
+    await controller.refreshSessions()
+    expect(controller.isCwdInUnion('repo')).toBe(false)
+    expect(controller.isCwdInUnion('..\\repo')).toBe(false)
+  })
+
+  it('do-now aborts if focus changes during cancel', async () => {
+    const prompt = vi.fn().mockResolvedValue(undefined)
+    let resolveCancel: () => void
+    const cancel = vi.fn().mockImplementation(() => new Promise<void>((r) => { resolveCancel = r }))
+    const controller = makeController({
+      prompt,
+      cancel,
+      listSessions: () => [
+        { id: 's1', cwd: 'C:\\repo', title: 'A' },
+        { id: 's2', cwd: 'C:\\repo', title: 'B' }
+      ]
+    })
+    controller.enable()
+    await controller.refreshSessions()
+    controller.setFocusSession('s1')
+    controller.setRunning('s1', true)
+    const pending = controller.handleDoNow('replacement')
+    controller.setFocusSession('s2')
+    resolveCancel!()
+    const result = await pending
+    expect(result.ok).toBe(false)
+    expect(prompt).not.toHaveBeenCalled()
+  })
 })

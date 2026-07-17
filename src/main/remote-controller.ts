@@ -53,9 +53,17 @@ export type HandlerResult =
   | { ok: true; sessionId?: string }
   | { ok: false; code: string; message: string }
 
-/** Normalize Windows paths for case-insensitive exact compare. */
-export function normalizeCwdKey(cwd: string): string {
-  const n = path.normalize(cwd.trim()).replace(/[\\/]+$/, '')
+/** Normalize absolute paths for case-insensitive exact compare. Relative → null. */
+export function normalizeCwdKey(cwd: string): string | null {
+  const trimmed = cwd.trim()
+  if (!trimmed || trimmed.includes('..')) return null
+  const abs = path.isAbsolute(trimmed) || /^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith('\\\\')
+  if (!abs) return null
+  let n = path.normalize(trimmed)
+  // path.normalize('C:\\') stays as drive root — keep single trailing slash only for roots
+  if (!/^[a-zA-Z]:\\?$/i.test(n) && !/^\\\\[^\\]+\\[^\\]+$/.test(n)) {
+    n = n.replace(/[\\/]+$/, '')
+  }
   return process.platform === 'win32' ? n.toLowerCase() : n
 }
 
@@ -186,6 +194,7 @@ export class RemoteController {
 
   /** Desktop/UI may set focus without load (wave 5 UI align). Prefer handleFocus for remote. */
   setFocusSession(sessionId: string | null): void {
+    this.loadGeneration += 1 // cancel in-flight handleFocus/restore loads
     this.focusSessionId = sessionId
     this.focusStatus = !sessionId ? 'none' : this.deps.isSessionReady(sessionId) ? 'ready' : 'loading'
     this.focusError = undefined
@@ -277,29 +286,35 @@ export class RemoteController {
   async handleFocus(sessionId: string): Promise<HandlerResult> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
     await this.refreshSessions()
+    if (!this.sessionsListFresh) {
+      return { ok: false, code: 'not_ready', message: '無法刷新 session 列表，拒絕切換焦點' }
+    }
     const summary = this.lastSessions.find((item) => item.id === sessionId)
     if (!summary) return { ok: false, code: 'not_found', message: '找不到該對話' }
 
+    const gen = ++this.loadGeneration
     this.focusSessionId = sessionId
     this.focusError = undefined
     this.deps.onFocusChanged?.(sessionId)
 
     if (this.deps.isSessionReady(sessionId)) {
+      if (gen !== this.loadGeneration) return { ok: false, code: 'not_ready', message: '焦點已變更' }
       this.focusStatus = 'ready'
       this.emit()
       return { ok: true, sessionId }
     }
 
     if (!this.deps.loadSession) {
-      this.focusStatus = 'error'
-      this.focusError = '載入對話能力未就緒'
-      this.emit()
-      return { ok: false, code: 'not_ready', message: this.focusError }
+      if (gen === this.loadGeneration && this.focusSessionId === sessionId) {
+        this.focusStatus = 'error'
+        this.focusError = '載入對話能力未就緒'
+        this.emit()
+      }
+      return { ok: false, code: 'not_ready', message: '載入對話能力未就緒' }
     }
 
     this.focusStatus = 'loading'
     this.emit()
-    const gen = ++this.loadGeneration
     try {
       await this.deps.loadSession(sessionId, summary.cwd)
       if (gen !== this.loadGeneration || this.focusSessionId !== sessionId) {
@@ -309,7 +324,7 @@ export class RemoteController {
       this.emit()
       return { ok: true, sessionId }
     } catch (error) {
-      if (this.focusSessionId === sessionId) {
+      if (gen === this.loadGeneration && this.focusSessionId === sessionId) {
         this.focusStatus = 'error'
         this.focusError = error instanceof Error ? error.message : String(error)
         this.emit()
@@ -354,7 +369,11 @@ export class RemoteController {
     const set = new Map<string, string>()
     for (const session of this.lastSessions) {
       const key = normalizeCwdKey(session.cwd)
-      if (key && !set.has(key)) set.set(key, path.normalize(session.cwd.replace(/[\\/]+$/, '')))
+      if (!key) continue
+      if (!set.has(key)) {
+        const display = path.normalize(session.cwd.trim())
+        set.set(key, display.replace(/[\\/]+$/, '') || display)
+      }
     }
     return [...set.values()].sort((a, b) => a.localeCompare(b))
   }
@@ -362,7 +381,7 @@ export class RemoteController {
   isCwdInUnion(cwd: string): boolean {
     if (!this.sessionsListFresh) return false
     const key = normalizeCwdKey(cwd)
-    if (!key || key.includes('..')) return false
+    if (!key) return false
     // exact key only — no child path of union member
     return this.listCwdUnion().some((item) => normalizeCwdKey(item) === key)
   }
@@ -510,7 +529,7 @@ export class RemoteController {
     }
   }
 
-  /** Cancel current turn then send new prompt. */
+  /** Cancel current turn then send new prompt — pinned to focus at call time. */
   async handleDoNow(text: string): Promise<HandlerResult> {
     const sessionId = this.focusSessionId
     if (!sessionId) return { ok: false, code: 'not_ready', message: '尚未選定對話' }
@@ -523,7 +542,10 @@ export class RemoteController {
         this.inFlightPrompt.delete(sessionId)
         this.runningBySession.set(sessionId, false)
       }
-      return await this.handlePrompt(trimmed)
+      if (this.focusSessionId !== sessionId) {
+        return { ok: false, code: 'not_ready', message: '焦點已變更，取消立刻改做' }
+      }
+      return await this.handlePromptForSession(sessionId, trimmed)
     } catch (error) {
       return { ok: false, code: 'server_error', message: error instanceof Error ? error.message : String(error) }
     }
@@ -576,7 +598,31 @@ export class RemoteController {
     if (this.focusSessionId !== sessionId) {
       return { ok: false, code: 'not_ready', message: '焦點已變更，取消送出' }
     }
-    return this.handlePrompt(text)
+    if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
+    if (this.focusStatus === 'loading') return { ok: false, code: 'not_ready', message: '對話載入中' }
+    if (!this.deps.isSessionReady(sessionId)) return { ok: false, code: 'not_ready', message: '對話尚未就緒' }
+    if (this.inFlightPrompt.has(sessionId) || this.runningBySession.get(sessionId)) {
+      return { ok: false, code: 'in_flight', message: '此對話已有進行中的提示' }
+    }
+    const trimmed = text.trim()
+    if (!trimmed) return { ok: false, code: 'invalid_request', message: '提示不可為空' }
+    if (trimmed.length > REMOTE_PROMPT_MAX_CHARS) {
+      return { ok: false, code: 'invalid_request', message: `提示過長（上限 ${REMOTE_PROMPT_MAX_CHARS} 字）` }
+    }
+    this.inFlightPrompt.add(sessionId)
+    this.notices = ['來自手機遙控：已送出提示']
+    this.emit()
+    try {
+      if (this.focusSessionId !== sessionId) {
+        this.inFlightPrompt.delete(sessionId)
+        return { ok: false, code: 'not_ready', message: '焦點已變更，取消送出' }
+      }
+      await this.deps.prompt(sessionId, trimmed)
+      return { ok: true, sessionId }
+    } catch (error) {
+      this.inFlightPrompt.delete(sessionId)
+      return { ok: false, code: 'server_error', message: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   async handleCancel(): Promise<HandlerResult> {
