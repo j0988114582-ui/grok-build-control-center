@@ -266,12 +266,7 @@ export class RemoteController {
     list.push(item)
     while (list.length > REMOTE_TAIL_MAX_ITEMS) list.shift()
     // T1: bound public wire size via JSON UTF-8 (includes escaping overhead)
-    while (list.length > 1 && remoteTailPayloadBytes(list) > REMOTE_TAIL_MAX_BYTES) {
-      list.shift()
-    }
-    if (list.length === 1 && remoteTailPayloadBytes(list) > REMOTE_TAIL_MAX_BYTES) {
-      trimTranscriptItemToPayloadBudget(list[0]!, REMOTE_TAIL_MAX_BYTES)
-    }
+    enforceTailPayloadBudget(list)
     this.tails.set(event.sessionId, list)
     if (event.kind === 'turn') {
       this.runningBySession.set(event.sessionId, event.status === 'running')
@@ -841,21 +836,28 @@ export class RemoteController {
 }
 
 function toRemoteTranscriptItem(event: UiSessionEvent): RemoteTranscriptItem | null {
+  const id = event.id.slice(0, 128)
   if (event.kind === 'message') {
-    return { id: event.id, kind: 'message', role: event.role, text: event.text.slice(0, 1_500) }
+    return { id, kind: 'message', role: event.role, text: event.text.slice(0, 1_500) }
   }
   if (event.kind === 'tool') {
-    return { id: event.id, kind: 'tool', text: event.title.slice(0, 200), status: event.status }
+    return {
+      id,
+      kind: 'tool',
+      text: event.title.slice(0, 200),
+      status: String(event.status).slice(0, 64)
+    }
   }
   if (event.kind === 'turn') {
-    return { id: event.id, kind: 'turn', text: event.status, status: event.status }
+    const st = String(event.status).slice(0, 64)
+    return { id, kind: 'turn', text: st, status: st }
   }
   if (event.kind === 'error') {
-    return { id: event.id, kind: 'error', text: event.message.slice(0, 500) }
+    return { id, kind: 'error', text: event.message.slice(0, 500) }
   }
   if (event.kind === 'compact') {
     return {
-      id: event.id,
+      id,
       kind: 'compact',
       text: event.source === 'official' ? '已自動壓縮上下文' : '可能已壓縮上下文'
     }
@@ -868,8 +870,23 @@ function remoteTailPayloadBytes(list: RemoteTranscriptItem[]): number {
   return Buffer.byteLength(JSON.stringify(list), 'utf8')
 }
 
-/** Shrink a single item's text until JSON array `[item]` fits maxBytes. */
-function trimTranscriptItemToPayloadBudget(row: RemoteTranscriptItem, maxBytes: number): void {
+/**
+ * Ensure list serializes to ≤ maxBytes. Drop oldest items first; for a single
+ * oversize row, strip optional fields then shrink text; if still over, drop it.
+ */
+function enforceTailPayloadBudget(list: RemoteTranscriptItem[], maxBytes = REMOTE_TAIL_MAX_BYTES): void {
+  while (list.length > 1 && remoteTailPayloadBytes(list) > maxBytes) {
+    list.shift()
+  }
+  if (list.length === 0 || remoteTailPayloadBytes(list) <= maxBytes) return
+
+  const row = list[0]!
+  // Non-text fields can also explode wire size — clear optionals first
+  delete row.role
+  delete row.status
+  row.id = row.id.slice(0, 32)
+  if (remoteTailPayloadBytes(list) <= maxBytes) return
+
   const full = row.text
   let lo = 0
   let hi = full.length
@@ -877,7 +894,7 @@ function trimTranscriptItemToPayloadBudget(row: RemoteTranscriptItem, maxBytes: 
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2)
     row.text = full.slice(0, mid)
-    if (Buffer.byteLength(JSON.stringify([row]), 'utf8') <= maxBytes) {
+    if (remoteTailPayloadBytes(list) <= maxBytes) {
       best = mid
       lo = mid + 1
     } else {
@@ -885,4 +902,7 @@ function trimTranscriptItemToPayloadBudget(row: RemoteTranscriptItem, maxBytes: 
     }
   }
   row.text = full.slice(0, best)
+  if (remoteTailPayloadBytes(list) > maxBytes) {
+    list.shift() // fail-closed: never expose an oversize tail
+  }
 }

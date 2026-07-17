@@ -432,6 +432,29 @@ describe('remote-controller (v0.9 coexistence)', () => {
     expect(bytes).toBeLessThanOrEqual(64_000)
   })
 
+  it('T1 caps non-text fields and never exceeds wire budget', () => {
+    const controller = makeController()
+    controller.enable()
+    controller.setFocusSession('s1')
+    const hugeId = `id-${'x'.repeat(10_000)}`
+    const hugeTitle = `${'\\"'.repeat(5_000)}${'工'.repeat(2_000)}`
+    controller.pushEvent({
+      id: hugeId,
+      sessionId: 's1',
+      kind: 'tool',
+      title: hugeTitle,
+      status: 'completed',
+      toolName: 'shell'
+    } as never)
+    const snap = controller.getSnapshot()
+    const bytes = Buffer.byteLength(JSON.stringify(snap.tail), 'utf8')
+    expect(bytes).toBeLessThanOrEqual(64_000)
+    if (snap.tail[0]) {
+      expect(snap.tail[0].id.length).toBeLessThanOrEqual(128)
+      expect(snap.tail[0].text.length).toBeLessThanOrEqual(200)
+    }
+  })
+
   it('desktop setFocus invalidates pending older remote focus', async () => {
     let releaseList: () => void
     const listGate = new Promise<void>((r) => { releaseList = r })
