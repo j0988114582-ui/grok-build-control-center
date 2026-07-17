@@ -265,16 +265,12 @@ export class RemoteController {
     const list = this.tails.get(event.sessionId) ?? []
     list.push(item)
     while (list.length > REMOTE_TAIL_MAX_ITEMS) list.shift()
-    // T1: enforce UTF-8 byte budget (not JS UTF-16 char length)
-    let total = list.reduce((sum, row) => sum + remoteTranscriptItemBytes(row), 0)
-    while (list.length > 1 && total > REMOTE_TAIL_MAX_BYTES) {
-      const removed = list.shift()
-      total -= removed ? remoteTranscriptItemBytes(removed) : 0
+    // T1: bound public wire size via JSON UTF-8 (includes escaping overhead)
+    while (list.length > 1 && remoteTailPayloadBytes(list) > REMOTE_TAIL_MAX_BYTES) {
+      list.shift()
     }
-    // Single oversize item: hard-trim text to fit budget
-    if (list.length === 1 && total > REMOTE_TAIL_MAX_BYTES) {
-      const only = list[0]!
-      only.text = trimUtf8ToBytes(only.text, Math.max(0, REMOTE_TAIL_MAX_BYTES - remoteTranscriptItemBytes({ ...only, text: '' })))
+    if (list.length === 1 && remoteTailPayloadBytes(list) > REMOTE_TAIL_MAX_BYTES) {
+      trimTranscriptItemToPayloadBudget(list[0]!, REMOTE_TAIL_MAX_BYTES)
     }
     this.tails.set(event.sessionId, list)
     if (event.kind === 'turn') {
@@ -337,8 +333,9 @@ export class RemoteController {
       return { ok: false, code: 'not_found', message: '找不到該對話' }
     }
 
-    // Older valid intent that lost the race to a newer validated focus
-    if (intentId < this.latestValidatedFocusIntent) {
+    // Older/equal intent lost to a newer validated focus OR desktop setFocusSession/disable
+    // (those set latestValidatedFocusIntent = focusIntentSeq so pending intents are stale).
+    if (intentId <= this.latestValidatedFocusIntent) {
       return { ok: false, code: 'not_ready', message: '焦點已變更' }
     }
     this.latestValidatedFocusIntent = intentId
@@ -866,21 +863,26 @@ function toRemoteTranscriptItem(event: UiSessionEvent): RemoteTranscriptItem | n
   return null
 }
 
-/** Conservative public-tail size: UTF-8 of string fields + fixed JSON overhead. */
-function remoteTranscriptItemBytes(row: RemoteTranscriptItem): number {
-  let n = 48 // keys/punctuation overhead per object
-  n += Buffer.byteLength(row.id, 'utf8')
-  n += Buffer.byteLength(row.kind, 'utf8')
-  n += Buffer.byteLength(row.text, 'utf8')
-  if (row.role) n += Buffer.byteLength(row.role, 'utf8')
-  if (row.status) n += Buffer.byteLength(row.status, 'utf8')
-  return n
+/** Public tail wire size (JSON UTF-8, includes escaping). */
+function remoteTailPayloadBytes(list: RemoteTranscriptItem[]): number {
+  return Buffer.byteLength(JSON.stringify(list), 'utf8')
 }
 
-function trimUtf8ToBytes(text: string, maxBytes: number): string {
-  if (maxBytes <= 0) return ''
-  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text
-  let end = Math.min(text.length, maxBytes)
-  while (end > 0 && Buffer.byteLength(text.slice(0, end), 'utf8') > maxBytes) end -= 1
-  return text.slice(0, end)
+/** Shrink a single item's text until JSON array `[item]` fits maxBytes. */
+function trimTranscriptItemToPayloadBudget(row: RemoteTranscriptItem, maxBytes: number): void {
+  const full = row.text
+  let lo = 0
+  let hi = full.length
+  let best = 0
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    row.text = full.slice(0, mid)
+    if (Buffer.byteLength(JSON.stringify([row]), 'utf8') <= maxBytes) {
+      best = mid
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
+  }
+  row.text = full.slice(0, best)
 }

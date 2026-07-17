@@ -391,7 +391,7 @@ describe('remote-controller (v0.9 coexistence)', () => {
     expect(prompt).not.toHaveBeenCalledWith('s1', 'from-mobile')
   })
 
-  it('T1 tail enforces UTF-8 byte budget not char length', () => {
+  it('T1 tail enforces UTF-8 JSON wire budget not char length', () => {
     const controller = makeController()
     controller.enable()
     controller.setFocusSession('s1')
@@ -408,9 +408,60 @@ describe('remote-controller (v0.9 coexistence)', () => {
     }
     const snap = controller.getSnapshot()
     const payload = JSON.stringify(snap.tail)
-    expect(Buffer.byteLength(payload, 'utf8')).toBeLessThanOrEqual(64_000 + 4_096) // budget + small JSON array overhead slack
+    expect(Buffer.byteLength(payload, 'utf8')).toBeLessThanOrEqual(64_000)
     // Must have dropped many of the 80 items (char-only cap would keep far more)
     expect(snap.tail.length).toBeLessThan(40)
+  })
+
+  it('T1 tail accounts for JSON escape expansion', () => {
+    const controller = makeController()
+    controller.enable()
+    controller.setFocusSession('s1')
+    // Quotes/backslashes expand under JSON.stringify
+    const noisy = `${'\\"'.repeat(400)}${'測'.repeat(200)}`
+    for (let i = 0; i < 100; i++) {
+      controller.pushEvent({
+        id: `e${i}`,
+        sessionId: 's1',
+        kind: 'message',
+        role: 'assistant',
+        text: noisy
+      })
+    }
+    const bytes = Buffer.byteLength(JSON.stringify(controller.getSnapshot().tail), 'utf8')
+    expect(bytes).toBeLessThanOrEqual(64_000)
+  })
+
+  it('desktop setFocus invalidates pending older remote focus', async () => {
+    let releaseList: () => void
+    const listGate = new Promise<void>((r) => { releaseList = r })
+    let armed = false
+    const controller = makeController({
+      listSessions: async () => {
+        if (!armed) {
+          return [
+            { id: 's1', cwd: 'C:\\repo', title: 'A' },
+            { id: 's2', cwd: 'C:\\repo', title: 'B' }
+          ]
+        }
+        await listGate
+        return [
+          { id: 's1', cwd: 'C:\\repo', title: 'A' },
+          { id: 's2', cwd: 'C:\\repo', title: 'B' }
+        ]
+      },
+      isSessionReady: () => true
+    })
+    controller.enable()
+    await controller.refreshSessions()
+    armed = true
+    const pending = controller.handleFocus('s1')
+    await new Promise((r) => setTimeout(r, 5))
+    controller.setFocusSession('s2')
+    releaseList!()
+    const result = await pending
+    expect(result.ok).toBe(false)
+    expect(controller.getFocusSessionId()).toBe('s2')
   })
 
   it('disable then re-enable does not revive pre-disable focus', async () => {
