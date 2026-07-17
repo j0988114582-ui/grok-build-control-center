@@ -703,6 +703,8 @@ export function App(): React.JSX.Element {
     const off = window.grokApi.onRemoteFocusChanged((payload) => {
       const sessionId = payload.sessionId
       if (!sessionId) return
+      // Trust main event immediately (state may lag behind focus-changed).
+      remoteMainFocusRef.current = sessionId
       const seq = ++remoteFocusAlignSeqRef.current
       void (async () => {
         aligningRemoteFocusRef.current = true
@@ -714,9 +716,8 @@ export function App(): React.JSX.Element {
             setSessions(list)
             session = list.find((item) => item.id === sessionId)
           }
+          // seq gate only: desktop loadSession bumps seq; do not compare stale state focus id
           if (seq !== remoteFocusAlignSeqRef.current) return
-          // Desktop or a newer phone focus already moved main authority — do not clobber UI.
-          if (remoteMainFocusRef.current !== null && remoteMainFocusRef.current !== sessionId) return
           if (!session) {
             setNotice('手機已切換焦點，但本機列表尚無該對話')
             return
@@ -1502,8 +1503,8 @@ export function App(): React.JSX.Element {
     if (!text && !attachments.length) return
 
     // Remote on + text-only: main single-slot (E9).
-    // If attachments exist, keep one local queue only and clear main so mobile cannot
-    // co-queue a second prompt for the same session.
+    // If attachments exist, clear main first (await) then install one local queue so
+    // mobile cannot co-queue a second prompt for the same session.
     if (remoteControlActive && text && attachments.length === 0) {
       void window.grokApi.remoteQueue(text).then((result) => {
         if (!result.ok) {
@@ -1518,20 +1519,32 @@ export function App(): React.JSX.Element {
       return
     }
 
-    if (remoteControlActive && attachments.length > 0) {
-      void window.grokApi.remoteQueueClear().catch(() => undefined)
-    }
-
     const item: LocalQueuedPrompt = {
       sessionId,
       ...(text ? { text } : {}),
       attachments: [...attachments]
     }
-    localQueueRef.current = item
-    setLocalQueue(item)
-    setDrafts((current) => ({ ...current, [sessionId]: '' }))
-    setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
-    setNotice(LOCAL_QUEUE_NOTICE)
+    const installLocal = (): void => {
+      localQueueRef.current = item
+      setLocalQueue(item)
+      setDrafts((current) => ({ ...current, [sessionId]: '' }))
+      setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
+      setNotice(LOCAL_QUEUE_NOTICE)
+    }
+    if (remoteControlActive && attachments.length > 0) {
+      void window.grokApi.remoteQueueClear()
+        .then(() => {
+          // Mobile may have last-written during clear; do not install a second slot.
+          if (remoteMainQueueRef.current?.sessionId === sessionId) {
+            setNotice('手機已更新排隊，桌面附件排隊未寫入')
+            return
+          }
+          installLocal()
+        })
+        .catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+      return
+    }
+    installLocal()
   }
 
   const clearLocalQueue = (): void => {
