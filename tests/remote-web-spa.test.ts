@@ -42,6 +42,12 @@ describe('remote-web SPA (wave4)', () => {
     expect(js).toMatch(/fetchSnapshotOnce/)
     expect(js).toMatch(/nearBottom/)
     expect(js).toMatch(/切斷失敗/)
+    expect(js).toMatch(/elevationLocked/)
+    expect(js).toMatch(/網路錯誤/)
+    // Ensure post-action refresh does not call pollSnapshot (would double-timer)
+    const postActionBlock = js.slice(js.indexOf('async function postAction'), js.indexOf('async function sendPrompt'))
+    expect(postActionBlock).toMatch(/fetchSnapshotOnce/)
+    expect(postActionBlock).not.toMatch(/void pollSnapshot/)
   })
 
   it('CSS enforces 44px touch targets', () => {

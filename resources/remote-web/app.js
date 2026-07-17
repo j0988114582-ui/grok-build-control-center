@@ -132,23 +132,29 @@
   }
 
   async function refreshStatus() {
-    const { data } = await api('/api/status')
-    if (!data) {
-      setBanner('無法連線（請回電腦確認遙控已啟用）')
+    try {
+      const { res, data } = await api('/api/status')
+      if (!res.ok || !data) {
+        setBanner('無法連線（請回電腦確認遙控已啟用）')
+        bookmarkHint.classList.remove('hidden')
+        showPair()
+        return
+      }
+      if (data.paired) {
+        paired = true
+        setBanner('已配對')
+        showMain()
+        startPolling()
+      } else if (data.pairable || pairingSecret) {
+        setBanner(data.pairable ? '可配對（請輸入 PIN）' : '等待桌面開啟配對')
+        showPair()
+      } else {
+        setBanner('遠端待命／請在桌面啟用並顯示 QR')
+        showPair()
+      }
+    } catch (_) {
+      setBanner('網路錯誤：無法讀取狀態（請回電腦確認）')
       bookmarkHint.classList.remove('hidden')
-      showPair()
-      return
-    }
-    if (data.paired) {
-      paired = true
-      setBanner('已配對')
-      showMain()
-      startPolling()
-    } else if (data.pairable || pairingSecret) {
-      setBanner(data.pairable ? '可配對（請輸入 PIN）' : '等待桌面開啟配對')
-      showPair()
-    } else {
-      setBanner('遠端待命／請在桌面啟用並顯示 QR')
       showPair()
     }
   }
@@ -237,8 +243,15 @@
       ttlLabel.classList.add('hidden')
     }
 
-    if (snap.permissionMode === 'always-approve') yoloBadge.classList.remove('hidden')
-    else yoloBadge.classList.add('hidden')
+    if (snap.permissionMode === 'always-approve') {
+      yoloBadge.textContent = 'YOLO'
+      yoloBadge.classList.remove('hidden')
+    } else if (snap.elevationLocked) {
+      yoloBadge.textContent = 'PIN 已鎖'
+      yoloBadge.classList.remove('hidden')
+    } else {
+      yoloBadge.classList.add('hidden')
+    }
 
     if (snap.running) runningTools.classList.remove('hidden')
     else runningTools.classList.add('hidden')
@@ -362,18 +375,23 @@
 
   async function postAction(path, body, okMsg) {
     mainError.textContent = ''
-    const { res, data } = await api(path, {
-      method: 'POST',
-      body: JSON.stringify(body || {})
-    })
-    if (!res.ok) {
-      mainError.textContent = (data && data.message) || '操作失敗'
+    try {
+      const { res, data } = await api(path, {
+        method: 'POST',
+        body: JSON.stringify(body || {})
+      })
+      if (!res.ok) {
+        mainError.textContent = (data && data.message) || '操作失敗'
+        return false
+      }
+      if (okMsg) noticesEl.textContent = okMsg
+      // Refresh once without spawning a second poll chain
+      void fetchSnapshotOnce()
+      return true
+    } catch (_) {
+      mainError.textContent = '網路錯誤，請稍後再試'
       return false
     }
-    if (okMsg) noticesEl.textContent = okMsg
-    // Refresh once without spawning a second poll chain
-    void fetchSnapshotOnce()
-    return true
   }
 
   async function sendPrompt() {
