@@ -167,10 +167,14 @@ const remoteController = new RemoteController({
   },
   setPermissionMode: async (mode) => applyAgentPermissionMode(mode),
   onFocusChanged: (sessionId) => {
+    // Status may still be transitioning; renderer also reads remote:state for ready.
     send('remote:focus-changed', { sessionId })
   },
   onStateChange: () => {
-    send('remote:state', remoteController.getDesktopPairingView())
+    send('remote:state', {
+      ...remoteController.getDesktopPairingView(),
+      localUrl: remoteServer?.getPort() ? `http://127.0.0.1:${remoteServer.getPort()}` : null
+    })
   }
 })
 let remoteServer: RemoteServer | null = null
@@ -566,6 +570,17 @@ function registerIpc(): void {
     if (sessionId !== null && typeof sessionId !== 'string') throw new Error('Invalid session id')
     remoteController.setFocusSession(typeof sessionId === 'string' ? sessionId : null)
     return true
+  })
+  ipcMain.handle('remote:queue', (_event, text: unknown) => {
+    if (typeof text !== 'string') return { ok: false, message: '排隊內容無效' }
+    const result = remoteController.handleQueue(text, 'desktop')
+    if (!result.ok) return { ok: false, message: result.message }
+    return { ok: true }
+  })
+  ipcMain.handle('remote:queue-clear', () => {
+    const result = remoteController.handleQueueClear()
+    if (!result.ok) return { ok: false, message: result.message }
+    return { ok: true }
   })
   ipcMain.handle('remote:enable', async (_event, options?: {
     allowPhonePermissions?: boolean

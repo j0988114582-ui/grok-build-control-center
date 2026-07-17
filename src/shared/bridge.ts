@@ -84,7 +84,23 @@ export interface GrokBridgeApi {
   remoteDisable(): Promise<RemoteDesktopState>
   remoteRegeneratePairing(): Promise<RemoteDesktopState>
   remoteSetFocus(sessionId: string | null): Promise<boolean>
+  /** Desktop writer into main single-slot queue (E9 last-writer-wins with mobile). */
+  remoteQueue(text: string): Promise<{ ok: boolean; message?: string }>
+  remoteQueueClear(): Promise<{ ok: boolean; message?: string }>
   onRemoteState(callback: (state: RemoteDesktopState) => void): () => void
+  /** Phone/main focus change — renderer only aligns UI (does not own load/ready). */
+  onRemoteFocusChanged(callback: (payload: RemoteFocusChangedPayload) => void): () => void
+}
+
+export type RemoteFocusChangedPayload = {
+  sessionId: string | null
+  focusStatus?: 'none' | 'loading' | 'ready' | 'error'
+}
+
+export type RemoteDesktopQueue = {
+  sessionId: string
+  text: string
+  source: 'mobile-remote' | 'desktop'
 }
 
 export type RemoteDesktopState = {
@@ -97,4 +113,9 @@ export type RemoteDesktopState = {
   localUrl?: string | null
   allowPhonePermissions: boolean
   experimentalTunnel: boolean
+  focusSessionId?: string | null
+  focusStatus?: 'none' | 'loading' | 'ready' | 'error'
+  focusError?: string
+  queue?: RemoteDesktopQueue | null
+  notices?: string[]
 }

@@ -561,6 +561,29 @@ describe('remote-controller (v0.9 coexistence)', () => {
     expect(snap.focusSessionId).toBe('s2')
   })
 
+  it('setFocusSession is idempotent for the same session (no load gen cancel)', async () => {
+    let ready = false
+    let loads = 0
+    const controller = makeController({
+      isSessionReady: () => ready,
+      loadSession: async () => {
+        loads += 1
+        await new Promise((r) => setTimeout(r, 30))
+        ready = true
+      }
+    })
+    controller.enable()
+    const pending = controller.handleFocus('s1')
+    await new Promise((r) => setTimeout(r, 5))
+    // Echo from renderer re-pushing the same focus must not cancel the load
+    controller.setFocusSession('s1')
+    controller.setFocusSession('s1')
+    const result = await pending
+    expect(result.ok).toBe(true)
+    expect(loads).toBe(1)
+    expect(controller.getSnapshot().focusStatus).toBe('ready')
+  })
+
   it('yolo disable switches to ask without revoking remote', async () => {
     const setPermissionMode = vi.fn().mockResolvedValue('ask')
     let mode: 'ask' | 'always-approve' = 'always-approve'

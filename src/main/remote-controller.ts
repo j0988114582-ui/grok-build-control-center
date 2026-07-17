@@ -143,6 +143,11 @@ export class RemoteController {
     publicBaseUrl: string | null
     allowPhonePermissions: boolean
     experimentalTunnel: boolean
+    focusSessionId: string | null
+    focusStatus: RemoteFocusStatus
+    focusError?: string
+    queue: RemoteQueuedPrompt | null
+    notices: string[]
   } {
     return {
       enabled: this.enabled,
@@ -152,7 +157,12 @@ export class RemoteController {
       expiresAt: this.pairingExpiresAt,
       publicBaseUrl: this.publicBaseUrl,
       allowPhonePermissions: this.allowPhonePermissions,
-      experimentalTunnel: this.experimentalTunnel
+      experimentalTunnel: this.experimentalTunnel,
+      focusSessionId: this.focusSessionId,
+      focusStatus: this.focusStatus,
+      ...(this.focusError ? { focusError: this.focusError } : {}),
+      queue: this.queue ? { ...this.queue } : null,
+      notices: [...this.notices]
     }
   }
 
@@ -213,8 +223,20 @@ export class RemoteController {
     return { pairingSecret: opened.pairingSecret, pin: opened.pin, expiresAt: opened.expiresAt }
   }
 
-  /** Desktop/UI may set focus without load (wave 5 UI align). Prefer handleFocus for remote. */
+  /**
+   * Desktop/UI may set focus without load (wave 5 UI align). Prefer handleFocus for remote.
+   * Idempotent when sessionId already matches — avoids echo from renderer re-pushing
+   * phone-chosen focus (which would bump loadGeneration and cancel in-flight load).
+   */
   setFocusSession(sessionId: string | null): void {
+    if (sessionId === this.focusSessionId) {
+      if (sessionId && this.deps.isSessionReady(sessionId) && this.focusStatus !== 'ready') {
+        this.focusStatus = 'ready'
+        this.focusError = undefined
+        this.emit()
+      }
+      return
+    }
     this.loadGeneration += 1 // cancel in-flight handleFocus/restore loads
     // Any earlier remote focus intent must not overwrite desktop focus after validation
     this.latestValidatedFocusIntent = this.focusIntentSeq

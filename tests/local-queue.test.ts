@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   hasQueuedPayload,
+  remoteQueueStatusLabel,
+  REMOTE_QUEUE_STATUS_DESKTOP,
+  REMOTE_QUEUE_STATUS_MOBILE,
   shouldDrainLocalQueue,
   takeQueueForSession,
   type LocalQueuedPrompt
@@ -25,5 +28,10 @@ describe('local next-turn queue (F-INT-4)', () => {
     const queue: LocalQueuedPrompt = { sessionId: 's1', text: 'next', attachments: [] }
     expect(takeQueueForSession(queue, 's2')).toEqual({ next: queue, drained: null })
     expect(takeQueueForSession(queue, 's1')).toEqual({ next: null, drained: queue })
+  })
+
+  it('labels remote queue provenance for desktop chrome', () => {
+    expect(remoteQueueStatusLabel('mobile-remote')).toBe(REMOTE_QUEUE_STATUS_MOBILE)
+    expect(remoteQueueStatusLabel('desktop')).toBe(REMOTE_QUEUE_STATUS_DESKTOP)
   })
 })

@@ -21,5 +21,7 @@ describe('remote main composition (wave2)', () => {
     expect(indexSrc).toMatch(/restoreFocusAfterReconnect/)
     expect(indexSrc).toMatch(/sessionReadyGate\.markReady/)
     expect(indexSrc).toMatch(/previewRoots\.setSessionCwd/)
+    expect(indexSrc).toMatch(/remote:queue/)
+    expect(indexSrc).toMatch(/remote:focus-changed/)
   })
 })

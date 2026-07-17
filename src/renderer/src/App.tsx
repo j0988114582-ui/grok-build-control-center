@@ -25,6 +25,8 @@ import {
   LOCAL_QUEUE_CLEARED_NOTICE,
   LOCAL_QUEUE_NOTICE,
   LOCAL_QUEUE_STATUS,
+  REMOTE_QUEUE_NOTICE_DESKTOP,
+  remoteQueueStatusLabel,
   shouldDrainLocalQueue,
   takeQueueForSession,
   type LocalQueuedPrompt
@@ -330,6 +332,9 @@ export function App(): React.JSX.Element {
   const [remoteBusy, setRemoteBusy] = useState(false)
   const [remoteAllowPhonePerms, setRemoteAllowPhonePerms] = useState(false)
   const [remoteUseQuickTunnel, setRemoteUseQuickTunnel] = useState(false)
+  /** Skip desktop→main focus echo while aligning UI to phone-owned focus. */
+  const aligningRemoteFocusRef = useRef(false)
+  const lastRemoteNoticeRef = useRef<string>('')
   const [runningMap, setRunningMap] = useState<Record<string, boolean>>({})
   const [yoloConfirm, setYoloConfirm] = useState(false)
   const [yoloBusy, setYoloBusy] = useState(false)
@@ -398,8 +403,12 @@ export function App(): React.JSX.Element {
   const setupReturnFocusRef = useRef<HTMLElement | null>(null)
   const deletingSessionsRef = useRef(false)
   const cancelActiveTurnRef = useRef<(sessionId: string) => Promise<void>>(async () => {})
+  const sessionsRef = useRef<SessionSummary[]>([])
+  const remoteControlActiveRef = useRef(false)
   followTailRef.current = followTail
   activeIdRef.current = active?.id ?? null
+  sessionsRef.current = sessions
+  remoteControlActiveRef.current = remoteControlActive
 
   const updateConnectionGeneration = (newGen: number): void => {
     connectionGenerationRef.current = newGen
@@ -571,20 +580,31 @@ export function App(): React.JSX.Element {
           setInterjectState((current) =>
             current?.status === 'queued' && current.sessionId === event.sessionId ? null : current)
           // F-INT-4: drain local next-turn queue after the active turn ends.
+          // When Remote is on, main RemoteController owns the text queue (E9); skip local
+          // text-only drain to avoid double-send. Attachment-only local queues still drain here.
           if (shouldDrainLocalQueue(event.status)) {
-            const { next, drained } = takeQueueForSession(localQueueRef.current, event.sessionId)
-            if (drained) {
-              localQueueRef.current = next
-              setLocalQueue(next)
-              const blocks: PromptBlock[] = [
-                ...(drained.text ? [{ type: 'text' as const, text: drained.text }] : []),
-                ...drained.attachments
-              ]
-              setRunningMap((current) => ({ ...current, [event.sessionId]: true }))
-              void window.grokApi.sendPrompt(event.sessionId, blocks).catch((error) => {
-                setNotice(error instanceof Error ? error.message : String(error))
-                setRunningMap((current) => ({ ...current, [event.sessionId]: false }))
-              })
+            const queued = localQueueRef.current
+            const remoteOwnsText =
+              remoteControlActiveRef.current &&
+              queued &&
+              queued.sessionId === event.sessionId &&
+              Boolean(queued.text?.trim()) &&
+              queued.attachments.length === 0
+            if (!remoteOwnsText) {
+              const { next, drained } = takeQueueForSession(localQueueRef.current, event.sessionId)
+              if (drained) {
+                localQueueRef.current = next
+                setLocalQueue(next)
+                const blocks: PromptBlock[] = [
+                  ...(drained.text ? [{ type: 'text' as const, text: drained.text }] : []),
+                  ...drained.attachments
+                ]
+                setRunningMap((current) => ({ ...current, [event.sessionId]: true }))
+                void window.grokApi.sendPrompt(event.sessionId, blocks).catch((error) => {
+                  setNotice(error instanceof Error ? error.message : String(error))
+                  setRunningMap((current) => ({ ...current, [event.sessionId]: false }))
+                })
+              }
             }
           }
           // F-UX-1: system notification when the turn finishes (main suppresses if focused).
@@ -643,15 +663,68 @@ export function App(): React.JSX.Element {
       setRemoteState(state)
       setRemoteControlActive(state.enabled)
     }).catch(() => undefined)
-    const off = window.grokApi.onRemoteState((state) => {
+    const offState = window.grokApi.onRemoteState((state) => {
       setRemoteState(state)
       setRemoteControlActive(state.enabled)
+      const notice = state.notices?.[0]
+      if (notice && notice !== lastRemoteNoticeRef.current) {
+        lastRemoteNoticeRef.current = notice
+        setNotice(notice)
+      }
+      // Mirror main focus readiness when load finishes (renderer does not re-load).
+      if (state.focusSessionId && state.focusStatus === 'ready') {
+        const id = state.focusSessionId
+        setSessionReady((current) =>
+          markSessionReadyIfCurrent(current, id, connectionGenerationRef.current, connectionGenerationRef.current)
+        )
+      }
+    })
+    return offState
+  }, [])
+
+  /** Wave 5: renderer only aligns UI to main-owned remote focus (no second load authority). */
+  useEffect(() => {
+    const off = window.grokApi.onRemoteFocusChanged((payload) => {
+      const sessionId = payload.sessionId
+      if (!sessionId) return
+      void (async () => {
+        aligningRemoteFocusRef.current = true
+        try {
+          let session = sessionsRef.current.find((item) => item.id === sessionId)
+          if (!session) {
+            const list = await window.grokApi.listSessions().catch(() => [] as SessionSummary[])
+            setSessions(list)
+            session = list.find((item) => item.id === sessionId)
+          }
+          if (!session) {
+            setNotice('手機已切換焦點，但本機列表尚無該對話')
+            return
+          }
+          setActive(session)
+          activeIdRef.current = sessionId
+          setFollowTail(true)
+          setUnread(0)
+          if (payload.focusStatus === 'ready') {
+            setSessionReady((current) =>
+              markSessionReadyIfCurrent(current, sessionId, connectionGenerationRef.current, connectionGenerationRef.current)
+            )
+          } else if (payload.focusStatus === 'loading') {
+            setNotice('手機焦點對話載入中…')
+          } else if (payload.focusStatus === 'error') {
+            setNotice('手機焦點對話載入失敗')
+          }
+        } finally {
+          // Allow next user-driven focus change to push to main
+          window.setTimeout(() => { aligningRemoteFocusRef.current = false }, 0)
+        }
+      })()
     })
     return off
   }, [])
 
   useEffect(() => {
     if (!remoteControlActive) return
+    if (aligningRemoteFocusRef.current) return
     void window.grokApi.remoteSetFocus(active?.id ?? null).catch(() => undefined)
   }, [active?.id, remoteControlActive])
 
@@ -1349,6 +1422,9 @@ export function App(): React.JSX.Element {
       localQueueRef.current = null
       setLocalQueue(null)
     }
+    if (remoteControlActive) {
+      void window.grokApi.remoteQueueClear().catch(() => undefined)
+    }
     setDrafts((current) => ({ ...current, [sessionId]: '' }))
     setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
     setImagePathDedupeBySession((current) => {
@@ -1389,12 +1465,36 @@ export function App(): React.JSX.Element {
     await doThisNowFor(active.id)
   }
 
-  /** F-INT-4: queue a full next-turn prompt to auto-send when the current turn ends. */
+  /** F-INT-4 / E9: queue next turn — main single-slot when Remote is on (last writer wins). */
   const queueNextTurn = (): void => {
     if (!active || !running || interjectBusy) return
     const sessionId = active.id
     const text = drafts[sessionId]?.trim()
     if (!text && !attachments.length) return
+
+    // Remote on + text: write main-owned slot (mobile may overwrite / be overwritten).
+    if (remoteControlActive && text) {
+      void window.grokApi.remoteQueue(text).then((result) => {
+        if (!result.ok) {
+          setNotice(result.message || '排隊失敗')
+          return
+        }
+        setDrafts((current) => ({ ...current, [sessionId]: '' }))
+        // Attachment-only remainder stays local if present
+        if (attachments.length) {
+          const item: LocalQueuedPrompt = { sessionId, attachments: [...attachments] }
+          localQueueRef.current = item
+          setLocalQueue(item)
+          setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
+        } else {
+          localQueueRef.current = null
+          setLocalQueue(null)
+        }
+        setNotice(REMOTE_QUEUE_NOTICE_DESKTOP)
+      }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+      return
+    }
+
     const item: LocalQueuedPrompt = {
       sessionId,
       ...(text ? { text } : {}),
@@ -1408,11 +1508,33 @@ export function App(): React.JSX.Element {
   }
 
   const clearLocalQueue = (): void => {
-    if (!localQueue) return
+    if (remoteControlActive && remoteState?.queue) {
+      void window.grokApi.remoteQueueClear().then((result) => {
+        if (!result.ok) setNotice(result.message || '清除排隊失敗')
+        else setNotice(LOCAL_QUEUE_CLEARED_NOTICE)
+      }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+    }
+    if (!localQueue && !(remoteControlActive && remoteState?.queue)) return
     localQueueRef.current = null
     setLocalQueue(null)
-    setNotice(LOCAL_QUEUE_CLEARED_NOTICE)
+    if (!remoteControlActive) setNotice(LOCAL_QUEUE_CLEARED_NOTICE)
   }
+
+  /** Display queue: main remote slot takes precedence when Remote is enabled. */
+  const displayQueue: LocalQueuedPrompt | null = (() => {
+    if (remoteControlActive && remoteState?.queue) {
+      return {
+        sessionId: remoteState.queue.sessionId,
+        text: remoteState.queue.text,
+        attachments: localQueue?.sessionId === remoteState.queue.sessionId ? localQueue.attachments : []
+      }
+    }
+    return localQueue
+  })()
+  const displayQueueStatus =
+    remoteControlActive && remoteState?.queue
+      ? remoteQueueStatusLabel(remoteState.queue.source)
+      : LOCAL_QUEUE_STATUS
 
   const chooseFiles = async (): Promise<void> => { try { const files = await window.grokApi.chooseFiles(); addSelectedFiles(files) } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) } }
   const addSelectedFiles = (files: SelectedFile[]): void => { if (!active) return; const sessionId = active.id; const { blocks, paths } = selectedFilesToPrompt(files, caps.promptCapabilities.image === true); setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), ...blocks] })); if (paths) setDrafts((current) => ({ ...current, [sessionId]: `${current[sessionId] ?? ''}${current[sessionId] ? '\n' : ''}${paths}` })) }
@@ -2091,8 +2213,8 @@ export function App(): React.JSX.Element {
               {interjectState?.status === 'queued' && interjectState.sessionId === active.id
                 ? <em className="interject-queued" data-testid="interject-status">{INTERJECT_QUEUED_NOTICE}</em>
                 : null}
-              {localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue)
-                ? <em className="local-queue-status" data-testid="local-queue-status">{LOCAL_QUEUE_STATUS}</em>
+              {displayQueue && displayQueue.sessionId === active.id && hasQueuedPayload(displayQueue)
+                ? <em className="local-queue-status" data-testid="local-queue-status">{displayQueueStatus}</em>
                 : null}
               <span className="composer-status-keys">{running ? `${shortcutLabel('sendPrompt')} 插話 · ${shortcutLabel('cancelTurn')} 停止` : `${shortcutLabel('sendPrompt')} 傳送 · ${shortcutLabel('newline')} 換行`}</span>
             </div>
@@ -2138,7 +2260,7 @@ export function App(): React.JSX.Element {
               {running ? <div className="composer-actions running command-rail" data-testid="command-rail">
                 <button type="button" className="interject-button" data-testid="interject-button" title="在下一個安全點插入指示（不取消目前回合）" disabled={!activeReady || interjectBusy || !(drafts[active.id] ?? '').trim()} onClick={() => void sendInterject()}><MessageSquare />插話</button>
                 <button type="button" className="queue-next-button" data-testid="queue-next-button" title="目前回合結束後自動送出（本機排隊，非官方 queue API）" disabled={!activeReady || interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => queueNextTurn()}><ListTodo />排隊下一輪</button>
-                {localQueue && localQueue.sessionId === active.id && hasQueuedPayload(localQueue) ? <button type="button" className="queue-clear-button" data-testid="queue-clear-button" title="取消已排隊的下一輪" onClick={() => clearLocalQueue()}><X />取消排隊</button> : null}
+                {displayQueue && displayQueue.sessionId === active.id && hasQueuedPayload(displayQueue) ? <button type="button" className="queue-clear-button" data-testid="queue-clear-button" title="取消已排隊的下一輪" onClick={() => clearLocalQueue()}><X />取消排隊</button> : null}
                 <button type="button" className="do-now-button" data-testid="do-this-now-button" title="取消目前回合並立刻送出新指示" disabled={!activeReady || interjectBusy || (!(drafts[active.id] ?? '').trim() && attachments.length === 0)} onClick={() => void doThisNow()}><Zap />立刻改做</button>
                 <button type="button" className="stop-button" data-nova-tone="danger" data-testid="stop-button" disabled={!activeReady} onClick={() => void cancelActiveTurn(active.id).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Square />停止</button>
               </div> : <button className="send-button" data-magnetic data-nova-tone="primary" disabled={!activeReady || (!(drafts[active.id] ?? '').trim() && !attachments.length)} onClick={() => void sendPrompt()}><Send />送出</button>}

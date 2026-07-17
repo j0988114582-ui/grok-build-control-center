@@ -15,6 +15,14 @@ export type LocalQueuedPrompt = {
 export const LOCAL_QUEUE_NOTICE = '已排隊下一輪：目前回合結束後會自動送出'
 export const LOCAL_QUEUE_STATUS = '下一輪已排隊'
 export const LOCAL_QUEUE_CLEARED_NOTICE = '已取消下一輪排隊'
+/** E9: main single-slot when Remote is on — provenance for desktop chrome. */
+export const REMOTE_QUEUE_STATUS_MOBILE = '下一輪已排隊（手機）'
+export const REMOTE_QUEUE_STATUS_DESKTOP = '下一輪已排隊（桌面）'
+export const REMOTE_QUEUE_NOTICE_DESKTOP = '已排隊下一輪（桌面寫入主佇列；與手機最後寫入者勝）'
+
+export function remoteQueueStatusLabel(source: 'mobile-remote' | 'desktop'): string {
+  return source === 'mobile-remote' ? REMOTE_QUEUE_STATUS_MOBILE : REMOTE_QUEUE_STATUS_DESKTOP
+}
 
 /** True when there is something worth sending after the turn. */
 export function hasQueuedPayload(item: LocalQueuedPrompt | null | undefined): boolean {
