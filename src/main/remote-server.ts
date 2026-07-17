@@ -280,54 +280,170 @@ export class RemoteServer {
         sendJson(res, 429, remoteError('rate_limited', '提示頻率過高'))
         return
       }
-      const raw = await readBody(req)
-      let body: { text?: string }
-      try {
-        body = JSON.parse(raw) as { text?: string }
-      } catch {
-        sendJson(res, 400, remoteError('invalid_request', 'JSON 無效'))
-        return
-      }
+      const body = await parseJsonBody<{ text?: string }>(req, res)
+      if (!body) return
       const result = await controller.handlePrompt(typeof body.text === 'string' ? body.text : '')
-      if (!result.ok) {
-        sendJson(res, result.code === 'in_flight' ? 409 : 400, remoteError(result.code as 'invalid_request', result.message))
-        return
-      }
-      sendJson(res, 200, { ok: true, provenance: 'mobile-remote' })
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
       return
     }
 
     if (pathname === '/api/cancel' && req.method === 'POST') {
       if (!requireJsonMutation(req, res)) return
       const result = await controller.handleCancel()
-      if (!result.ok) {
-        sendJson(res, 400, remoteError(result.code as 'not_ready', result.message))
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/interject' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      if (!controller.auth.rateLimit(`interject:${session.value.tokenHash}`, 10, 60_000, now)) {
+        sendJson(res, 429, remoteError('rate_limited', '請求過於頻繁'))
         return
       }
-      sendJson(res, 200, { ok: true, provenance: 'mobile-remote' })
+      const body = await parseJsonBody<{ text?: string }>(req, res)
+      if (!body) return
+      const result = await controller.handleInterject(typeof body.text === 'string' ? body.text : '')
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/do-now' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      if (!controller.auth.rateLimit(`donow:${session.value.tokenHash}`, 5, 60_000, now)) {
+        sendJson(res, 429, remoteError('rate_limited', '請求過於頻繁'))
+        return
+      }
+      const body = await parseJsonBody<{ text?: string }>(req, res)
+      if (!body) return
+      const result = await controller.handleDoNow(typeof body.text === 'string' ? body.text : '')
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/queue' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      const body = await parseJsonBody<{ text?: string }>(req, res)
+      if (!body) return
+      const result = controller.handleQueue(typeof body.text === 'string' ? body.text : '', 'mobile-remote')
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/queue/clear' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      const result = controller.handleQueueClear()
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/session/focus' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      if (!controller.auth.rateLimit(`focus:${session.value.tokenHash}`, 20, 60_000, now)) {
+        sendJson(res, 429, remoteError('rate_limited', '請求過於頻繁'))
+        return
+      }
+      const body = await parseJsonBody<{ sessionId?: string }>(req, res)
+      if (!body) return
+      if (typeof body.sessionId !== 'string' || !body.sessionId.trim()) {
+        sendJson(res, 400, remoteError('invalid_request', '缺少 sessionId'))
+        return
+      }
+      const result = await controller.handleFocus(body.sessionId.trim())
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/session/create' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      if (!controller.auth.rateLimit(`create:${session.value.tokenHash}`, 5, 60_000, now)) {
+        sendJson(res, 429, remoteError('rate_limited', '請求過於頻繁'))
+        return
+      }
+      const body = await parseJsonBody<{ cwd?: string }>(req, res)
+      if (!body) return
+      if (typeof body.cwd !== 'string' || !body.cwd.trim()) {
+        sendJson(res, 400, remoteError('invalid_request', '缺少 cwd'))
+        return
+      }
+      const result = await controller.handleCreateSession(body.cwd)
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/session/list' && req.method === 'GET') {
+      if (!controller.auth.rateLimit(`list:${session.value.tokenHash}`, 30, 60_000, now)) {
+        sendJson(res, 429, remoteError('rate_limited', '請求過於頻繁'))
+        return
+      }
+      await controller.refreshSessions()
+      const snap = controller.getSnapshot()
+      sendJson(res, 200, { sessions: snap.sessions, cwdUnion: controller.listCwdUnion() })
+      return
+    }
+
+    if (pathname === '/api/model' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      const body = await parseJsonBody<{ modelId?: string; reasoningEffort?: string }>(req, res)
+      if (!body) return
+      if (typeof body.modelId !== 'string' || !body.modelId.trim()) {
+        sendJson(res, 400, remoteError('invalid_request', '缺少 modelId'))
+        return
+      }
+      const effort = typeof body.reasoningEffort === 'string' ? body.reasoningEffort : undefined
+      const result = await controller.handleSetModel(body.modelId.trim(), effort)
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/mode' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      const body = await parseJsonBody<{ modeId?: string }>(req, res)
+      if (!body) return
+      if (typeof body.modeId !== 'string' || !body.modeId.trim()) {
+        sendJson(res, 400, remoteError('invalid_request', '缺少 modeId'))
+        return
+      }
+      const result = await controller.handleSetMode(body.modeId.trim())
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/yolo/enable' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      const body = await parseJsonBody<{ pin?: string }>(req, res)
+      if (!body) return
+      if (typeof body.pin !== 'string') {
+        sendJson(res, 400, remoteError('invalid_request', '缺少 pin'))
+        return
+      }
+      const result = await controller.handleYoloEnable(body.pin, session.value.tokenHash)
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    if (pathname === '/api/yolo/disable' && req.method === 'POST') {
+      if (!requireJsonMutation(req, res)) return
+      const result = await controller.handleYoloDisable()
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
       return
     }
 
     if (pathname === '/api/permission/respond' && req.method === 'POST') {
       if (!requireJsonMutation(req, res)) return
-      const raw = await readBody(req)
-      let body: { requestId?: string; optionId?: string }
-      try {
-        body = JSON.parse(raw) as { requestId?: string; optionId?: string }
-      } catch {
-        sendJson(res, 400, remoteError('invalid_request', 'JSON 無效'))
-        return
-      }
+      const body = await parseJsonBody<{ requestId?: string; optionId?: string }>(req, res)
+      if (!body) return
       if (typeof body.requestId !== 'string' || typeof body.optionId !== 'string') {
         sendJson(res, 400, remoteError('invalid_request', '缺少 requestId 或 optionId'))
         return
       }
       const result = controller.handlePermissionRespond(body.requestId, body.optionId)
-      if (!result.ok) {
-        sendJson(res, result.code === 'forbidden' ? 403 : 400, remoteError(result.code as 'permission_mismatch', result.message))
-        return
-      }
-      sendJson(res, 200, { ok: true, provenance: 'mobile-remote' })
+      sendHandlerResult(res, result, { provenance: 'mobile-remote' })
+      return
+    }
+
+    // Explicitly no upload / multipart routes
+    if (pathname === '/api/upload' || pathname.startsWith('/api/upload/')) {
+      sendJson(res, 404, remoteError('not_found', '不支援上傳'))
       return
     }
 
@@ -378,6 +494,44 @@ function requireJsonMutation(req: IncomingMessage, res: ServerResponse): boolean
     return false
   }
   return true
+}
+
+async function parseJsonBody<T extends object>(req: IncomingMessage, res: ServerResponse): Promise<T | null> {
+  const raw = await readBody(req)
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    sendJson(res, 400, remoteError('invalid_request', 'JSON 無效'))
+    return null
+  }
+}
+
+type HandlerLike =
+  | { ok: true; sessionId?: string }
+  | { ok: false; code: string; message: string }
+
+function sendHandlerResult(
+  res: ServerResponse,
+  result: HandlerLike,
+  extra?: Record<string, unknown>
+): void {
+  if (result.ok) {
+    sendJson(res, 200, {
+      ok: true,
+      ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+      ...extra
+    })
+    return
+  }
+  const status =
+    result.code === 'unauthorized' || result.code === 'pin_invalid' ? 401
+      : result.code === 'forbidden' || result.code === 'elevation_locked' ? 403
+        : result.code === 'not_found' ? 404
+          : result.code === 'rate_limited' ? 429
+            : result.code === 'in_flight' ? 409
+              : result.code === 'not_ready' ? 409
+                : 400
+  sendJson(res, status, remoteError(result.code as 'invalid_request', result.message))
 }
 
 export function defaultRemoteWebRoot(): string {
