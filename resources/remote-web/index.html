@@ -3,43 +3,102 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
   <meta name="referrer" content="no-referrer" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Grok Build 遙控</title>
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
   <main id="app" class="app">
-    <header>
-      <h1>Grok Build 遙控</h1>
-      <p id="banner" class="banner">連線中…</p>
+    <header class="topbar">
+      <div>
+        <h1>Grok Build 遙控</h1>
+        <p id="banner" class="banner">連線中…</p>
+      </div>
+      <div class="topbar-meta">
+        <span id="ttl-label" class="pill hidden" title="絕對 session 期限">—</span>
+        <span id="yolo-badge" class="pill yolo hidden">YOLO</span>
+      </div>
     </header>
+
+    <section id="bookmark-hint" class="card hint hidden">
+      <p>若書籤無法開啟或配對失敗，請<strong>回到電腦</strong>重新啟用遙控並更新 QR／網址（Quick Tunnel URL 常會變）。</p>
+    </section>
+
     <section id="pair-panel" class="card hidden">
       <h2>配對</h2>
-      <p>請輸入桌面顯示的 PIN（配對密鑰已由 QR 帶入，不會出現在網址列）。</p>
-      <label>PIN <input id="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="8" /></label>
-      <button id="pair-btn" type="button">配對</button>
+      <p class="muted">輸入桌面顯示的 PIN。配對密鑰由 QR 帶入，不會顯示在此頁。</p>
+      <div id="pin-display" class="pin-display" aria-live="polite">······</div>
+      <div id="pin-pad" class="pin-pad" role="group" aria-label="PIN 數字鍵盤"></div>
+      <div class="actions">
+        <button id="pair-btn" type="button">配對</button>
+        <button id="pin-clear" type="button" class="ghost">清除</button>
+      </div>
       <p id="pair-error" class="error" role="alert"></p>
     </section>
-    <section id="main-panel" class="card hidden">
-      <div class="status-row">
-        <span id="focus-label">焦點對話：—</span>
-        <span id="running-label"></span>
+
+    <section id="main-panel" class="main-shell hidden">
+      <div class="toolbar">
+        <button id="sessions-toggle" type="button" class="ghost">對話</button>
+        <button id="overflow-toggle" type="button" class="ghost">更多</button>
+        <button id="logout-btn" type="button" class="danger">切斷</button>
       </div>
+
+      <aside id="session-drawer" class="drawer hidden" aria-label="對話列表">
+        <h2>對話</h2>
+        <ul id="session-list" class="session-list"></ul>
+        <p id="focus-status" class="muted"></p>
+      </aside>
+
+      <aside id="overflow-panel" class="drawer hidden" aria-label="溢位選單">
+        <h2>更多</h2>
+        <label>模型 ID
+          <input id="model-id" placeholder="例如 grok-4.5" autocomplete="off" />
+        </label>
+        <label>reasoning effort（可空）
+          <input id="model-effort" placeholder="high / medium / low" autocomplete="off" />
+        </label>
+        <button id="set-model-btn" type="button" class="secondary">套用模型</button>
+        <label>工作模式 ID
+          <input id="mode-id" placeholder="例如 build" autocomplete="off" />
+        </label>
+        <button id="set-mode-btn" type="button" class="secondary">套用工作模式</button>
+        <label>新建對話 cwd（僅既有專案）
+          <select id="cwd-select"></select>
+        </label>
+        <button id="create-session-btn" type="button" class="secondary">建立對話並聚焦</button>
+        <div class="actions yolo-actions">
+          <button id="yolo-on-btn" type="button">開啟 YOLO（需 PIN）</button>
+          <button id="yolo-off-btn" type="button" class="ghost">關閉 YOLO</button>
+        </div>
+        <label id="yolo-pin-wrap" class="hidden">YOLO PIN
+          <input id="yolo-pin" inputmode="numeric" maxlength="8" autocomplete="one-time-code" />
+        </label>
+      </aside>
+
       <div id="permissions" class="permissions"></div>
       <div id="tail" class="tail" aria-live="polite"></div>
+
+      <div id="running-tools" class="running-tools hidden">
+        <button id="interject-btn" type="button" class="secondary">插話</button>
+        <button id="queue-btn" type="button" class="secondary">排隊下一輪</button>
+        <button id="donow-btn" type="button" class="secondary">立刻改做</button>
+      </div>
+
       <label class="prompt-label">提示
-        <textarea id="prompt" rows="3" maxlength="4000" placeholder="傳送給目前焦點對話…"></textarea>
+        <textarea id="prompt" rows="3" maxlength="12000" placeholder="傳送給目前焦點對話…"></textarea>
       </label>
-      <div class="actions">
+      <div class="actions composer-actions">
         <button id="send-btn" type="button">送出</button>
         <button id="cancel-btn" type="button" class="danger">停止</button>
-        <button id="logout-btn" type="button" class="ghost">切斷</button>
       </div>
       <p id="main-error" class="error" role="alert"></p>
       <p id="notices" class="notices"></p>
     </section>
+
     <footer class="privacy">
-      <p>流量經 Cloudflare 等隧道供應商時，供應商在邊緣終止 TLS，技術上可處理 HTTP 內容（提示、權限摘要、對話片段）。用完請切斷，勿分享 QR 螢幕。</p>
+      <p>單人高風險遠端控制 · session 72 小時絕對期限 · 無上傳。流量經 Cloudflare 等隧道時，供應商在邊緣終止 TLS，技術上可處理內容。用完請切斷。</p>
     </footer>
   </main>
   <script src="/app.js"></script>
