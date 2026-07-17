@@ -129,6 +129,46 @@ const remoteController = new RemoteController({
   respondPermission: (requestId, optionId) => {
     acpConnection.current?.respondPermission(requestId, optionId)
   },
+  /** E2: main-owned load — markReady + preview cwd (same side effects as desktop IPC). */
+  loadSession: async (sessionId, cwd) => {
+    if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) {
+      throw new Error('Invalid session id')
+    }
+    const client = await connectAcp()
+    try {
+      await client.loadSession(sessionId, cwd)
+      sessionReadyGate.markReady(sessionId)
+      if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
+    } catch (error) {
+      sessionReadyGate.clear(sessionId)
+      throw error
+    }
+  },
+  createSession: async (cwd) => {
+    const client = await connectAcp()
+    const result = await client.createSession(cwd)
+    const sessionId = typeof result?.sessionId === 'string' ? result.sessionId : undefined
+    if (!sessionId) throw new Error('建立對話失敗：未回傳 sessionId')
+    sessionReadyGate.markReady(sessionId)
+    if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
+    return { sessionId, cwd: typeof cwd === 'string' ? cwd : '' }
+  },
+  setModel: async (sessionId, modelId, reasoningEffort) => {
+    sessionReadyGate.assertReady(sessionId)
+    await (await connectAcp()).setModel(sessionId, modelId, reasoningEffort)
+  },
+  setMode: async (sessionId, modeId) => {
+    sessionReadyGate.assertReady(sessionId)
+    await (await connectAcp()).setMode(sessionId, modeId)
+  },
+  interject: async (sessionId, text) => {
+    sessionReadyGate.assertReady(sessionId)
+    await (await connectAcp()).interject(sessionId, text)
+  },
+  setPermissionMode: async (mode) => applyAgentPermissionMode(mode),
+  onFocusChanged: (sessionId) => {
+    send('remote:focus-changed', { sessionId })
+  },
   onStateChange: () => {
     send('remote:state', remoteController.getDesktopPairingView())
   }
@@ -192,6 +232,50 @@ async function cliStatus(): Promise<CliStatus> {
 }
 
 let acpConnecting: { executable: string; client: GrokAcpClient; promise: Promise<GrokAcpClient> } | null = null
+
+/**
+ * Shared permission-mode transition for desktop IPC and phone `/api/yolo/*`.
+ * E1: never revokes Remote. E2: after reconnect, restore Remote focus session.
+ */
+async function applyAgentPermissionMode(mode: AgentPermissionMode): Promise<AgentPermissionMode> {
+  if (mode !== 'ask' && mode !== 'always-approve') throw new Error('Invalid permission mode')
+  if (agentPermissionMode === mode) return agentPermissionMode
+  if (mode === 'always-approve') {
+    const yoloGate = canEnableYolo(remoteController.isEnabled())
+    if (!yoloGate.ok) throw new Error(yoloGate.reason)
+    if (requiresPinForYoloElevation(remoteController.isEnabled())) {
+      void YOLO_ELEVATION_PIN_REQUIRED
+    }
+  }
+  agentPermissionMode = mode
+  remoteController.onPermissionModeChanged(mode)
+  const wasConnected = acpConnection.current !== null || acpConnecting !== null
+  disconnectAcp()
+  send('grok:status-update', {
+    connected: false,
+    message: mode === 'always-approve'
+      ? '已切換為一律核准（YOLO），需重新連線後生效'
+      : '已切換為每次詢問，需重新連線後生效'
+  })
+  if (wasConnected) {
+    try {
+      await connectAcp()
+      send('grok:status-update', {
+        connected: true,
+        message: mode === 'always-approve' ? 'YOLO 模式已啟用（高風險）' : '權限模式：每次詢問'
+      })
+      // E2: phone focus is authoritative after YOLO reconnect
+      await remoteController.restoreFocusAfterReconnect()
+    } catch (error) {
+      send('grok:status-update', {
+        connected: false,
+        message: error instanceof Error ? error.message : String(error)
+      })
+      throw error
+    }
+  }
+  return agentPermissionMode
+}
 
 async function connectAcp(): Promise<GrokAcpClient> {
   const executable = settings().grokExecutable
@@ -349,46 +433,8 @@ function registerIpc(): void {
   ipcMain.handle('grok:config', async (_event, sessionId: string, configId: string, value: string | boolean) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setConfigOption(sessionId, configId, value)))
   ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => lifecycleOperation.runShared('Grok 權限回覆', async () => acpConnection.current?.respondPermission(requestId, optionId)))
   ipcMain.handle('grok:permission-mode:get', () => agentPermissionMode)
-  ipcMain.handle('grok:permission-mode:set', async (_event, mode: AgentPermissionMode) => {
-    if (mode !== 'ask' && mode !== 'always-approve') throw new Error('Invalid permission mode')
-    if (agentPermissionMode === mode) return agentPermissionMode
-    // v0.9: YOLO may coexist with Remote (PIN elevation is phone-side; desktop uses confirm UI).
-    if (mode === 'always-approve') {
-      const yoloGate = canEnableYolo(remoteController.isEnabled())
-      if (!yoloGate.ok) throw new Error(yoloGate.reason)
-      // Desktop path does not require PIN here; phone elevate uses /api/yolo/enable.
-      if (requiresPinForYoloElevation(remoteController.isEnabled())) {
-        // Notice only — desktop operator already confirmed via YOLO modal.
-        void YOLO_ELEVATION_PIN_REQUIRED
-      }
-    }
-    agentPermissionMode = mode
-    // E1: do not revoke remote on mode change
-    remoteController.onPermissionModeChanged(mode)
-    const wasConnected = acpConnection.current !== null || acpConnecting !== null
-    disconnectAcp()
-    send('grok:status-update', {
-      connected: false,
-      message: mode === 'always-approve'
-        ? '已切換為一律核准（YOLO），需重新連線後生效'
-        : '已切換為每次詢問，需重新連線後生效'
-    })
-    if (wasConnected) {
-      try {
-        await connectAcp()
-        send('grok:status-update', {
-          connected: true,
-          message: mode === 'always-approve' ? 'YOLO 模式已啟用（高風險）' : '權限模式：每次詢問'
-        })
-      } catch (error) {
-        send('grok:status-update', {
-          connected: false,
-          message: error instanceof Error ? error.message : String(error)
-        })
-      }
-    }
-    return agentPermissionMode
-  })
+  ipcMain.handle('grok:permission-mode:set', async (_event, mode: AgentPermissionMode) =>
+    lifecycleOperation.runShared('Grok 權限模式', async () => applyAgentPermissionMode(mode)))
   ipcMain.handle('fs:stat-local', async (_event, filePath: unknown) => {
     if (typeof filePath !== 'string' || !filePath.trim()) {
       return { path: '', kind: 'missing' as const }
