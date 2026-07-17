@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { CliStatusUpdate, GrokBridgeApi } from '../shared/bridge'
 import type { PermissionRequest, UiSessionEvent } from '../shared/types'
 
@@ -27,6 +27,15 @@ const api: GrokBridgeApi = {
   chooseDirectory: () => ipcRenderer.invoke('dialog:directory'),
   chooseFiles: () => ipcRenderer.invoke('dialog:files'),
   savePasteImage: (payload) => ipcRenderer.invoke('paste:save-image', payload),
+  getPathForFile: (file) => {
+    try {
+      const resolved = webUtils.getPathForFile(file)
+      return resolved && resolved.trim() ? resolved : null
+    } catch {
+      return null
+    }
+  },
+  statLocalPath: (filePath) => ipcRenderer.invoke('fs:stat-local', filePath),
   exportSession: (sessionId) => ipcRenderer.invoke('grok:export', sessionId),
   revealExport: (filePath) => ipcRenderer.invoke('grok:export-reveal', filePath),
   openTui: (cwd) => ipcRenderer.invoke('grok:tui', cwd),

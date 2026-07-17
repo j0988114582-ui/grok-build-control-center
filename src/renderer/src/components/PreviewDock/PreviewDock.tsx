@@ -40,6 +40,8 @@ export type PreviewDockProps = {
   onToggleOpen: () => void
   onWidthChange: (width: number) => void
   onSelectItem: (id: string) => void
+  /** P-CLOSE-1: clear active item / load state; dock may stay open; not delete. */
+  onCloseItem?: () => void
   onRefresh: () => void
   onRescan: () => void
   onOpenFile: () => void
@@ -69,7 +71,7 @@ function kindIcon(kind: PreviewKind): React.ReactNode {
 export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
   const {
     open, width, items, activeId, load, showHtmlScriptAdvanced, htmlScriptsAllowed,
-    onToggleOpen, onWidthChange, onSelectItem, onRefresh, onRescan, onOpenFile,
+    onToggleOpen, onWidthChange, onSelectItem, onCloseItem, onRefresh, onRescan, onOpenFile,
     onToggleHtmlScripts, onCopyPath, onRevealPath, onOpenExternalPath
   } = props
 
@@ -171,6 +173,16 @@ export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
           <button type="button" className="icon-button" aria-label="複製路徑" onClick={() => onCopyPath(pathForActions)}><Copy size={15} /></button>
           <button type="button" className="icon-button" aria-label="在檔案總管開啟" onClick={() => onRevealPath(pathForActions)}><FolderOpen size={15} /></button>
         </>}
+        {onCloseItem && (activeId || load.status !== 'idle') && (
+          <button
+            type="button"
+            className="icon-button"
+            data-testid="preview-close-item"
+            aria-label="關閉目前項目"
+            title="關閉目前項目（不刪除檔案、不移出清單）"
+            onClick={onCloseItem}
+          ><X size={15} /></button>
+        )}
         <button type="button" className="icon-button" aria-label="收合預覽台" title="收合預覽台 (Ctrl+Shift+V)" onClick={onToggleOpen}><PanelRightClose size={15} /></button>
       </div>
     </header>
@@ -203,6 +215,18 @@ export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
           type="button"
           aria-current={item.id === activeId ? 'true' : undefined}
           className={`preview-list-item ${item.id === activeId ? 'active' : ''}`}
+          draggable={item.source.type === 'file'}
+          title={item.source.type === 'file' ? '拖到輸入框可插入本機路徑' : undefined}
+          onDragStart={(event) => {
+            // P-DRAG-5: Preview→composer uses DataTransfer path only for local files
+            if (item.source.type !== 'file') {
+              event.preventDefault()
+              return
+            }
+            event.dataTransfer.setData('application/x-grok-path', item.source.path)
+            event.dataTransfer.setData('text/plain', item.source.path)
+            event.dataTransfer.effectAllowed = 'copy'
+          }}
           onClick={() => onSelectItem(item.id)}
         >
           <span className="preview-list-icon">{kindIcon(item.kind)}</span>
@@ -217,7 +241,7 @@ export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
 
     <div className="preview-stage" data-testid="preview-stage">
       {load.status === 'idle' && (
-        <div className="preview-empty-stage">
+        <div className="preview-empty-stage" data-testid="preview-idle">
           <Eye size={28} />
           <p>座艙預覽台待命</p>
           <small>點清單項目，或從對話中的路徑啟動預覽</small>

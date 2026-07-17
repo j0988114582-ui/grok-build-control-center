@@ -96,6 +96,17 @@ import {
   PERMISSION_ASK_ALREADY_NOTICE,
   PERMISSION_ASK_TOOLTIP
 } from '../../shared/remote-yolo-mutex'
+import {
+  appendPathLines,
+  isAbsoluteLocalPath,
+  isImageMime,
+  isImagePath,
+  removePathLine,
+  revokePathChipUrls,
+  stripDuplicateImagePathLines,
+  upsertPathChips,
+  type PathChip
+} from '../../shared/drop-paths'
 import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock,
   SessionSummary, SessionUsage, UiSessionEvent
@@ -315,8 +326,10 @@ export function App(): React.JSX.Element {
   const [yoloConfirm, setYoloConfirm] = useState(false)
   const [yoloBusy, setYoloBusy] = useState(false)
   const [loadingSessionIds, setLoadingSessionIds] = useState<string[]>([])
-  /** F-MED-2: path chip with optional in-memory thumbnail (object/data URL). */
-  const [pastePathChip, setPastePathChip] = useState<{ path: string; previewUrl?: string } | null>(null)
+  /** P-DRAG multi path chips (absolute paths) with optional in-memory thumbnails. */
+  const [pathChips, setPathChips] = useState<PathChip[]>([])
+  /** Paths also sent as image blocks — strip matching draft lines on send (P-DRAG-4). */
+  const [imagePathDedupeBySession, setImagePathDedupeBySession] = useState<Record<string, string[]>>({})
   /** Mid-turn interjection lifecycle (queued → cleared on turn end / cancel discard). */
   const [interjectState, setInterjectState] = useState<InterjectUiState>(null)
   const [interjectBusy, setInterjectBusy] = useState(false)
@@ -649,6 +662,7 @@ export function App(): React.JSX.Element {
       if (command === 'newSession') { event.preventDefault(); if (!lifecycleBusy) createSessionRef.current(); return }
       if (command === 'jumpToLatest') { event.preventDefault(); jumpToLatestRef.current(); return }
       if (command === 'cancelTurn' || event.key === 'Escape') {
+        // P-CLOSE-2: lightbox is handled in PreviewDock capture phase first.
         if (panel !== 'none') { event.preventDefault(); setPanel('none'); return }
         if (setupDialog) { event.preventDefault(); if (!lifecycleBusy) setSetupDialog(null); return }
         if (batchDeleteTargets) { event.preventDefault(); setBatchDeleteTargets(null); return }
@@ -657,6 +671,13 @@ export function App(): React.JSX.Element {
         if (selectMode) { event.preventDefault(); setSelectMode(false); setSelectedIds(new Set()); return }
         if (renameTarget) { event.preventDefault(); setRenameTarget(null); return }
         if (searchOpen) { event.preventDefault(); setSearchOpen(false); setTranscriptQuery(''); return }
+        // Clear active Preview item (not dock collapse, not delete, not cancel turn)
+        if (previewActiveId || previewLoad.status !== 'idle') {
+          event.preventDefault()
+          setPreviewActiveId(null)
+          setPreviewLoad({ status: 'idle' })
+          return
+        }
       }
       if (command === 'cancelTurn') {
         event.preventDefault()
@@ -667,7 +688,7 @@ export function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [running, active, panel, setupDialog, lifecycleBusy, batchDeleteTargets, yoloConfirm, deleteTarget, renameTarget, searchOpen, selectMode, sidebarOpen, settings.shortcuts])
+  }, [running, active, panel, setupDialog, lifecycleBusy, batchDeleteTargets, yoloConfirm, deleteTarget, renameTarget, searchOpen, selectMode, sidebarOpen, settings.shortcuts, previewActiveId, previewLoad.status])
 
   const activeEvents = useMemo(() => active ? events[active.id] ?? [] : [], [active, events])
   const searchHits = useMemo(() => transcriptQuery ? activeEvents.filter((event) => eventText(event).toLocaleLowerCase().includes(transcriptQuery.toLocaleLowerCase())).length : 0, [activeEvents, transcriptQuery])
@@ -961,7 +982,7 @@ export function App(): React.JSX.Element {
           return toggleTeamSlot(current, summary.id)
         })
       }
-      setPastePathChip(null)
+      setPathChips((chips) => { revokePathChipUrls(chips); return [] })
       setUsage(null)
       setFollowTail(true)
       setUnread(0)
@@ -993,7 +1014,7 @@ export function App(): React.JSX.Element {
           return toggleTeamSlot(current, session.id)
         })
       }
-      setPastePathChip(null)
+      setPathChips((chips) => { revokePathChipUrls(chips); return [] })
       setUsage(null)
       setFollowTail(true)
       setUnread(0)
@@ -1154,6 +1175,17 @@ export function App(): React.JSX.Element {
     })
   }
 
+  const addPathChips = (chips: PathChip[]): void => {
+    if (!chips.length) return
+    setPathChips((current) => upsertPathChips(current, chips))
+  }
+
+  const appendPathsToDraft = (sessionId: string, paths: string[]): void => {
+    if (!paths.length) return
+    setDrafts((current) => ({ ...current, [sessionId]: appendPathLines(current[sessionId] ?? '', paths) }))
+    addPathChips(paths.map((path) => ({ path })))
+  }
+
   const sendPromptFor = async (sessionId: string): Promise<void> => {
     const check = sessionActionAllowed(sessionReady, sessionId, connectionGenerationRef.current, {
       loading: loadingSessionIds.includes(sessionId),
@@ -1164,10 +1196,22 @@ export function App(): React.JSX.Element {
       return
     }
     if (runningMap[sessionId]) return
-    const text = drafts[sessionId]?.trim()
     const pending = attachmentsBySession[sessionId] ?? []
+    const dedupePaths = imagePathDedupeBySession[sessionId] ?? []
+    const rawDraft = drafts[sessionId] ?? ''
+    const text = stripDuplicateImagePathLines(rawDraft, dedupePaths).trim()
     if (!text && !pending.length) return
-    dispatchPrompt(sessionId, text, pending)
+    setImagePathDedupeBySession((current) => {
+      if (!current[sessionId]) return current
+      const next = { ...current }
+      delete next[sessionId]
+      return next
+    })
+    setPathChips((chips) => {
+      revokePathChipUrls(chips)
+      return []
+    })
+    dispatchPrompt(sessionId, text || undefined, pending)
   }
 
   const sendPrompt = async (): Promise<void> => {
@@ -1221,8 +1265,9 @@ export function App(): React.JSX.Element {
       return
     }
     if (!runningMap[sessionId] || interjectBusy) return
-    const text = drafts[sessionId]?.trim()
     const pendingAttachments = attachmentsBySession[sessionId] ?? []
+    const dedupePaths = imagePathDedupeBySession[sessionId] ?? []
+    const text = stripDuplicateImagePathLines(drafts[sessionId] ?? '', dedupePaths).trim()
     if (!text && !pendingAttachments.length) return
     setInterjectBusy(true)
     discardQueuedInterject(sessionId)
@@ -1233,6 +1278,16 @@ export function App(): React.JSX.Element {
     }
     setDrafts((current) => ({ ...current, [sessionId]: '' }))
     setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
+    setImagePathDedupeBySession((current) => {
+      if (!current[sessionId]) return current
+      const next = { ...current }
+      delete next[sessionId]
+      return next
+    })
+    setPathChips((chips) => {
+      revokePathChipUrls(chips)
+      return []
+    })
     try {
       await window.grokApi.cancel(sessionId)
       const blocks: PromptBlock[] = [...(text ? [{ type: 'text' as const, text }] : []), ...pendingAttachments]
@@ -1362,11 +1417,13 @@ export function App(): React.JSX.Element {
     reader.readAsDataURL(file)
   })
 
-  /** Shared paste / drag-drop image pipeline (path-only when ACP image capability is false). */
-  const ingestImageFiles = (files: File[], source: 'paste' | 'drop'): void => {
+  /**
+   * Clipboard paste images (no Explorer path): save to temp path chips, or image blocks when capable.
+   */
+  const ingestPastedImages = (files: File[]): void => {
     if (!files.length || !active) return
     const sessionId = active.id
-    const imageFiles = files.filter((file) => file.type.startsWith('image/') || (!file.type && source === 'paste'))
+    const imageFiles = files.filter((file) => isImageMime(file.type) || !file.type)
     if (!imageFiles.length) return
 
     if (caps.promptCapabilities.image === true) {
@@ -1383,47 +1440,127 @@ export function App(): React.JSX.Element {
     }
 
     void (async () => {
-      const paths: string[] = []
+      const chips: PathChip[] = []
       let failed = 0
       for (const file of imageFiles) {
         const image = await readFileAsImage(file)
         if (!image) { failed += 1; continue }
         try {
           const saved = await window.grokApi.savePasteImage(image)
-          paths.push(saved.path)
+          let previewUrl: string | undefined
+          try { previewUrl = URL.createObjectURL(file) } catch { /* optional */ }
+          chips.push({ path: saved.path, ...(previewUrl ? { previewUrl } : {}) })
         } catch {
           failed += 1
         }
       }
-      if (!paths.length) {
-        setNotice(failed
-          ? (source === 'drop' ? '拖放圖片儲存失敗，草稿未變更' : '貼圖儲存失敗，草稿未變更')
-          : (source === 'drop' ? '無法讀取拖放圖片' : '無法讀取剪貼簿圖片'))
+      if (!chips.length) {
+        setNotice(failed ? '貼圖儲存失敗，草稿未變更' : '無法讀取剪貼簿圖片')
         return
       }
-      setDrafts((current) => {
-        const previous = current[sessionId] ?? ''
-        const joined = paths.join('\n')
-        return { ...current, [sessionId]: previous ? `${previous}\n${joined}` : joined }
-      })
-      // F-MED-2: keep a small in-memory preview (object URL) next to the path chip.
-      const lastPath = paths[paths.length - 1]
-      if (lastPath) {
-        const lastFile = imageFiles[imageFiles.length - 1]
-        let previewUrl: string | undefined
-        try {
-          if (lastFile) previewUrl = URL.createObjectURL(lastFile)
-        } catch { /* preview is optional */ }
-        setPastePathChip((previous) => {
-          if (previous?.previewUrl?.startsWith('blob:')) {
-            try { URL.revokeObjectURL(previous.previewUrl) } catch { /* ignore */ }
-          }
-          return { path: lastPath, ...(previewUrl ? { previewUrl } : {}) }
-        })
-      }
+      appendPathsToDraft(sessionId, chips.map((chip) => chip.path))
+      addPathChips(chips)
       setNotice(failed
         ? `已改以本機路徑附上（ACP 目前不支援內嵌圖片）；${failed} 張失敗`
         : '已改以本機路徑附上（ACP 目前不支援內嵌圖片）')
+    })()
+  }
+
+  /**
+   * P-DRAG: Explorer / OS drop — any local file or folder (no recursive listing).
+   * Always insert absolute path lines; image capability may also add image blocks + dedupe on send.
+   */
+  const ingestDroppedLocalFiles = (files: File[]): void => {
+    if (!files.length || !active) return
+    const sessionId = active.id
+    void (async () => {
+      const resolvedPaths: string[] = []
+      const chips: PathChip[] = []
+      const imageFilesForBlocks: Array<{ file: File; path: string }> = []
+      let failed = 0
+
+      for (const file of files) {
+        const pathFromOs = typeof window.grokApi.getPathForFile === 'function'
+          ? window.grokApi.getPathForFile(file)
+          : null
+        if (!pathFromOs || !isAbsoluteLocalPath(pathFromOs)) {
+          // Fallback: clipboard-like image without OS path
+          if (isImageMime(file.type)) {
+            try {
+              const image = await readFileAsImage(file)
+              if (!image) { failed += 1; continue }
+              if (caps.promptCapabilities.image === true) {
+                setAttachmentsBySession((current) => ({
+                  ...current,
+                  [sessionId]: [...(current[sessionId] ?? []), { type: 'image', data: image.data, mimeType: image.mimeType, name: file.name || undefined }]
+                }))
+              } else {
+                const saved = await window.grokApi.savePasteImage(image)
+                resolvedPaths.push(saved.path)
+                let previewUrl: string | undefined
+                try { previewUrl = URL.createObjectURL(file) } catch { /* optional */ }
+                chips.push({ path: saved.path, ...(previewUrl ? { previewUrl } : {}) })
+              }
+            } catch {
+              failed += 1
+            }
+          } else {
+            failed += 1
+          }
+          continue
+        }
+
+        let kind: 'file' | 'directory' | 'other' | 'missing' = 'file'
+        try {
+          const statResult = await window.grokApi.statLocalPath(pathFromOs)
+          kind = statResult.kind
+        } catch {
+          kind = 'file'
+        }
+        if (kind === 'missing') {
+          failed += 1
+          setNotice(`找不到路徑：${pathFromOs}`)
+          continue
+        }
+
+        resolvedPaths.push(pathFromOs)
+        const isDirectory = kind === 'directory'
+        let previewUrl: string | undefined
+        if (!isDirectory && (isImageMime(file.type) || isImagePath(pathFromOs))) {
+          try { previewUrl = URL.createObjectURL(file) } catch { /* optional */ }
+          imageFilesForBlocks.push({ file, path: pathFromOs })
+        }
+        chips.push({ path: pathFromOs, isDirectory, ...(previewUrl ? { previewUrl } : {}) })
+      }
+
+      if (resolvedPaths.length) {
+        appendPathsToDraft(sessionId, resolvedPaths)
+        addPathChips(chips)
+      }
+
+      if (caps.promptCapabilities.image === true && imageFilesForBlocks.length) {
+        const blocks: PromptBlock[] = []
+        const dedupePaths: string[] = []
+        for (const entry of imageFilesForBlocks) {
+          const image = await readFileAsImage(entry.file)
+          if (!image) continue
+          blocks.push({ type: 'image', data: image.data, mimeType: image.mimeType, name: entry.path })
+          dedupePaths.push(entry.path)
+        }
+        if (blocks.length) {
+          setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), ...blocks] }))
+          setImagePathDedupeBySession((current) => ({
+            ...current,
+            [sessionId]: [...new Set([...(current[sessionId] ?? []), ...dedupePaths])]
+          }))
+        }
+      }
+
+      if (!resolvedPaths.length && !imageFilesForBlocks.length && failed) {
+        setNotice('無法取得拖放項目的本機路徑')
+      } else if (failed && resolvedPaths.length) {
+        setNotice(`已加入 ${resolvedPaths.length} 個路徑；${failed} 個失敗`)
+      }
     })()
   }
 
@@ -1431,45 +1568,64 @@ export function App(): React.JSX.Element {
     const files = [...event.clipboardData.files]
     if (!files.length || !active) return
     event.preventDefault()
-    ingestImageFiles(files, 'paste')
+    ingestPastedImages(files)
   }
 
   const onComposerDragOver = (event: React.DragEvent<HTMLElement>): void => {
-    if (![...event.dataTransfer.types].includes('Files')) return
+    const types = [...event.dataTransfer.types]
+    if (!types.includes('Files') && !types.includes('text/plain') && !types.includes('application/x-grok-path')) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
   }
 
   const onComposerDrop = (event: React.DragEvent<HTMLElement>): void => {
-    const files = [...event.dataTransfer.files]
-    if (!files.length || !active) return
+    if (!active) return
     event.preventDefault()
-    ingestImageFiles(files, 'drop')
-  }
-  const dismissPastePathChip = (): void => {
-    if (!active || !pastePathChip) {
-      if (pastePathChip?.previewUrl?.startsWith('blob:')) {
-        try { URL.revokeObjectURL(pastePathChip.previewUrl) } catch { /* ignore */ }
+    const sessionId = active.id
+    const readTransfer = (type: string): string => {
+      try {
+        return typeof event.dataTransfer.getData === 'function' ? (event.dataTransfer.getData(type) || '') : ''
+      } catch {
+        return ''
       }
-      setPastePathChip(null)
+    }
+    const grokPath = readTransfer('application/x-grok-path')
+    const plain = readTransfer('text/plain')
+    const pathFromPreview = [grokPath, plain].find((value) => isAbsoluteLocalPath(value))
+    const files = event.dataTransfer.files ? [...event.dataTransfer.files] : []
+    if (pathFromPreview && !files.length) {
+      appendPathsToDraft(sessionId, [pathFromPreview.trim()])
       return
     }
-    const sessionId = active.id
-    const path = pastePathChip.path
-    if (pastePathChip.previewUrl?.startsWith('blob:')) {
-      try { URL.revokeObjectURL(pastePathChip.previewUrl) } catch { /* ignore */ }
+    if (files.length) {
+      ingestDroppedLocalFiles(files)
+      return
     }
-    setPastePathChip(null)
-    setDrafts((current) => {
-      const previous = current[sessionId] ?? ''
-      if (!previous.includes(path)) return current
-      const next = previous
-        .split('\n')
-        .filter((line) => line !== path)
-        .join('\n')
-      return { ...current, [sessionId]: next }
+    if (pathFromPreview) appendPathsToDraft(sessionId, [pathFromPreview.trim()])
+  }
+
+  const dismissPathChip = (filePath: string): void => {
+    setPathChips((current) => {
+      const target = current.find((chip) => chip.path === filePath)
+      if (target?.previewUrl?.startsWith('blob:')) {
+        try { URL.revokeObjectURL(target.previewUrl) } catch { /* ignore */ }
+      }
+      return current.filter((chip) => chip.path !== filePath)
+    })
+    if (!active) return
+    const sessionId = active.id
+    setDrafts((current) => ({ ...current, [sessionId]: removePathLine(current[sessionId] ?? '', filePath) }))
+    setImagePathDedupeBySession((current) => {
+      const list = current[sessionId]
+      if (!list?.length) return current
+      return { ...current, [sessionId]: list.filter((item) => item !== filePath) }
     })
   }
+
+  const closePreviewItem = useCallback((): void => {
+    setPreviewActiveId(null)
+    setPreviewLoad({ status: 'idle' })
+  }, [])
 
   const focusSessionId = (teamEnabled && team.focusId) || active?.id || null
   const previewSessionId = focusSessionId
@@ -1793,7 +1949,16 @@ export function App(): React.JSX.Element {
               <span className="composer-status-keys">{running ? `${shortcutLabel('sendPrompt')} 插話 · ${shortcutLabel('cancelTurn')} 停止` : `${shortcutLabel('sendPrompt')} 傳送 · ${shortcutLabel('newline')} 換行`}</span>
             </div>
             {attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}
-            {pastePathChip && <div className="path-chip-row"><span className="path-chip" title={pastePathChip.path} data-testid="path-chip">{pastePathChip.previewUrl ? <img className="path-chip-thumb" data-testid="path-chip-thumb" src={pastePathChip.previewUrl} alt="" width={28} height={28} /> : <Paperclip />}<em>{pastePathChip.path}</em><button type="button" className="path-preview-btn" data-testid="path-chip-preview" aria-label="預覽貼圖" onClick={() => openPreviewPath(pastePathChip.path)}>預覽</button><button type="button" aria-label="移除貼圖路徑" onClick={dismissPastePathChip}><X /></button></span></div>}
+            {pathChips.length > 0 && <div className="path-chip-row" data-testid="path-chip-row">{pathChips.map((chip) => (
+              <span key={chip.path} className="path-chip" title={chip.path} data-testid="path-chip">
+                {chip.previewUrl
+                  ? <img className="path-chip-thumb" data-testid="path-chip-thumb" src={chip.previewUrl} alt="" width={28} height={28} />
+                  : chip.isDirectory ? <FolderOpen /> : <Paperclip />}
+                <em>{chip.path}</em>
+                <button type="button" className="path-preview-btn" data-testid="path-chip-preview" aria-label={`預覽 ${chip.path}`} onClick={() => openPreviewPath(chip.path)}>預覽</button>
+                <button type="button" aria-label={`移除路徑 ${chip.path}`} onClick={() => dismissPathChip(chip.path)}><X /></button>
+              </span>
+            ))}</div>}
             {!running && <div className="template-row" data-testid="prompt-templates">
               {PROMPT_TEMPLATES.map((item) => (
                 <button
@@ -1814,7 +1979,7 @@ export function App(): React.JSX.Element {
                 onChange={(event) => setDrafts((current) => ({ ...current, [active.id]: event.target.value }))}
                 onKeyDown={composerKey}
                 onPaste={paste}
-                placeholder={!activeReady ? '此對話尚未在目前連線就緒（載入中、失敗或已斷線）' : running ? '回合進行中可插話、排隊下一輪，或立刻改做…' : '交給 Grok 一個任務，或貼上／拖放圖片與檔案路徑…'}
+                placeholder={!activeReady ? '此對話尚未在目前連線就緒（載入中、失敗或已斷線）' : running ? '回合進行中可插話、排隊下一輪，或立刻改做…' : '交給 Grok 一個任務，或拖放本機檔案／資料夾（絕對路徑）…'}
                 rows={3}
               />
               {running ? <div className="composer-actions running command-rail" data-testid="command-rail">
@@ -1842,6 +2007,7 @@ export function App(): React.JSX.Element {
           const item = previewItems.find((entry) => entry.id === id)
           if (item) void loadPreviewItem(item)
         }}
+        onCloseItem={closePreviewItem}
         onRefresh={() => {
           const item = previewItems.find((entry) => entry.id === previewActiveId)
           if (item) {

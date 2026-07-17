@@ -67,6 +67,38 @@ describe('PreviewDock', () => {
     expect(screen.getByTestId('preview-dock')).toHaveAttribute('data-open', 'true')
   })
 
+  it('P-CLOSE-1: close current item clears stage to idle without collapsing dock', async () => {
+    const user = userEvent.setup()
+    const onCloseItem = vi.fn()
+    render(
+      <PreviewDock
+        open
+        width={360}
+        items={[baseItem()]}
+        activeId="file:c:\\repo\\a.png"
+        load={{ status: 'ready', kind: 'image', mediaSrc: 'data:image/png;base64,aa', path: 'C:\\repo\\a.png' }}
+        showHtmlScriptAdvanced
+        htmlScriptsAllowed={false}
+        onToggleOpen={() => undefined}
+        onWidthChange={() => undefined}
+        onSelectItem={() => undefined}
+        onCloseItem={onCloseItem}
+        onRefresh={() => undefined}
+        onRescan={() => undefined}
+        onOpenFile={() => undefined}
+        onToggleHtmlScripts={() => undefined}
+        onCopyPath={() => undefined}
+        onRevealPath={() => undefined}
+        onOpenExternalPath={() => undefined}
+      />
+    )
+    expect(screen.getByTestId('preview-dock')).toHaveAttribute('data-open', 'true')
+    await user.click(screen.getByTestId('preview-close-item'))
+    expect(onCloseItem).toHaveBeenCalledTimes(1)
+    // list item remains (close ≠ delete / remove from recent)
+    expect(screen.getByText('a.png')).toBeInTheDocument()
+  })
+
   it('Escape closes lightbox without bubbling cancel-turn intent', () => {
     const onCancelTurn = vi.fn()
     render(

@@ -36,6 +36,8 @@ const createApiMock = (): GrokBridgeApi => ({
   }),
   respondPermission: vi.fn(), chooseDirectory: vi.fn(), chooseFiles: vi.fn(),
   savePasteImage: vi.fn().mockResolvedValue({ path: 'C:\\Users\\demo\\AppData\\Local\\Temp\\grok-build-gui-paste\\paste-1.png' }),
+  getPathForFile: vi.fn().mockReturnValue(null),
+  statLocalPath: vi.fn().mockImplementation(async (filePath: string) => ({ path: filePath, kind: 'file' as const, size: 1 })),
   exportSession: vi.fn(), revealExport: vi.fn().mockResolvedValue(true), openTui: vi.fn(), openExternal: vi.fn(),
   notify: vi.fn().mockResolvedValue(false),
   previewStat: vi.fn().mockResolvedValue({ ok: false, reason: '找不到檔案，可能已被移動或刪除' }),
@@ -767,7 +769,7 @@ describe('App', () => {
     await waitFor(() => expect(composer).toHaveValue(savedPath))
     expect(screen.getByText(/已改以本機路徑附上/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /移除附件/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '移除貼圖路徑' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /移除路徑/ })).toBeInTheDocument()
   })
 
   it('T8 leaves the draft unchanged and shows a notice when paste save fails', async () => {
@@ -795,7 +797,7 @@ describe('App', () => {
     await waitFor(() => expect(api.savePasteImage).toHaveBeenCalled())
     expect(await screen.findByText(/貼圖儲存失敗/)).toBeInTheDocument()
     expect(composer).toHaveValue('保留這段')
-    expect(screen.queryByRole('button', { name: '移除貼圖路徑' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /移除路徑/ })).not.toBeInTheDocument()
   })
 
   // --- v0.5.0 interject / do-this-now ---
@@ -909,7 +911,7 @@ describe('App', () => {
 
     await waitFor(() => expect(api.savePasteImage).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(composer).toHaveValue(savedPath))
-    expect(screen.getByRole('button', { name: '移除貼圖路徑' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /移除路徑/ })).toBeInTheDocument()
   })
 
   it('T-RT-6: context pill is labeled separately from subscription quota rings', async () => {

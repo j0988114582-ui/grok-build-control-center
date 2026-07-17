@@ -10,6 +10,11 @@ export type SessionFeatures = { sessionId?: string; modes?: unknown; configOptio
 export type SavePasteImageRequest = { mimeType: string; data: string }
 export type SavePasteImageResult = { path: string }
 
+/** Local path stat for dropped Explorer files/folders (P-DRAG-6). */
+export type LocalPathStatResult =
+  | { path: string; kind: 'file' | 'directory' | 'other'; size?: number }
+  | { path: string; kind: 'missing' }
+
 export interface GrokBridgeApi {
   getStatus(): Promise<CliStatus>
   installCli(): Promise<CliStatus>
@@ -37,6 +42,13 @@ export interface GrokBridgeApi {
   chooseFiles(): Promise<SelectedFile[]>
   /** Save a clipboard image into %TEMP%/grok-build-gui-paste and return its absolute path. */
   savePasteImage(payload: SavePasteImageRequest): Promise<SavePasteImageResult>
+  /**
+   * Resolve a File from drag-drop to an absolute OS path (Electron webUtils).
+   * Returns null when the runtime cannot map the File (e.g. pure browser tests).
+   */
+  getPathForFile(file: File): string | null
+  /** Stat a dropped absolute path (file vs directory); no recursive listing. */
+  statLocalPath(filePath: string): Promise<LocalPathStatResult>
   exportSession(sessionId: string): Promise<string | null>
   /**
    * Reveal an export path in the OS file manager.

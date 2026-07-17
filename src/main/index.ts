@@ -343,6 +343,23 @@ function registerIpc(): void {
     }
     return agentPermissionMode
   })
+  ipcMain.handle('fs:stat-local', async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) {
+      return { path: '', kind: 'missing' as const }
+    }
+    const normalized = path.normalize(filePath.trim())
+    if (!path.isAbsolute(normalized)) {
+      return { path: normalized, kind: 'missing' as const }
+    }
+    try {
+      const info = await stat(normalized)
+      if (info.isDirectory()) return { path: normalized, kind: 'directory' as const, size: info.size }
+      if (info.isFile()) return { path: normalized, kind: 'file' as const, size: info.size }
+      return { path: normalized, kind: 'other' as const, size: info.size }
+    } catch {
+      return { path: normalized, kind: 'missing' as const }
+    }
+  })
   ipcMain.handle('dialog:directory', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0]
