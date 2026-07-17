@@ -124,4 +124,64 @@ describe('remote-controller (v0.9 coexistence)', () => {
     expect(snap.tail[0]?.text).toBe('hello')
     expect(snap.focusStatus).toBe('ready')
   })
+
+  it('handleFocus loads unready session via main loadSession', async () => {
+    const loadSession = vi.fn().mockImplementation(async () => {
+      /* mark ready via isSessionReady after call — use mutable flag */
+    })
+    let ready = false
+    const controller = makeController({
+      isSessionReady: () => ready,
+      loadSession: async (id, cwd) => {
+        await loadSession(id, cwd)
+        ready = true
+      }
+    })
+    controller.enable()
+    await controller.refreshSessions()
+    const result = await controller.handleFocus('s1')
+    expect(result.ok).toBe(true)
+    expect(loadSession).toHaveBeenCalledWith('s1', 'C:\\repo')
+    expect(controller.getSnapshot().focusStatus).toBe('ready')
+  })
+
+  it('cwd union exact match only', async () => {
+    const controller = makeController()
+    controller.enable()
+    await controller.refreshSessions()
+    expect(controller.isCwdInUnion('C:\\repo')).toBe(true)
+    expect(controller.isCwdInUnion('C:\\repo\\nested')).toBe(false)
+    expect(controller.isCwdInUnion('C:\\other')).toBe(false)
+    const bad = await controller.handleCreateSession('C:\\evil')
+    expect(bad.ok).toBe(false)
+  })
+
+  it('yolo enable requires elevation PIN', async () => {
+    const setPermissionMode = vi.fn().mockResolvedValue('always-approve')
+    const controller = makeController({ setPermissionMode })
+    controller.enable()
+    const opened = controller.regeneratePairing()!
+    const paired = controller.auth.pair(opened.pairingSecret, opened.pin, 1_000_000)
+    expect(paired.ok).toBe(true)
+    if (!paired.ok) return
+    const v = controller.auth.validateSession(paired.value.sessionToken, 1_000_001)
+    expect(v.ok).toBe(true)
+    if (!v.ok) return
+    const fail = await controller.handleYoloEnable('000000', v.value.tokenHash)
+    expect(fail.ok).toBe(false)
+    const ok = await controller.handleYoloEnable(opened.pin, v.value.tokenHash)
+    expect(ok.ok).toBe(true)
+    expect(setPermissionMode).toHaveBeenCalledWith('always-approve')
+  })
+
+  it('queue last-write drains after turn ends', async () => {
+    const prompt = vi.fn().mockResolvedValue(undefined)
+    const controller = makeController({ prompt })
+    controller.enable()
+    controller.setFocusSession('s1')
+    controller.setRunning('s1', true)
+    expect(controller.handleQueue('next job').ok).toBe(true)
+    controller.setRunning('s1', false)
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledWith('s1', 'next job'))
+  })
 })
