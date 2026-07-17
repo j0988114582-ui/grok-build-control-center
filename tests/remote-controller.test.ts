@@ -389,6 +389,8 @@ describe('remote-controller (v0.9 coexistence)', () => {
     controller.setRunning('s1', false)
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledWith('s1', 'from-desktop'))
     expect(prompt).not.toHaveBeenCalledWith('s1', 'from-mobile')
+    // Drain notice keeps desktop provenance (not mislabeled as phone)
+    expect(controller.getDesktopPairingView().notices.some((n) => n.includes('桌面'))).toBe(true)
   })
 
   it('T1 tail enforces UTF-8 JSON wire budget not char length', () => {

@@ -686,11 +686,15 @@ export class RemoteController {
     if (this.runningBySession.get(sessionId) || this.inFlightPrompt.has(sessionId)) return
     this.queue = null
     this.emit()
-    // Pass explicit sessionId so prompt cannot retarget after a late focus change
-    await this.handlePromptForSession(sessionId, q.text)
+    // Pass explicit sessionId + provenance so drain notice matches last writer
+    await this.handlePromptForSession(sessionId, q.text, q.source)
   }
 
-  private async handlePromptForSession(sessionId: string, text: string): Promise<HandlerResult> {
+  private async handlePromptForSession(
+    sessionId: string,
+    text: string,
+    source: 'mobile-remote' | 'desktop' = 'mobile-remote'
+  ): Promise<HandlerResult> {
     if (this.focusSessionId !== sessionId) {
       return { ok: false, code: 'not_ready', message: '焦點已變更，取消送出' }
     }
@@ -706,7 +710,9 @@ export class RemoteController {
       return { ok: false, code: 'invalid_request', message: `提示過長（上限 ${REMOTE_PROMPT_MAX_CHARS} 字）` }
     }
     this.inFlightPrompt.add(sessionId)
-    this.notices = ['來自手機遙控：已送出提示']
+    this.notices = [
+      source === 'desktop' ? '來自桌面：已送出排隊提示' : '來自手機遙控：已送出提示'
+    ]
     this.emit()
     try {
       if (this.focusSessionId !== sessionId) {

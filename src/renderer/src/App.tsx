@@ -120,7 +120,7 @@ import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock,
   SessionSummary, SessionUsage, UiSessionEvent
 } from '../../shared/types'
-import type { RemoteDesktopState } from '../../shared/bridge'
+import type { RemoteDesktopQueue, RemoteDesktopState } from '../../shared/bridge'
 import { RemoteControlPanel } from './components/RemoteControlPanel'
 
 const EMPTY_CAPS: AgentCapabilities = { loadSession: false, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [] }
@@ -335,6 +335,10 @@ export function App(): React.JSX.Element {
   /** Skip desktop→main focus echo while aligning UI to phone-owned focus. */
   const aligningRemoteFocusRef = useRef(false)
   const lastRemoteNoticeRef = useRef<string>('')
+  /** Monotonic seq so stale async focus align cannot overwrite a newer intent. */
+  const remoteFocusAlignSeqRef = useRef(0)
+  /** Mirror of remote main queue for drain decisions (avoid double-send). */
+  const remoteMainQueueRef = useRef<RemoteDesktopQueue | null>(null)
   const [runningMap, setRunningMap] = useState<Record<string, boolean>>({})
   const [yoloConfirm, setYoloConfirm] = useState(false)
   const [yoloBusy, setYoloBusy] = useState(false)
@@ -580,17 +584,16 @@ export function App(): React.JSX.Element {
           setInterjectState((current) =>
             current?.status === 'queued' && current.sessionId === event.sessionId ? null : current)
           // F-INT-4: drain local next-turn queue after the active turn ends.
-          // When Remote is on, main RemoteController owns the text queue (E9); skip local
-          // text-only drain to avoid double-send. Attachment-only local queues still drain here.
+          // E9: when main currently holds a queue for this session, main drains it —
+          // skip local drain for that session to avoid double-send. Pre-remote local
+          // queues (main queue empty) still drain here even if Remote is later enabled.
           if (shouldDrainLocalQueue(event.status)) {
-            const queued = localQueueRef.current
-            const remoteOwnsText =
+            const mainQ = remoteMainQueueRef.current
+            const mainOwnsSession =
               remoteControlActiveRef.current &&
-              queued &&
-              queued.sessionId === event.sessionId &&
-              Boolean(queued.text?.trim()) &&
-              queued.attachments.length === 0
-            if (!remoteOwnsText) {
+              mainQ &&
+              mainQ.sessionId === event.sessionId
+            if (!mainOwnsSession) {
               const { next, drained } = takeQueueForSession(localQueueRef.current, event.sessionId)
               if (drained) {
                 localQueueRef.current = next
@@ -666,6 +669,7 @@ export function App(): React.JSX.Element {
     const offState = window.grokApi.onRemoteState((state) => {
       setRemoteState(state)
       setRemoteControlActive(state.enabled)
+      remoteMainQueueRef.current = state.queue ?? null
       const notice = state.notices?.[0]
       if (notice && notice !== lastRemoteNoticeRef.current) {
         lastRemoteNoticeRef.current = notice
@@ -687,15 +691,18 @@ export function App(): React.JSX.Element {
     const off = window.grokApi.onRemoteFocusChanged((payload) => {
       const sessionId = payload.sessionId
       if (!sessionId) return
+      const seq = ++remoteFocusAlignSeqRef.current
       void (async () => {
         aligningRemoteFocusRef.current = true
         try {
           let session = sessionsRef.current.find((item) => item.id === sessionId)
           if (!session) {
             const list = await window.grokApi.listSessions().catch(() => [] as SessionSummary[])
+            if (seq !== remoteFocusAlignSeqRef.current) return
             setSessions(list)
             session = list.find((item) => item.id === sessionId)
           }
+          if (seq !== remoteFocusAlignSeqRef.current) return
           if (!session) {
             setNotice('手機已切換焦點，但本機列表尚無該對話')
             return
@@ -714,8 +721,12 @@ export function App(): React.JSX.Element {
             setNotice('手機焦點對話載入失敗')
           }
         } finally {
-          // Allow next user-driven focus change to push to main
-          window.setTimeout(() => { aligningRemoteFocusRef.current = false }, 0)
+          if (seq === remoteFocusAlignSeqRef.current) {
+            // Allow next user-driven focus change to push to main
+            window.setTimeout(() => {
+              if (seq === remoteFocusAlignSeqRef.current) aligningRemoteFocusRef.current = false
+            }, 0)
+          }
         }
       })()
     })
@@ -1472,24 +1483,17 @@ export function App(): React.JSX.Element {
     const text = drafts[sessionId]?.trim()
     if (!text && !attachments.length) return
 
-    // Remote on + text: write main-owned slot (mobile may overwrite / be overwritten).
-    if (remoteControlActive && text) {
+    // Remote on + text-only: main single-slot (E9). If attachments exist, keep one local
+    // queue so text+files are not split into two competing prompts.
+    if (remoteControlActive && text && attachments.length === 0) {
       void window.grokApi.remoteQueue(text).then((result) => {
         if (!result.ok) {
           setNotice(result.message || '排隊失敗')
           return
         }
         setDrafts((current) => ({ ...current, [sessionId]: '' }))
-        // Attachment-only remainder stays local if present
-        if (attachments.length) {
-          const item: LocalQueuedPrompt = { sessionId, attachments: [...attachments] }
-          localQueueRef.current = item
-          setLocalQueue(item)
-          setAttachmentsBySession((current) => ({ ...current, [sessionId]: [] }))
-        } else {
-          localQueueRef.current = null
-          setLocalQueue(null)
-        }
+        localQueueRef.current = null
+        setLocalQueue(null)
         setNotice(REMOTE_QUEUE_NOTICE_DESKTOP)
       }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
       return
