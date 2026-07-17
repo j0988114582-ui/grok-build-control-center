@@ -13,6 +13,31 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
 
+## [0.8.0] - 2026-07-17
+
+### Added
+
+- **語意文字 token（P-VIS）**：paper / dark-panel 正文與 meta 分離；Team 長路徑可讀；深色卡片不再整塊死灰。
+- **額度環（P-QUOTA）**：無分項資料時隱藏 Build／Imagine／API 環，保留總額度。
+- **權限 notice + YOLO↔Remote 互斥**：已是「每次詢問」再選有說明；Remote 與 YOLO 不可同時啟用。
+- **預覽關閉目前項目（P-CLOSE）**：清 active／idle；Esc 順序：燈箱 → modal → 清 Preview 項目 → cancelTurn。
+- **拖放任意本機檔／資料夾（P-DRAG）**：多 path chips；絕對路徑；image capability 時附件去重。
+- **Composer 自動長高**：主輸入整塊 max 50vh；Team 另套 min(120px, 28% pane)。
+- **Session 治理**：完整 cwd 篩選；10 天活動／釘選／Team 保護；建議清理區（更亮按鈕）；不自動刪。
+- **手機 QR 遙控（實驗）**：本機 `127.0.0.1` HTTP + 可選 Quick Tunnel；fragment 配對；HttpOnly cookie；物件級權限綁定；SPA + CSP。
+
+### Security / Privacy
+
+- Remote 預設關；不開機自啟；配對 PIN 僅記憶體；DTO 精簡（session 列表預設無 cwd）。
+- 誠實隱私：Cloudflare 終止訪客 TLS，技術上可處理 HTTP 內容。
+- Quick Tunnel = **Experimental / best-effort**（無 SLA；polling 非 SSE）。
+- **4G 真實手測**：見 `docs/plans/v080-4g-remote-handtest-checklist.md`。本實作環境若未完成真 4G，Remote 視為實驗功能；桌面功能仍出貨。
+
+### Notes
+
+- 計畫：`docs/plans/2026-07-17-v0.8.0-ux-session-remote-plan.md`
+- Codex 計畫審：`docs/plans/v080-plan-codex-review.md`
+
 ## [0.7.0] - 2026-07-16
 
 ### Added

@@ -325,7 +325,7 @@ export class RemoteServer {
   }
 
   private async handleStatic(res: ServerResponse, pathname: string): Promise<void> {
-    let rel = pathname === '/' ? '/index.html' : pathname
+    const rel = pathname === '/' ? '/index.html' : pathname
     if (rel.includes('..')) {
       res.writeHead(400)
       res.end('Bad path')

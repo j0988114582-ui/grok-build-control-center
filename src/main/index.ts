@@ -95,6 +95,24 @@ let agentPermissionMode: AgentPermissionMode = 'ask'
 const billingCache = new BillingCache<unknown>()
 const lifecycleOperation = new SingleLifecycleOperation()
 
+const settings = (): AppSettings => normalizeSettings(settingsStore.store, homedir())
+const grokHome = (): string => process.env.GROK_HOME?.trim() || path.join(homedir(), '.grok')
+const send = (channel: string, payload: unknown): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send(channel, payload)
+}
+
+const SESSION_ID_PATTERN = /^[0-9a-f-]{8,64}$/i
+
+const executeLifecycleFile: ExecuteFile = async (executable, args, options) => {
+  const { stdout, stderr } = await execFileAsync(executable, args, { ...options, encoding: 'utf8' })
+  return { stdout: String(stdout), stderr: String(stderr) }
+}
+
+const sessionReadyGate = new SessionReadyGate()
+const previewRoots = new PreviewRootTracker()
+const previewAllowlist = new PreviewMediaAllowlist()
+
 const remoteController = new RemoteController({
   getPermissionMode: () => agentPermissionMode,
   listSessions: () => listLocalSessions(grokHome()),
@@ -116,7 +134,7 @@ const remoteController = new RemoteController({
   }
 })
 let remoteServer: RemoteServer | null = null
-let remoteTunnel = new RemoteTunnelManager()
+const remoteTunnel = new RemoteTunnelManager()
 let remoteAllowedHosts: string[] = []
 
 export function setRemoteControlActive(active: boolean): void {
@@ -125,24 +143,6 @@ export function setRemoteControlActive(active: boolean): void {
 export function isRemoteControlActive(): boolean {
   return remoteController.isEnabled()
 }
-
-const settings = (): AppSettings => normalizeSettings(settingsStore.store, homedir())
-const grokHome = (): string => process.env.GROK_HOME?.trim() || path.join(homedir(), '.grok')
-const send = (channel: string, payload: unknown): void => {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.webContents.send(channel, payload)
-}
-
-const SESSION_ID_PATTERN = /^[0-9a-f-]{8,64}$/i
-
-const executeLifecycleFile: ExecuteFile = async (executable, args, options) => {
-  const { stdout, stderr } = await execFileAsync(executable, args, { ...options, encoding: 'utf8' })
-  return { stdout: String(stdout), stderr: String(stderr) }
-}
-
-const sessionReadyGate = new SessionReadyGate()
-const previewRoots = new PreviewRootTracker()
-const previewAllowlist = new PreviewMediaAllowlist()
 
 async function stopRemoteSubsystem(): Promise<void> {
   remoteController.disable()
@@ -504,13 +504,25 @@ function registerIpc(): void {
     return file
   })
 
-  // ── Remote control (loopback + optional experimental Quick Tunnel) ──
-  ipcMain.handle('remote:get-state', () => remoteController.getDesktopPairingView())
+  // ── Remote control (127.0.0.1 only + optional experimental Quick Tunnel) ──
+  ipcMain.handle('remote:get-state', () => ({
+    ...remoteController.getDesktopPairingView(),
+    localUrl: remoteServer?.getPort() ? `http://127.0.0.1:${remoteServer.getPort()}` : null
+  }))
   ipcMain.handle('remote:set-focus', (_event, sessionId: unknown) => {
+    if (sessionId !== null && typeof sessionId !== 'string') throw new Error('Invalid session id')
     remoteController.setFocusSession(typeof sessionId === 'string' ? sessionId : null)
     return true
   })
-  ipcMain.handle('remote:enable', async (_event, options?: { allowPhonePermissions?: boolean; useQuickTunnel?: boolean }) => {
+  ipcMain.handle('remote:enable', async (_event, options?: {
+    allowPhonePermissions?: boolean
+    useQuickTunnel?: boolean
+    riskAcknowledged?: boolean
+    cloudflaredPath?: string
+  }) => {
+    if (options?.useQuickTunnel && options.riskAcknowledged !== true) {
+      throw new Error('啟用 Experimental Quick Tunnel 前必須確認風險（供應商可處理 HTTP 內容，無 SLA）')
+    }
     const gate = remoteController.enable({
       allowPhonePermissions: options?.allowPhonePermissions === true,
       experimentalTunnel: options?.useQuickTunnel === true
@@ -522,7 +534,6 @@ function registerIpc(): void {
         controller: remoteController,
         getAllowedHosts: () => remoteAllowedHosts,
         webRoot: defaultRemoteWebRoot(),
-        // Secure cookies for HTTPS tunnels; loopback HTTP keeps Secure off so browser accepts cookie.
         cookieSecure: () => Boolean(remoteController.getPublicBaseUrl()?.startsWith('https://'))
       })
       const { port, healthNonce } = await remoteServer.start()
@@ -530,8 +541,8 @@ function registerIpc(): void {
       remoteController.setBanner('starting')
 
       if (options?.useQuickTunnel) {
-        // Experimental: require cloudflared on PATH or known locations — no auto-download in 0.8.0 without checksum pin ship.
         const candidates = [
+          ...(typeof options.cloudflaredPath === 'string' && options.cloudflaredPath.trim() ? [options.cloudflaredPath.trim()] : []),
           path.join(homedir(), '.cloudflared', 'cloudflared.exe'),
           path.join(homedir(), '.grok', 'bin', 'cloudflared.exe'),
           'cloudflared'
@@ -549,7 +560,6 @@ function registerIpc(): void {
           remoteController.setBanner('tunnel_failed')
           throw new Error(`Quick Tunnel 啟動失敗（實驗性）：${started.reason}`)
         }
-        // Nonce health proof through public URL
         try {
           const healthUrl = `${started.url}/api/health?nonce=${encodeURIComponent(healthNonce)}`
           const res = await fetch(healthUrl, { signal: AbortSignal.timeout(12_000) })
@@ -567,6 +577,7 @@ function registerIpc(): void {
           throw new Error(error instanceof Error ? error.message : String(error))
         }
       } else {
+        // Local loopback only — useful for desktop path / LAN dev; not a public WAN bind.
         remoteController.setPublicBaseUrl(`http://127.0.0.1:${port}`)
         remoteController.setBanner('url_verified')
       }
@@ -574,7 +585,10 @@ function registerIpc(): void {
       const pairing = remoteController.regeneratePairing()
       if (!pairing) throw new Error('無法產生配對')
       remoteController.setBanner('pairable')
-      return remoteController.getDesktopPairingView()
+      return {
+        ...remoteController.getDesktopPairingView(),
+        localUrl: `http://127.0.0.1:${port}`
+      }
     } catch (error) {
       await stopRemoteSubsystem()
       throw error
@@ -585,10 +599,12 @@ function registerIpc(): void {
     return remoteController.getDesktopPairingView()
   })
   ipcMain.handle('remote:regenerate-pairing', () => {
+    if (!remoteController.isEnabled()) throw new Error('遠端遙控未啟用')
     const pairing = remoteController.regeneratePairing()
-    if (!pairing) throw new Error('遠端未啟用或無法產生配對')
+    if (!pairing) throw new Error('無法產生配對（請確認非 YOLO 模式）')
     return remoteController.getDesktopPairingView()
   })
+
   ipcMain.handle('shell:reveal-path', async (_event, filePath: unknown) => {
     if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('無效的檔案路徑')
     if (!isAbsoluteLocalPath(filePath) && rejectUnsafePreviewPath(filePath)) {
