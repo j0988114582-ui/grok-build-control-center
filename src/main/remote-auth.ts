@@ -1,12 +1,12 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import {
+  REMOTE_ELEVATE_PIN_FAIL_LIMIT,
+  REMOTE_ELEVATE_RATE_LIMIT,
+  REMOTE_ELEVATE_RATE_WINDOW_MS,
   REMOTE_PAIRING_TTL_MS,
   REMOTE_SESSION_ABSOLUTE_MS,
-  REMOTE_SESSION_IDLE_MS,
   type RemoteErrorCode
 } from '../shared/remote-protocol'
-
-const PIN_FAIL_LIMIT = 5
 
 export type AuthResult<T> =
   | { ok: true; value: T }
@@ -21,6 +21,14 @@ type PairingRecord = {
   generation: number
   failures: number
   closed: boolean
+}
+
+/** PIN material retained after pair for YOLO elevation (v0.9). */
+type ElevationPinRecord = {
+  pinHash: string
+  pinSalt: string
+  failures: number
+  locked: boolean
 }
 
 type SessionRecord = {
@@ -50,28 +58,36 @@ function safeEqualHex(a: string, b: string): boolean {
   }
 }
 
-/** In-memory pairing + session auth (R-SEC-1–6). Nothing persisted. */
+/** In-memory pairing + session auth. Nothing persisted. */
 export class RemoteAuthStore {
   private pairing: PairingRecord | null = null
+  private elevationPin: ElevationPinRecord | null = null
   private sessions = new Map<string, SessionRecord>()
   private generation = 0
   private rateBuckets = new Map<string, { count: number; resetAt: number }>()
 
-  /** Create a new pairing secret + PIN. Closes previous pairing. */
+  /** Create a new pairing secret + PIN. Resets elevation pin material. */
   openPairing(now = Date.now()): { pairingSecret: string; pin: string; expiresAt: number; generation: number } {
     this.generation += 1
-    const pairingSecret = randomBytes(24).toString('base64url') // ≥128-bit
-    const pin = String(Math.floor(100000 + Math.random() * 900000)) // 6 digits
+    const pairingSecret = randomBytes(24).toString('base64url')
+    const pin = String(Math.floor(100000 + Math.random() * 900000))
     const pinSalt = randomBytes(16).toString('hex')
+    const pinHash = hashPin(pin, pinSalt)
     this.pairing = {
       secretHash: sha256(pairingSecret),
-      pinHash: hashPin(pin, pinSalt),
+      pinHash,
       pinSalt,
       createdAt: now,
       expiresAt: now + REMOTE_PAIRING_TTL_MS,
       generation: this.generation,
       failures: 0,
       closed: false
+    }
+    // Fresh PIN also unlocks elevation (desktop regenerate)
+    this.elevationPin = { pinHash, pinSalt, failures: 0, locked: false }
+    // Clear elevate rate buckets so regenerate is immediately usable
+    for (const key of [...this.rateBuckets.keys()]) {
+      if (key.startsWith('elevate:')) this.rateBuckets.delete(key)
     }
     return { pairingSecret, pin, expiresAt: this.pairing.expiresAt, generation: this.generation }
   }
@@ -88,8 +104,12 @@ export class RemoteAuthStore {
     return { pairable: true, expiresAt: pairing.expiresAt, generation: pairing.generation }
   }
 
-  /** Single successful pair closes pairing (R-SEC-2b). */
-  pair(pairingSecret: string, pin: string, now = Date.now()): AuthResult<{ sessionToken: string }> {
+  isElevationLocked(): boolean {
+    return this.elevationPin?.locked === true
+  }
+
+  /** Single successful pair closes pairing for new devices but keeps elevation PIN. */
+  pair(pairingSecret: string, pin: string, now = Date.now()): AuthResult<{ sessionToken: string; expiresAt: number }> {
     const pairing = this.pairing
     if (!pairing || pairing.closed) {
       return { ok: false, code: 'pairing_closed', message: '配對已關閉，請在桌面重新產生' }
@@ -100,13 +120,13 @@ export class RemoteAuthStore {
     }
     if (!safeEqualHex(sha256(pairingSecret), pairing.secretHash)) {
       pairing.failures += 1
-      if (pairing.failures >= PIN_FAIL_LIMIT) pairing.closed = true
+      if (pairing.failures >= REMOTE_ELEVATE_PIN_FAIL_LIMIT) pairing.closed = true
       return { ok: false, code: 'unauthorized', message: '配對失敗' }
     }
     const pinHash = hashPin(pin.trim(), pairing.pinSalt)
     if (!safeEqualHex(pinHash, pairing.pinHash)) {
       pairing.failures += 1
-      if (pairing.failures >= PIN_FAIL_LIMIT) {
+      if (pairing.failures >= REMOTE_ELEVATE_PIN_FAIL_LIMIT) {
         pairing.closed = true
         return { ok: false, code: 'pin_invalid', message: 'PIN 錯誤次數過多，請在桌面重新產生' }
       }
@@ -115,19 +135,62 @@ export class RemoteAuthStore {
 
     const sessionToken = randomBytes(32).toString('base64url')
     const tokenHash = sha256(sessionToken)
-    this.sessions.clear() // default one active device
+    const absoluteExpiresAt = now + REMOTE_SESSION_ABSOLUTE_MS
+    this.sessions.clear()
     this.sessions.set(tokenHash, {
       tokenHash,
       createdAt: now,
       lastSeenAt: now,
-      absoluteExpiresAt: now + REMOTE_SESSION_ABSOLUTE_MS,
+      absoluteExpiresAt,
       generation: pairing.generation
     })
     pairing.closed = true
-    return { ok: true, value: { sessionToken } }
+    // Keep elevation PIN (same as pairing PIN) until remote disabled / regenerate
+    this.elevationPin = {
+      pinHash: pairing.pinHash,
+      pinSalt: pairing.pinSalt,
+      failures: 0,
+      locked: false
+    }
+    return { ok: true, value: { sessionToken, expiresAt: absoluteExpiresAt } }
   }
 
-  validateSession(sessionToken: string | null | undefined, now = Date.now()): AuthResult<{ tokenHash: string }> {
+  /**
+   * Verify PIN for YOLO elevation while Remote session is active.
+   * Does not create a new session; does not require pairing to be open.
+   */
+  verifyElevationPin(pin: string, tokenHash: string, now = Date.now()): AuthResult<{ ok: true }> {
+    if (!this.sessions.has(tokenHash)) {
+      return { ok: false, code: 'unauthorized', message: '工作階段無效' }
+    }
+    const session = this.sessions.get(tokenHash)!
+    if (now > session.absoluteExpiresAt) {
+      this.sessions.delete(tokenHash)
+      return { ok: false, code: 'unauthorized', message: '工作階段已過期' }
+    }
+    const elev = this.elevationPin
+    if (!elev) {
+      return { ok: false, code: 'elevation_locked', message: '請在桌面重新產生 PIN' }
+    }
+    if (elev.locked) {
+      return { ok: false, code: 'elevation_locked', message: 'PIN 錯誤次數過多，請在桌面重新產生 PIN' }
+    }
+    // Failure lock (5 wrong PINs) is the primary anti-bruteforce; optional soft rate limit after each try.
+    const pinHash = hashPin(pin.trim(), elev.pinSalt)
+    if (!safeEqualHex(pinHash, elev.pinHash)) {
+      elev.failures += 1
+      void this.rateLimit(`elevate:${tokenHash}`, REMOTE_ELEVATE_RATE_LIMIT + 5, REMOTE_ELEVATE_RATE_WINDOW_MS, now)
+      if (elev.failures >= REMOTE_ELEVATE_PIN_FAIL_LIMIT) {
+        elev.locked = true
+        return { ok: false, code: 'elevation_locked', message: 'PIN 錯誤次數過多，請在桌面重新產生 PIN' }
+      }
+      return { ok: false, code: 'pin_invalid', message: 'PIN 錯誤' }
+    }
+    elev.failures = 0
+    return { ok: true, value: { ok: true } }
+  }
+
+  validateSession(sessionToken: string | null | undefined, now = Date.now()): AuthResult<{ tokenHash: string; expiresAt: number }> {
     if (!sessionToken) return { ok: false, code: 'unauthorized', message: '未登入' }
     const tokenHash = sha256(sessionToken)
     const session = this.sessions.get(tokenHash)
@@ -136,23 +199,28 @@ export class RemoteAuthStore {
       this.sessions.delete(tokenHash)
       return { ok: false, code: 'unauthorized', message: '工作階段已過期' }
     }
-    if (now - session.lastSeenAt > REMOTE_SESSION_IDLE_MS) {
-      this.sessions.delete(tokenHash)
-      return { ok: false, code: 'unauthorized', message: '工作階段閒置過久' }
-    }
+    // v0.9: no idle timeout — only absolute 72h
     session.lastSeenAt = now
-    return { ok: true, value: { tokenHash } }
+    return { ok: true, value: { tokenHash, expiresAt: session.absoluteExpiresAt } }
+  }
+
+  getSessionExpiresAt(now = Date.now()): number | null {
+    for (const session of this.sessions.values()) {
+      if (now <= session.absoluteExpiresAt) return session.absoluteExpiresAt
+    }
+    return null
   }
 
   revokeAll(): void {
     this.sessions.clear()
     this.closePairing()
+    this.elevationPin = null
     this.generation += 1
   }
 
   hasActiveSession(now = Date.now()): boolean {
     for (const [hash, session] of this.sessions) {
-      if (now > session.absoluteExpiresAt || now - session.lastSeenAt > REMOTE_SESSION_IDLE_MS) {
+      if (now > session.absoluteExpiresAt) {
         this.sessions.delete(hash)
         continue
       }
@@ -161,7 +229,6 @@ export class RemoteAuthStore {
     return false
   }
 
-  /** Simple fixed-window rate limit. */
   rateLimit(key: string, limit: number, windowMs: number, now = Date.now()): boolean {
     const current = this.rateBuckets.get(key)
     if (!current || now >= current.resetAt) {
@@ -184,8 +251,6 @@ export function parseCookie(header: string | undefined, name: string): string | 
 }
 
 export function buildSessionCookie(token: string, maxAgeSec: number, secure = true): string {
-  // Host-only (no Domain), HttpOnly, SameSite=Strict, Path=/api
-  // Secure required for HTTPS tunnels; loopback HTTP tests may pass secure=false.
   const securePart = secure ? '; Secure' : ''
   return `grok_remote_session=${encodeURIComponent(token)}; Path=/api; HttpOnly${securePart}; SameSite=Strict; Max-Age=${maxAgeSec}`
 }

@@ -1,13 +1,19 @@
-/** Remote control DTOs and error codes (R-SEC). Minimal surface for mobile SPA. */
+/** Remote control DTOs and error codes (v0.9.0 workable remote contract). */
 
 export const REMOTE_HEADER = 'x-grok-remote'
 export const REMOTE_COOKIE_NAME = 'grok_remote_session'
 export const REMOTE_PAIRING_TTL_MS = 3 * 60_000
-export const REMOTE_SESSION_IDLE_MS = 30 * 60_000
-export const REMOTE_SESSION_ABSOLUTE_MS = 4 * 60 * 60_000
-export const REMOTE_PROMPT_MAX_CHARS = 4_000
-export const REMOTE_TAIL_MAX_ITEMS = 40
-export const REMOTE_TAIL_MAX_CHARS = 8_000
+/** v0.9: no idle disconnect — absolute TTL only. Kept as alias of absolute for callers. */
+export const REMOTE_SESSION_IDLE_MS = 72 * 60 * 60_000
+/** Absolute session lifetime from pair / re-pair (station owner: 72h). */
+export const REMOTE_SESSION_ABSOLUTE_MS = 72 * 60 * 60_000
+export const REMOTE_PROMPT_MAX_CHARS = 12_000
+/** T1 tail only (no full history reader in 0.9). */
+export const REMOTE_TAIL_MAX_ITEMS = 120
+export const REMOTE_TAIL_MAX_CHARS = 64_000
+export const REMOTE_ELEVATE_PIN_FAIL_LIMIT = 5
+export const REMOTE_ELEVATE_RATE_LIMIT = 5
+export const REMOTE_ELEVATE_RATE_WINDOW_MS = 10 * 60_000
 
 export type RemoteErrorCode =
   | 'unauthorized'
@@ -16,7 +22,9 @@ export type RemoteErrorCode =
   | 'pairing_expired'
   | 'pairing_closed'
   | 'pin_invalid'
+  | 'elevation_locked'
   | 'rate_limited'
+  /** @deprecated v0.9 coexistence — do not use for hard reject of YOLO+Remote */
   | 'yolo_conflict'
   | 'not_ready'
   | 'not_found'
@@ -32,11 +40,15 @@ export type RemoteBannerState =
   | 'pairable'
   | 'paired'
   | 'tunnel_failed'
+  | 'expired'
+
+export type RemoteFocusStatus = 'none' | 'loading' | 'ready' | 'error'
 
 export type RemoteSessionListItem = {
   id: string
   title: string
-  /** Intentionally omit cwd by default (R-SEC-9). */
+  /** v0.9 single-user: cwd allowed on wire */
+  cwd?: string
   updatedAt?: string
   running?: boolean
 }
@@ -51,7 +63,6 @@ export type RemotePermissionCard = {
   requestId: string
   sessionId: string
   title: string
-  /** Typed summary only — no raw tool input. */
   summary: string
   risk: 'low' | 'medium' | 'high' | 'unknown'
   options: RemotePermissionOption[]
@@ -72,11 +83,17 @@ export type RemoteSnapshot = {
   permissionMode: 'ask' | 'always-approve'
   allowPhonePermissions: boolean
   focusSessionId: string | null
+  focusStatus: RemoteFocusStatus
+  focusError?: string
   running: boolean
   sessions: RemoteSessionListItem[]
   permissions: RemotePermissionCard[]
   tail: RemoteTranscriptItem[]
   notices: string[]
+  /** Absolute session end (ms epoch); null if unpaired */
+  sessionExpiresAt: number | null
+  elevationLocked: boolean
+  experimentalTunnel: boolean
 }
 
 export type RemotePairRequest = {
@@ -84,9 +101,8 @@ export type RemotePairRequest = {
   pin: string
 }
 
-export type RemotePairResponse = {
-  ok: true
-  /** Cookie is Set-Cookie only; body never includes session token. */
+export type RemoteYoloEnableRequest = {
+  pin: string
 }
 
 export type RemotePromptRequest = {
@@ -96,6 +112,14 @@ export type RemotePromptRequest = {
 export type RemotePermissionRespondRequest = {
   requestId: string
   optionId: string
+}
+
+export type RemoteSessionFocusRequest = {
+  sessionId: string
+}
+
+export type RemoteSessionCreateRequest = {
+  cwd: string
 }
 
 export type RemotePublicStatus = {

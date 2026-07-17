@@ -10,7 +10,7 @@ import { BillingCache } from './billing-cache'
 import { AcpConnectionState, reportAsyncError } from './acp-connection-state'
 import { parseGrokVersion } from './grok-cli'
 import type { AgentPermissionMode, AppSettings, CliStatus, PromptBlock } from '../shared/types'
-import { canEnableYolo, YOLO_BLOCKED_BY_REMOTE } from '../shared/remote-yolo-mutex'
+import { canEnableYolo, requiresPinForYoloElevation, YOLO_ELEVATION_PIN_REQUIRED } from '../shared/remote-yolo-mutex'
 import { RemoteController } from './remote-controller'
 import { defaultRemoteWebRoot, RemoteServer } from './remote-server'
 import { RemoteTunnelManager } from './remote-tunnel'
@@ -352,11 +352,18 @@ function registerIpc(): void {
   ipcMain.handle('grok:permission-mode:set', async (_event, mode: AgentPermissionMode) => {
     if (mode !== 'ask' && mode !== 'always-approve') throw new Error('Invalid permission mode')
     if (agentPermissionMode === mode) return agentPermissionMode
+    // v0.9: YOLO may coexist with Remote (PIN elevation is phone-side; desktop uses confirm UI).
     if (mode === 'always-approve') {
       const yoloGate = canEnableYolo(remoteController.isEnabled())
-      if (!yoloGate.ok) throw new Error(yoloGate.reason || YOLO_BLOCKED_BY_REMOTE)
+      if (!yoloGate.ok) throw new Error(yoloGate.reason)
+      // Desktop path does not require PIN here; phone elevate uses /api/yolo/enable.
+      if (requiresPinForYoloElevation(remoteController.isEnabled())) {
+        // Notice only — desktop operator already confirmed via YOLO modal.
+        void YOLO_ELEVATION_PIN_REQUIRED
+      }
     }
     agentPermissionMode = mode
+    // E1: do not revoke remote on mode change
     remoteController.onPermissionModeChanged(mode)
     const wasConnected = acpConnection.current !== null || acpConnecting !== null
     disconnectAcp()

@@ -4,12 +4,13 @@ import {
   REMOTE_TAIL_MAX_CHARS,
   REMOTE_TAIL_MAX_ITEMS,
   type RemoteBannerState,
+  type RemoteFocusStatus,
   type RemotePermissionCard,
   type RemoteSessionListItem,
   type RemoteSnapshot,
   type RemoteTranscriptItem
 } from '../shared/remote-protocol'
-import { canEnableRemote, canEnableYolo, REMOTE_BLOCKED_BY_YOLO, YOLO_BLOCKED_BY_REMOTE } from '../shared/remote-yolo-mutex'
+import { canEnableRemote, canEnableYolo, YOLO_REMOTE_COEXIST_NOTICE } from '../shared/remote-yolo-mutex'
 import { RemoteAuthStore } from './remote-auth'
 
 export type RemotePendingPermission = {
@@ -97,7 +98,7 @@ export class RemoteController {
     }
   }
 
-  /** Start Remote only when permission mode is ask (R-SEC-14b). */
+  /** v0.9: Remote may start in ask or YOLO (desktop confirms when already YOLO). */
   enable(options?: { allowPhonePermissions?: boolean; experimentalTunnel?: boolean }): { ok: true } | { ok: false; reason: string } {
     const gate = canEnableRemote(this.deps.getPermissionMode())
     if (!gate.ok) return gate
@@ -105,7 +106,9 @@ export class RemoteController {
     this.allowPhonePermissions = options?.allowPhonePermissions === true
     this.experimentalTunnel = options?.experimentalTunnel === true
     this.banner = 'starting'
-    this.notices = []
+    this.notices = this.deps.getPermissionMode() === 'always-approve'
+      ? [YOLO_REMOTE_COEXIST_NOTICE]
+      : []
     void this.refreshSessions()
     this.emit()
     return { ok: true }
@@ -134,10 +137,9 @@ export class RemoteController {
     this.emit()
   }
 
-  /** Desktop click regenerates pairing; does not auto-rotate forever. */
+  /** Desktop click regenerates pairing; also unlocks elevation PIN lock. */
   regeneratePairing(): { pairingSecret: string; pin: string; expiresAt: number } | null {
     if (!this.enabled) return null
-    if (this.deps.getPermissionMode() === 'always-approve') return null
     const opened = this.auth.openPairing(this.now())
     this.pairingSecret = opened.pairingSecret
     this.pairingPin = opened.pin
@@ -203,30 +205,25 @@ export class RemoteController {
     }
   }
 
-  /** YOLO enable check while remote is on. */
+  /** YOLO enable check — coexistence allowed; PIN elevation is separate API. */
   assertCanEnableYolo(): { ok: true } | { ok: false; reason: string } {
     return canEnableYolo(this.enabled)
   }
 
-  /** Called when desktop permission mode changes — revoke remote (R-SEC-4). */
-  onPermissionModeChanged(mode: AgentPermissionMode): void {
-    if (mode === 'always-approve' && this.enabled) {
-      this.disable()
-      this.notices = [YOLO_BLOCKED_BY_REMOTE]
-    } else if (this.enabled) {
-      this.auth.revokeAll()
-      this.pairingPin = null
-      this.pairingSecret = null
-      this.banner = this.publicBaseUrl ? 'url_verified' : 'starting'
+  /**
+   * v0.9 E1: mode switch must NOT revoke remote session/cookie/pinHash/72h clock.
+   */
+  onPermissionModeChanged(_mode: AgentPermissionMode): void {
+    if (!this.enabled) {
+      this.emit()
+      return
     }
+    this.notices = [YOLO_REMOTE_COEXIST_NOTICE]
     this.emit()
   }
 
   async handlePair(pairingSecret: string, pin: string): Promise<{ ok: true; sessionToken: string } | { ok: false; code: string; message: string }> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
-    if (this.deps.getPermissionMode() === 'always-approve') {
-      return { ok: false, code: 'yolo_conflict', message: REMOTE_BLOCKED_BY_YOLO }
-    }
     const result = this.auth.pair(pairingSecret, pin, this.now())
     if (!result.ok) return { ok: false, code: result.code, message: result.message }
     this.pairingPin = null
@@ -238,9 +235,6 @@ export class RemoteController {
 
   async handlePrompt(text: string): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
-    if (this.deps.getPermissionMode() === 'always-approve') {
-      return { ok: false, code: 'yolo_conflict', message: REMOTE_BLOCKED_BY_YOLO }
-    }
     const sessionId = this.focusSessionId
     if (!sessionId) return { ok: false, code: 'not_ready', message: '桌面尚未選定工作對話' }
     if (!this.deps.isSessionReady(sessionId)) return { ok: false, code: 'not_ready', message: '對話尚未就緒' }
@@ -324,10 +318,16 @@ export class RemoteController {
     const sessions = list.map((session): RemoteSessionListItem => ({
       id: session.id,
       title: session.title,
+      cwd: session.cwd,
       ...(session.updatedAt ? { updatedAt: session.updatedAt } : {}),
       running: this.runningBySession.get(session.id) === true
     }))
     const focus = this.focusSessionId
+    const focusStatus: RemoteFocusStatus = !focus
+      ? 'none'
+      : this.deps.isSessionReady(focus)
+        ? 'ready'
+        : 'loading'
     const permissions: RemotePermissionCard[] = [...this.pending.values()]
       .filter((item) => !item.consumed && this.now() <= item.expiresAt)
       .filter((item) => !focus || item.sessionId === focus)
@@ -341,17 +341,22 @@ export class RemoteController {
         expiresAt: item.expiresAt
       }))
 
+    const paired = this.auth.hasActiveSession(this.now())
     return {
-      banner: this.banner,
-      paired: this.auth.hasActiveSession(this.now()),
+      banner: paired ? this.banner : (this.banner === 'paired' ? 'expired' : this.banner),
+      paired,
       permissionMode: this.deps.getPermissionMode(),
       allowPhonePermissions: this.allowPhonePermissions,
       focusSessionId: focus,
+      focusStatus,
       running: focus ? this.runningBySession.get(focus) === true : false,
       sessions,
       permissions,
       tail: focus ? (this.tails.get(focus) ?? []) : [],
-      notices: [...this.notices]
+      notices: [...this.notices],
+      sessionExpiresAt: this.auth.getSessionExpiresAt(this.now()),
+      elevationLocked: this.auth.isElevationLocked(),
+      experimentalTunnel: this.experimentalTunnel
     }
   }
 

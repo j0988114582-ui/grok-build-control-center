@@ -13,6 +13,20 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
 
+## [0.9.0] - TBD（可作業遙控 · 進行中）
+
+### Added / Changed（草案 · 波次完成後更新）
+
+- **可作業遙控（單人高風險）**：72h 絕對連線、不因閒置斷線；App 重開必重配對。
+- **Remote 與 YOLO 可並用**：手機開 YOLO 需再輸入 PIN；可只關 YOLO 保留遙控。
+- **手機能力（規劃）**：自選 session、T1 transcript、插話／立刻改做／排隊、切模型／模式、既有 cwd 新建。
+- 計畫：`docs/plans/2026-07-17-v0.9.0-remote-workable-fullaccess-plan.md`（Fable 5 GO）
+
+### Security（誠實聲明）
+
+- 單人自用；Quick Tunnel 實驗、書籤 URL 可能變更；Cloudflare 可處理 HTTP 內容。
+- 手機遺失且已 YOLO → 至多 72h 高權限風險；桌面切斷為 kill switch。
+
 ## [0.8.0] - 2026-07-17
 
 ### Added

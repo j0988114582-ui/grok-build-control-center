@@ -19,17 +19,28 @@ function makeController(overrides?: Partial<ConstructorParameters<typeof RemoteC
   })
 }
 
-describe('remote-controller', () => {
-  it('blocks enable while YOLO is active', () => {
+describe('remote-controller (v0.9 coexistence)', () => {
+  it('allows enable while YOLO is active', () => {
     const controller = makeController({ getPermissionMode: () => 'always-approve' })
     const result = controller.enable()
-    expect(result.ok).toBe(false)
+    expect(result.ok).toBe(true)
   })
 
-  it('blocks YOLO while remote enabled', () => {
+  it('allows YOLO while remote enabled (PIN elevation is separate)', () => {
     const controller = makeController()
     expect(controller.enable().ok).toBe(true)
-    expect(controller.assertCanEnableYolo().ok).toBe(false)
+    expect(controller.assertCanEnableYolo().ok).toBe(true)
+  })
+
+  it('mode change does not revoke remote session', () => {
+    const controller = makeController()
+    controller.enable()
+    const opened = controller.regeneratePairing()!
+    const paired = controller.auth.pair(opened.pairingSecret, opened.pin, 1_000_000)
+    expect(paired.ok).toBe(true)
+    controller.onPermissionModeChanged('always-approve')
+    expect(controller.isEnabled()).toBe(true)
+    expect(controller.auth.hasActiveSession(1_000_001)).toBe(true)
   })
 
   it('prompt uses server-side focus session only', async () => {
@@ -40,6 +51,15 @@ describe('remote-controller', () => {
     const result = await controller.handlePrompt('hello from phone')
     expect(result.ok).toBe(true)
     expect(prompt).toHaveBeenCalledWith('s1', 'hello from phone')
+  })
+
+  it('prompt allowed under YOLO mode', async () => {
+    const prompt = vi.fn().mockResolvedValue(undefined)
+    const controller = makeController({ prompt, getPermissionMode: () => 'always-approve' })
+    controller.enable()
+    controller.setFocusSession('s1')
+    const result = await controller.handlePrompt('yolo prompt')
+    expect(result.ok).toBe(true)
   })
 
   it('permission respond requires allowPhonePermissions and exact option', () => {
@@ -67,7 +87,6 @@ describe('remote-controller', () => {
     expect(controller2.handlePermissionRespond('permission:2', 'forged').ok).toBe(false)
     expect(controller2.handlePermissionRespond('permission:2', 'once').ok).toBe(true)
     expect(respondPermission).toHaveBeenCalledWith('permission:2', 'once')
-    // single consume
     expect(controller2.handlePermissionRespond('permission:2', 'once').ok).toBe(false)
   })
 
@@ -85,12 +104,13 @@ describe('remote-controller', () => {
     expect(respondPermission).not.toHaveBeenCalled()
   })
 
-  it('snapshot redacts cwd from session list', () => {
+  it('snapshot includes cwd for single-user list', () => {
     const controller = makeController()
     controller.enable()
     const snap = controller.getSnapshot()
-    expect(snap.sessions[0]).toEqual(expect.objectContaining({ id: 's1', title: 'Alpha' }))
-    expect(snap.sessions[0]).not.toHaveProperty('cwd')
+    expect(snap.sessions[0]).toEqual(expect.objectContaining({ id: 's1', title: 'Alpha', cwd: 'C:\\repo' }))
+    expect(snap.focusStatus).toBe('none')
+    expect(snap.elevationLocked).toBe(false)
   })
 
   it('does not put thoughts in tail', () => {
@@ -102,5 +122,6 @@ describe('remote-controller', () => {
     const snap = controller.getSnapshot()
     expect(snap.tail).toHaveLength(1)
     expect(snap.tail[0]?.text).toBe('hello')
+    expect(snap.focusStatus).toBe('ready')
   })
 })
