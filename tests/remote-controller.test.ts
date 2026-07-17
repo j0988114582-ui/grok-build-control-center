@@ -223,6 +223,41 @@ describe('remote-controller (v0.9 coexistence)', () => {
     expect(controller.isCwdInUnion('..\\repo')).toBe(false)
   })
 
+  it('do-now rejects when session is idle', async () => {
+    const controller = makeController()
+    controller.enable()
+    controller.setFocusSession('s1')
+    const result = await controller.handleDoNow('nope')
+    expect(result.ok).toBe(false)
+  })
+
+  it('stale focus request does not overwrite newer focus', async () => {
+    let releaseS1: () => void
+    const s1Gate = new Promise<void>((r) => { releaseS1 = r })
+    const loads: string[] = []
+    let readyId: string | null = null
+    const controller = makeController({
+      listSessions: () => [
+        { id: 's1', cwd: 'C:\\repo', title: 'A' },
+        { id: 's2', cwd: 'C:\\repo', title: 'B' }
+      ],
+      isSessionReady: (id) => id === readyId,
+      loadSession: async (id) => {
+        loads.push(id)
+        if (id === 's1') await s1Gate
+        readyId = id
+      }
+    })
+    controller.enable()
+    const p1 = controller.handleFocus('s1')
+    await new Promise((r) => setTimeout(r, 5))
+    const p2 = controller.handleFocus('s2')
+    releaseS1!()
+    await Promise.all([p1, p2])
+    expect(controller.getFocusSessionId()).toBe('s2')
+    expect(controller.getSnapshot().focusStatus).toBe('ready')
+  })
+
   it('do-now aborts if focus changes during cancel', async () => {
     const prompt = vi.fn().mockResolvedValue(undefined)
     let resolveCancel: () => void

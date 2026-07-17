@@ -60,8 +60,10 @@ export function normalizeCwdKey(cwd: string): string | null {
   const abs = path.isAbsolute(trimmed) || /^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith('\\\\')
   if (!abs) return null
   let n = path.normalize(trimmed)
-  // path.normalize('C:\\') stays as drive root — keep single trailing slash only for roots
-  if (!/^[a-zA-Z]:\\?$/i.test(n) && !/^\\\\[^\\]+\\[^\\]+$/.test(n)) {
+  // Preserve drive root as `C:\` (not `C:`) for stable equality
+  if (/^[a-zA-Z]:\\?$/i.test(n)) {
+    n = `${n[0]}:\\`
+  } else if (!/^\\\\[^\\]+\\[^\\]+$/i.test(n)) {
     n = n.replace(/[\\/]+$/, '')
   }
   return process.platform === 'win32' ? n.toLowerCase() : n
@@ -285,17 +287,31 @@ export class RemoteController {
   /** E2: main-owned focus + load */
   async handleFocus(sessionId: string): Promise<HandlerResult> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
-    await this.refreshSessions()
-    if (!this.sessionsListFresh) {
-      return { ok: false, code: 'not_ready', message: '無法刷新 session 列表，拒絕切換焦點' }
-    }
-    const summary = this.lastSessions.find((item) => item.id === sessionId)
-    if (!summary) return { ok: false, code: 'not_found', message: '找不到該對話' }
-
+    // Bump generation BEFORE any await so concurrent/stale focus cannot overwrite later.
     const gen = ++this.loadGeneration
     this.focusSessionId = sessionId
     this.focusError = undefined
+    this.focusStatus = 'loading'
     this.deps.onFocusChanged?.(sessionId)
+    this.emit()
+
+    await this.refreshSessions()
+    if (gen !== this.loadGeneration || this.focusSessionId !== sessionId) {
+      return { ok: false, code: 'not_ready', message: '焦點已變更' }
+    }
+    if (!this.sessionsListFresh) {
+      this.focusStatus = 'error'
+      this.focusError = '無法刷新 session 列表，拒絕切換焦點'
+      this.emit()
+      return { ok: false, code: 'not_ready', message: this.focusError }
+    }
+    const summary = this.lastSessions.find((item) => item.id === sessionId)
+    if (!summary) {
+      this.focusStatus = 'error'
+      this.focusError = '找不到該對話'
+      this.emit()
+      return { ok: false, code: 'not_found', message: this.focusError }
+    }
 
     if (this.deps.isSessionReady(sessionId)) {
       if (gen !== this.loadGeneration) return { ok: false, code: 'not_ready', message: '焦點已變更' }
@@ -529,19 +545,24 @@ export class RemoteController {
     }
   }
 
-  /** Cancel current turn then send new prompt — pinned to focus at call time. */
+  /**
+   * Cancel current turn then send new prompt.
+   * ACL: only when turn is running / in-flight (matches desktop「立刻改做」).
+   */
   async handleDoNow(text: string): Promise<HandlerResult> {
     const sessionId = this.focusSessionId
     if (!sessionId) return { ok: false, code: 'not_ready', message: '尚未選定對話' }
     const trimmed = text.trim()
     if (!trimmed) return { ok: false, code: 'invalid_request', message: '提示不可為空' }
+    const running = this.runningBySession.get(sessionId) === true || this.inFlightPrompt.has(sessionId)
+    if (!running) {
+      return { ok: false, code: 'invalid_request', message: '僅在回合執行中可使用立刻改做' }
+    }
     this.queue = null
     try {
-      if (this.runningBySession.get(sessionId) || this.inFlightPrompt.has(sessionId)) {
-        await this.deps.cancel(sessionId)
-        this.inFlightPrompt.delete(sessionId)
-        this.runningBySession.set(sessionId, false)
-      }
+      await this.deps.cancel(sessionId)
+      this.inFlightPrompt.delete(sessionId)
+      this.runningBySession.set(sessionId, false)
       if (this.focusSessionId !== sessionId) {
         return { ok: false, code: 'not_ready', message: '焦點已變更，取消立刻改做' }
       }
