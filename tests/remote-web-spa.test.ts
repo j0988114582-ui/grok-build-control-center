@@ -39,6 +39,9 @@ describe('remote-web SPA (wave4)', () => {
     expect(js).toMatch(/\/api\/do-now/)
     expect(js).toMatch(/\/api\/queue/)
     expect(js).toMatch(/sessionExpiresAt/)
+    expect(js).toMatch(/fetchSnapshotOnce/)
+    expect(js).toMatch(/nearBottom/)
+    expect(js).toMatch(/切斷失敗/)
   })
 
   it('CSS enforces 44px touch targets', () => {

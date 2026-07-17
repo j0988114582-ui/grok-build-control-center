@@ -270,6 +270,7 @@
       permissionsEl.appendChild(card)
     })
 
+    const nearBottom = tailEl.scrollHeight - tailEl.scrollTop - tailEl.clientHeight < 96
     tailEl.innerHTML = ''
     ;(snap.tail || []).forEach(function (item) {
       const art = document.createElement('article')
@@ -291,10 +292,12 @@
       }
       tailEl.appendChild(art)
     })
-    tailEl.scrollTop = tailEl.scrollHeight
+    // Only force-scroll when user was already following the tail
+    if (nearBottom) tailEl.scrollTop = tailEl.scrollHeight
   }
 
-  async function pollSnapshot() {
+  /** One-shot snapshot (does NOT schedule poll — avoids duplicate loops / rate limits). */
+  async function fetchSnapshotOnce() {
     if (!paired) return
     try {
       const { res, data } = await api('/api/snapshot')
@@ -314,9 +317,13 @@
       }
     } catch (_) {
       pollMs = Math.min(10000, pollMs + 1000)
-    } finally {
-      pollTimer = window.setTimeout(pollSnapshot, pollMs)
     }
+  }
+
+  async function pollSnapshot() {
+    await fetchSnapshotOnce()
+    if (!paired) return
+    pollTimer = window.setTimeout(pollSnapshot, pollMs)
   }
 
   function startPolling() {
@@ -364,7 +371,8 @@
       return false
     }
     if (okMsg) noticesEl.textContent = okMsg
-    void pollSnapshot()
+    // Refresh once without spawning a second poll chain
+    void fetchSnapshotOnce()
     return true
   }
 
@@ -398,12 +406,21 @@
   async function logout() {
     if (!window.confirm('切斷遠端連線？\n切斷後需回電腦重新配對。')) return
     if (!window.confirm('再次確認：真的要切斷嗎？')) return
-    await api('/api/logout', { method: 'POST', body: '{}' })
-    paired = false
-    stopPolling()
-    setBanner('已切斷 — 需回電腦重新配對')
-    showPair()
-    bookmarkHint.classList.remove('hidden')
+    mainError.textContent = ''
+    try {
+      const { res, data } = await api('/api/logout', { method: 'POST', body: '{}' })
+      if (!res.ok) {
+        mainError.textContent = (data && data.message) || '切斷失敗，請重試或在桌面關閉遙控'
+        return
+      }
+      paired = false
+      stopPolling()
+      setBanner('已切斷 — 需回電腦重新配對')
+      showPair()
+      bookmarkHint.classList.remove('hidden')
+    } catch (_) {
+      mainError.textContent = '切斷時網路錯誤，連線狀態未知，請在桌面確認'
+    }
   }
 
   function toggle(el) {
