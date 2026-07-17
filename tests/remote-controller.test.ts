@@ -71,6 +71,20 @@ describe('remote-controller', () => {
     expect(controller2.handlePermissionRespond('permission:2', 'once').ok).toBe(false)
   })
 
+  it('permission respond fails closed without focus session', () => {
+    const respondPermission = vi.fn()
+    const controller = makeController({ respondPermission })
+    controller.enable({ allowPhonePermissions: true })
+    controller.onPermissionRequest({
+      requestId: 'permission:3',
+      sessionId: 's1',
+      title: 'Run shell',
+      options: [{ optionId: 'once', name: 'Allow once', kind: 'allow_once' }]
+    })
+    expect(controller.handlePermissionRespond('permission:3', 'once').ok).toBe(false)
+    expect(respondPermission).not.toHaveBeenCalled()
+  })
+
   it('snapshot redacts cwd from session list', () => {
     const controller = makeController()
     controller.enable()
