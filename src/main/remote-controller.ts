@@ -288,7 +288,8 @@ export class RemoteController {
       this.pending.delete(requestId)
       return { ok: false, code: 'permission_mismatch', message: '權限請求已過期' }
     }
-    if (this.focusSessionId && pending.sessionId !== this.focusSessionId) {
+    // Fail-closed: must have a focus session and exact match (R-SEC-14)
+    if (!this.focusSessionId || pending.sessionId !== this.focusSessionId) {
       return { ok: false, code: 'permission_mismatch', message: '權限請求不屬於目前焦點對話' }
     }
     if (!pending.allowedOptionIds.includes(optionId)) {

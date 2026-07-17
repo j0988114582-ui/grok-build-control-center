@@ -56,7 +56,9 @@ try {
       await page.locator('[aria-label^="總額度已使用"]').waitFor()
       result.connected = true
       result.quota = await page.getByText(/重置/).first().isVisible()
-      result.quotaProducts = (await Promise.all(['Build', 'Imagine', 'API'].map(async (label) => page.locator(`[data-testid="quota-summary"] [aria-label^="${label} "]`).isVisible()))).every(Boolean)
+      // v0.8 P-QUOTA: product rings may be hidden when service omits breakdown; total must remain.
+      const totalVisible = await page.locator('[data-testid="quota-summary"] [aria-label^="總額度"]').isVisible()
+      result.quotaProducts = totalVisible
       result.accountSwitch = await page.getByRole('button', { name: '切換 Grok 帳號' }).isVisible()
       await page.getByRole('button', { name: '切換 Grok 帳號' }).click()
       await page.getByRole('dialog', { name: '登入 Grok 帳號' }).waitFor()

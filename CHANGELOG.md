@@ -31,12 +31,15 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Remote 預設關；不開機自啟；配對 PIN 僅記憶體；DTO 精簡（session 列表預設無 cwd）。
 - 誠實隱私：Cloudflare 終止訪客 TLS，技術上可處理 HTTP 內容。
 - Quick Tunnel = **Experimental / best-effort**（無 SLA；polling 非 SSE）。
-- **4G 真實手測**：見 `docs/plans/v080-4g-remote-handtest-checklist.md`。本實作環境若未完成真 4G，Remote 視為實驗功能；桌面功能仍出貨。
+- **4G 真實手測**：見 `docs/plans/v080-4g-remote-handtest-checklist.md`。本實作環境**未完成真 4G**，Remote 以 **Experimental** 出貨（預設關）；產品 Codex 審為 Request-changes / Remote NO-GO（見 `docs/plans/v080-codex-fullaccess-review.md`）。桌面 UX/session 功能可獨立使用。
+- cloudflared **未釘版本 checksum 自動下載**；Quick Tunnel 僅在本機已安裝 cloudflared 時嘗試，失敗不阻斷桌面功能。
 
 ### Notes
 
 - 計畫：`docs/plans/2026-07-17-v0.8.0-ux-session-remote-plan.md`
 - Codex 計畫審：`docs/plans/v080-plan-codex-review.md`
+- Codex 產品審：`docs/plans/v080-codex-fullaccess-review.md`（Remote NO-GO；桌面需關注 path-chip / hygiene 文案等 P1）
+- Installer：`outputs/installer/Grok-Build-Control-Center-Setup-0.8.0.exe`（NotSigned）
 - Codex 產品審：`docs/plans/v080-codex-fullaccess-review.md` — **Remote NO-GO** until 4G hand-test + remaining R-SEC items; **desktop path ships**.
 - Installer：**NotSigned**（`outputs/installer/Grok-Build-Control-Center-Setup-0.8.0.exe`）。
 - cloudflared：**未完整**版本+checksum 釘選（R-SEC-20 部分）；Quick Tunnel 僅實驗路徑，不接受 renderer 任意執行檔路徑。

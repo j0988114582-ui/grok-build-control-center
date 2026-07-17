@@ -156,6 +156,16 @@ export class RemoteServer {
       const url = new URL(req.url || '/', `http://${host}`)
       const pathname = url.pathname
 
+      // Nonce health may arrive via tunnel before public Host is permanently allowlisted (route proof).
+      if (pathname === '/api/health' && req.method === 'GET') {
+        securityHeaders(res, true)
+        const nonce = url.searchParams.get('nonce')
+        if (nonce && this.healthNonce && nonce === this.healthNonce) {
+          sendJson(res, 200, { ok: true, nonce: this.healthNonce })
+          return
+        }
+      }
+
       if (pathname.startsWith('/api/')) {
         securityHeaders(res, true)
         await this.handleApi(req, res, pathname)

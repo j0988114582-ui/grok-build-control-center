@@ -91,10 +91,12 @@ export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
+        // Prevent App-level Esc (clear preview / cancel) from also firing on the same event.
+        event.stopImmediatePropagation()
         setLightbox(false)
       }
     }
-    // Capture phase so we win over global cancelTurn
+    // Capture phase so we win over global cancelTurn / clear-preview
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [lightbox])

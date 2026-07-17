@@ -59,9 +59,11 @@ export class RemoteTunnelManager {
       return { ok: false, reason: '找不到 cloudflared 執行檔' }
     }
 
+    // Prefer Host rewrite to loopback so origin Host allowlist stays tight (R-SEC-0d).
     const args = [
       'tunnel',
       '--url', `http://127.0.0.1:${options.port}`,
+      '--http-host-header', `127.0.0.1:${options.port}`,
       '--no-autoupdate'
     ]
 

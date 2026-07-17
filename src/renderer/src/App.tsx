@@ -333,8 +333,8 @@ export function App(): React.JSX.Element {
   const [yoloConfirm, setYoloConfirm] = useState(false)
   const [yoloBusy, setYoloBusy] = useState(false)
   const [loadingSessionIds, setLoadingSessionIds] = useState<string[]>([])
-  /** P-DRAG multi path chips (absolute paths) with optional in-memory thumbnails. */
-  const [pathChips, setPathChips] = useState<PathChip[]>([])
+  /** P-DRAG multi path chips per session (absolute paths) with optional thumbnails. */
+  const [pathChipsBySession, setPathChipsBySession] = useState<Record<string, PathChip[]>>({})
   /** Paths also sent as image blocks — strip matching draft lines on send (P-DRAG-4). */
   const [imagePathDedupeBySession, setImagePathDedupeBySession] = useState<Record<string, string[]>>({})
   /** Mid-turn interjection lifecycle (queued → cleared on turn end / cancel discard). */
@@ -679,7 +679,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     syncMainComposerHeight()
-  }, [syncMainComposerHeight, active?.id, drafts, running, attachments.length, pathChips.length])
+  }, [syncMainComposerHeight, active?.id, drafts, running, attachments.length, pathChipsBySession])
 
   useEffect(() => {
     const box = mainComposerRef.current
@@ -1049,7 +1049,6 @@ export function App(): React.JSX.Element {
           return toggleTeamSlot(current, summary.id)
         })
       }
-      setPathChips((chips) => { revokePathChipUrls(chips); return [] })
       setUsage(null)
       setFollowTail(true)
       setUnread(0)
@@ -1081,7 +1080,6 @@ export function App(): React.JSX.Element {
           return toggleTeamSlot(current, session.id)
         })
       }
-      setPathChips((chips) => { revokePathChipUrls(chips); return [] })
       setUsage(null)
       setFollowTail(true)
       setUnread(0)
@@ -1242,16 +1240,21 @@ export function App(): React.JSX.Element {
     })
   }
 
-  const addPathChips = (chips: PathChip[]): void => {
+  const addPathChips = (sessionId: string, chips: PathChip[]): void => {
     if (!chips.length) return
-    setPathChips((current) => upsertPathChips(current, chips))
+    setPathChipsBySession((current) => ({
+      ...current,
+      [sessionId]: upsertPathChips(current[sessionId] ?? [], chips)
+    }))
   }
 
   const appendPathsToDraft = (sessionId: string, paths: string[]): void => {
     if (!paths.length) return
     setDrafts((current) => ({ ...current, [sessionId]: appendPathLines(current[sessionId] ?? '', paths) }))
-    addPathChips(paths.map((path) => ({ path })))
+    addPathChips(sessionId, paths.map((path) => ({ path })))
   }
+
+  const pathChips = active ? (pathChipsBySession[active.id] ?? []) : []
 
   const sendPromptFor = async (sessionId: string): Promise<void> => {
     const check = sessionActionAllowed(sessionReady, sessionId, connectionGenerationRef.current, {
@@ -1274,9 +1277,13 @@ export function App(): React.JSX.Element {
       delete next[sessionId]
       return next
     })
-    setPathChips((chips) => {
-      revokePathChipUrls(chips)
-      return []
+    setPathChipsBySession((current) => {
+      const chips = current[sessionId]
+      if (chips?.length) revokePathChipUrls(chips)
+      if (!(sessionId in current)) return current
+      const next = { ...current }
+      delete next[sessionId]
+      return next
     })
     dispatchPrompt(sessionId, text || undefined, pending)
   }
@@ -1351,9 +1358,13 @@ export function App(): React.JSX.Element {
       delete next[sessionId]
       return next
     })
-    setPathChips((chips) => {
-      revokePathChipUrls(chips)
-      return []
+    setPathChipsBySession((current) => {
+      const chips = current[sessionId]
+      if (chips?.length) revokePathChipUrls(chips)
+      if (!(sessionId in current)) return current
+      const next = { ...current }
+      delete next[sessionId]
+      return next
     })
     try {
       await window.grokApi.cancel(sessionId)
@@ -1526,7 +1537,7 @@ export function App(): React.JSX.Element {
         return
       }
       appendPathsToDraft(sessionId, chips.map((chip) => chip.path))
-      addPathChips(chips)
+      addPathChips(sessionId, chips)
       setNotice(failed
         ? `已改以本機路徑附上（ACP 目前不支援內嵌圖片）；${failed} 張失敗`
         : '已改以本機路徑附上（ACP 目前不支援內嵌圖片）')
@@ -1602,7 +1613,7 @@ export function App(): React.JSX.Element {
 
       if (resolvedPaths.length) {
         appendPathsToDraft(sessionId, resolvedPaths)
-        addPathChips(chips)
+        addPathChips(sessionId, chips)
       }
 
       if (caps.promptCapabilities.image === true && imageFilesForBlocks.length) {
@@ -1672,15 +1683,16 @@ export function App(): React.JSX.Element {
   }
 
   const dismissPathChip = (filePath: string): void => {
-    setPathChips((current) => {
-      const target = current.find((chip) => chip.path === filePath)
+    if (!active) return
+    const sessionId = active.id
+    setPathChipsBySession((current) => {
+      const list = current[sessionId] ?? []
+      const target = list.find((chip) => chip.path === filePath)
       if (target?.previewUrl?.startsWith('blob:')) {
         try { URL.revokeObjectURL(target.previewUrl) } catch { /* ignore */ }
       }
-      return current.filter((chip) => chip.path !== filePath)
+      return { ...current, [sessionId]: list.filter((chip) => chip.path !== filePath) }
     })
-    if (!active) return
-    const sessionId = active.id
     setDrafts((current) => ({ ...current, [sessionId]: removePathLine(current[sessionId] ?? '', filePath) }))
     setImagePathDedupeBySession((current) => {
       const list = current[sessionId]
