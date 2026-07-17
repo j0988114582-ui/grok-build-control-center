@@ -339,6 +339,8 @@ export function App(): React.JSX.Element {
   const remoteFocusAlignSeqRef = useRef(0)
   /** Mirror of remote main queue for drain decisions (avoid double-send). */
   const remoteMainQueueRef = useRef<RemoteDesktopQueue | null>(null)
+  /** Latest main-owned focus id — stale phone align must not overwrite. */
+  const remoteMainFocusRef = useRef<string | null>(null)
   const [runningMap, setRunningMap] = useState<Record<string, boolean>>({})
   const [yoloConfirm, setYoloConfirm] = useState(false)
   const [yoloBusy, setYoloBusy] = useState(false)
@@ -670,6 +672,16 @@ export function App(): React.JSX.Element {
       setRemoteState(state)
       setRemoteControlActive(state.enabled)
       remoteMainQueueRef.current = state.queue ?? null
+      remoteMainFocusRef.current = state.focusSessionId ?? null
+      // E9: main queue last-writer wins — drop local queue for that session so we do not
+      // drain text (main) + attachments (local) as two competing prompts.
+      if (state.queue) {
+        const local = localQueueRef.current
+        if (local && local.sessionId === state.queue.sessionId) {
+          localQueueRef.current = null
+          setLocalQueue(null)
+        }
+      }
       const notice = state.notices?.[0]
       if (notice && notice !== lastRemoteNoticeRef.current) {
         lastRemoteNoticeRef.current = notice
@@ -703,6 +715,8 @@ export function App(): React.JSX.Element {
             session = list.find((item) => item.id === sessionId)
           }
           if (seq !== remoteFocusAlignSeqRef.current) return
+          // Desktop or a newer phone focus already moved main authority — do not clobber UI.
+          if (remoteMainFocusRef.current !== null && remoteMainFocusRef.current !== sessionId) return
           if (!session) {
             setNotice('手機已切換焦點，但本機列表尚無該對話')
             return
@@ -1142,6 +1156,10 @@ export function App(): React.JSX.Element {
   }
   const loadSession = async (session: SessionSummary): Promise<void> => {
     if (lifecycleBusy || loadingSessionsRef.current.has(session.id)) return
+    // Invalidate in-flight phone focus UI align; desktop focus is last-writer for UI.
+    remoteFocusAlignSeqRef.current += 1
+    aligningRemoteFocusRef.current = false
+    remoteMainFocusRef.current = session.id
     loadingSessionsRef.current.add(session.id)
     setLoadingSessionIds((current) => current.includes(session.id) ? current : [...current, session.id])
     try {
@@ -1483,8 +1501,9 @@ export function App(): React.JSX.Element {
     const text = drafts[sessionId]?.trim()
     if (!text && !attachments.length) return
 
-    // Remote on + text-only: main single-slot (E9). If attachments exist, keep one local
-    // queue so text+files are not split into two competing prompts.
+    // Remote on + text-only: main single-slot (E9).
+    // If attachments exist, keep one local queue only and clear main so mobile cannot
+    // co-queue a second prompt for the same session.
     if (remoteControlActive && text && attachments.length === 0) {
       void window.grokApi.remoteQueue(text).then((result) => {
         if (!result.ok) {
@@ -1497,6 +1516,10 @@ export function App(): React.JSX.Element {
         setNotice(REMOTE_QUEUE_NOTICE_DESKTOP)
       }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
       return
+    }
+
+    if (remoteControlActive && attachments.length > 0) {
+      void window.grokApi.remoteQueueClear().catch(() => undefined)
     }
 
     const item: LocalQueuedPrompt = {
