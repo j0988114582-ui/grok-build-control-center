@@ -76,7 +76,12 @@ export interface GrokBridgeApi {
   onStatus(callback: (status: CliStatusUpdate) => void): () => void
   /** Remote control (default off). */
   remoteGetState(): Promise<RemoteDesktopState>
-  remoteEnable(options?: { allowPhonePermissions?: boolean; useQuickTunnel?: boolean }): Promise<RemoteDesktopState>
+  remoteEnable(options?: {
+    allowPhonePermissions?: boolean
+    useQuickTunnel?: boolean
+    riskAcknowledged?: boolean
+    cloudflaredPath?: string
+  }): Promise<RemoteDesktopState>
   remoteDisable(): Promise<RemoteDesktopState>
   remoteRegeneratePairing(): Promise<RemoteDesktopState>
   remoteSetFocus(sessionId: string | null): Promise<boolean>
@@ -90,6 +95,7 @@ export type RemoteDesktopState = {
   pairingSecret: string | null
   expiresAt: number | null
   publicBaseUrl: string | null
+  localUrl?: string | null
   allowPhonePermissions: boolean
   experimentalTunnel: boolean
 }

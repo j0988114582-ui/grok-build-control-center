@@ -1,49 +1,52 @@
 # v0.8.0 Remote 4G 手測清單（發版閘）
 
-CI 可 SKIP live tunnel，**不可**當作發版豁免。Remote 若出貨，須完成下列手測並勾選。
-
-## 環境紀錄
-
-| 欄位 | 填寫 |
+| 欄位 | 內容 |
 | --- | --- |
-| 日期 | |
-| 桌面 OS / 版本 | Windows / GUI 0.8.0 |
-| 手機 / 瀏覽器 | |
-| 網路 | 4G（關閉 Wi‑Fi） |
-| Tunnel | Quick（Experimental） / Named+Access |
-| cloudflared 版本 | |
+| **狀態** | 本實作環境 **未完成** 真實 4G 手測（文件化） |
+| **日期** | 2026-07-17 |
+| **結論** | CI / 本機可 SKIP live tunnel；**不得**當發版豁免。Remote 出貨前必須補完本清單並勾選。 |
+
+## 環境紀錄（手測時填）
+
+| 項目 | 值 |
+| --- | --- |
+| 桌面 OS / 版本 | |
+| Grok Build GUI 版本 | 0.8.0 |
+| cloudflared 版本 / 雜湊 | |
+| 隧道模式 | Quick（Experimental） / Named+Access |
+| 手機 OS / 瀏覽器 | |
+| 網路 | 真實 4G（關閉 Wi‑Fi） |
 | 測試者 | |
+| 日期時間 | |
 
 ## 正向
 
-- [ ] 桌面權限為「每次詢問」；YOLO 關閉
-- [ ] 啟用遙控後出現 PIN；QR / 配對 URL 僅在 health 通過後
-- [ ] 手機掃碼 → fragment 立刻消失 → 輸入 PIN 成功
-- [ ] snapshot 輪詢可見焦點對話精簡 tail（無 thought / 完整 tool output）
-- [ ] 送出提示；桌面標記「來自手機遙控」
-- [ ] 停止回合
-- [ ] （若開啟「允許手機核准權限」）權限卡可核准/拒絕正確選項
-- [ ] 切斷後手機立即 401；桌面 PIN/配對作廢
+- [ ] 桌面 YOLO=每次詢問；啟用 Remote；Quick 風險確認文案含「供應商可處理 HTTP 內容」
+- [ ] nonce health 通過後才顯示 QR／公網 URL
+- [ ] 手機掃碼 → fragment 剝除 → PIN 配對 → Set-Cookie 成功
+- [ ] snapshot 輪詢：狀態、簡化 session 列表（無 cwd）、tail、權限卡
+- [ ] 送出 prompt（伺服端焦點 session）；桌面標記「來自手機遙控」
+- [ ] cancel 停止回合
+- [ ] （若開「允許手機核准權限」）permission.respond 正確選項通過；錯 option 拒
+- [ ] 切斷／disable：tunnel 殺、HTTP 關、token 全撤
 
-## 負向
+## 負面
 
-- [ ] YOLO 開啟時無法啟用 Remote；Remote 開啟時無法開 YOLO
-- [ ] 錯 PIN ×5 → 配對作廢，需桌面重產
 - [ ] 無 cookie 呼叫 `/api/snapshot` → 401
-- [ ] 無 `X-Grok-Remote` 的 POST → 403
-- [ ] 偽造 `requestId` / `optionId` → 拒
-- [ ] 關桌面遙控 / 關 tunnel / 重啟 app → 舊 cookie 失效
-- [ ] Host/Origin 異常請求被拒（若可構造）
+- [ ] 無 `X-Grok-Remote` mutation → 403
+- [ ] 錯 PIN ×5 → pairing 作廢需桌面再產
+- [ ] 過期 pairing → 失敗，不自動無限換碼
+- [ ] 偽造 requestId / 他 session option → 拒
+- [ ] client 帶 sessionId 不能改焦點（prompt 不信任 client sessionId）
+- [ ] YOLO 開啟時無法 enable Remote；Remote 開啟時無法 YOLO
+- [ ] 關 Remote 後公網 URL 失效
 
-## 隱私誠實
+## 本環境實作時已完成（單元／本機）
 
-- [ ] UI 文案說明 Cloudflare 終止 TLS、可處理 HTTP 內容（非「僅 SNI」）
+- 單元：TTL、PIN 作廢、allowlist、物件級 permission、YOLO 互斥、DTO redaction
+- 本機 HTTP：`remote-server` 負面測試（cookie / header / pair / CSP）
+- **未完成**：真實 4G 手機 + Quick Tunnel 錄影
 
-## 結論
+## 建議發版策略
 
-- [ ] **Remote GO**（可出 Remote）
-- [ ] **Remote NO-GO**（桌面功能仍可出 0.8.0；CHANGELOG 註明 Remote 未出或實驗）
-
-### 本次結果
-
-（實作環境若無法完成真實 4G：勾 NO-GO 或「本機 loopback 已驗證、4G 待補」並在 CHANGELOG 誠實記載。）
+若 4G 未完成：文件註明 **Remote = 實驗**；桌面 §1.1–1.5 仍可出 0.8.0；勿宣稱生產級外網遙控。

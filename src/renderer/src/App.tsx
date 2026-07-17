@@ -2259,7 +2259,11 @@ export function App(): React.JSX.Element {
                       if (!ok) return
                     }
                     setRemoteBusy(true)
-                    void window.grokApi.remoteEnable({ allowPhonePermissions: remoteAllowPhonePerms, useQuickTunnel: remoteUseQuickTunnel })
+                    void window.grokApi.remoteEnable({
+                      allowPhonePermissions: remoteAllowPhonePerms,
+                      useQuickTunnel: remoteUseQuickTunnel,
+                      riskAcknowledged: remoteUseQuickTunnel ? true : undefined
+                    })
                       .then((state) => {
                         setRemoteState(state)
                         setRemoteControlActive(true)

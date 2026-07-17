@@ -1,0 +1,139 @@
+{
+  "dockMounted": true,
+  "toggleOpen": true,
+  "toggleClose": true,
+  "shortcut": true,
+  "csp": true,
+  "sessionReady": true,
+  "kinds": {
+    "image": true,
+    "video": true,
+    "html": true,
+    "code": true
+  },
+  "viewports": {
+    "1040": true,
+    "1280": true
+  },
+  "a11y": [
+    {
+      "state": "preview-open",
+      "violations": []
+    },
+    {
+      "state": "preview-rail",
+      "violations": []
+    },
+    {
+      "state": "c13-image-1280",
+      "violations": []
+    },
+    {
+      "state": "c13-video-1280",
+      "violations": []
+    },
+    {
+      "state": "c13-html-1280",
+      "violations": []
+    },
+    {
+      "state": "c13-code-1280",
+      "violations": []
+    }
+  ],
+  "screenshots": [
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\preview-open.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\preview-rail.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\c13-image-1280.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\c13-video-1280.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\c13-html-1280.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\c13-code-1280.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\c13-image-1040.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\c13-video-1040.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\c13-html-1040.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\c13-code-1040.png",
+    "C:\\Users\\111\\Documents\\grok-build-GUI\\work\\_upstream\\outputs\\preview-smoke\\c13-rail-1280.png"
+  ],
+  "exitCode": 0,
+  "reg_image": {
+    "ok": true,
+    "path": "C:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.png",
+    "kind": "image",
+    "sizeBytes": 70,
+    "mtimeMs": 1784219830438.619,
+    "mimeType": "image/png",
+    "base64DataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "loadVia": "base64"
+  },
+  "ui_image": {
+    "text": "PREVIEW DOCK預覽自動圖片影片HTML程式碼遠端圖c13-sample.pngC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.pngimagec13-sample.tsC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.tscodec13-sample.htmlC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.htmlhtmlc13-sample.mp4C:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.mp4video符合視窗原始大小全螢幕c13-sample.png70 BimageCtrl+Shift+V 開關",
+    "hasImg": true,
+    "hasVideo": false,
+    "hasIframe": false,
+    "hasPre": false
+  },
+  "reg_video": {
+    "ok": true,
+    "path": "C:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.mp4",
+    "kind": "video",
+    "sizeBytes": 32,
+    "mtimeMs": 1784219830439.618,
+    "mimeType": "video/mp4",
+    "protocolUrl": "grok-preview://local/C%3A%5CUsers%5C111%5CAppData%5CLocal%5CTemp%5Cgrok-preview-fixtures-c4PWDV%5Cc13-sample.mp4",
+    "loadVia": "protocol"
+  },
+  "ui_video": {
+    "text": "PREVIEW DOCK預覽自動圖片影片HTML程式碼遠端圖c13-sample.mp4C:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.mp4videoc13-sample.pngC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.pngimagec13-sample.tsC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.tscodec13-sample.htmlC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.htmlhtml無法載入影片（可改用系統播放器開啟）c13-sample.mp432 BvideoCtrl+Shift+V 開關",
+    "hasImg": false,
+    "hasVideo": false,
+    "hasIframe": false,
+    "hasPre": false
+  },
+  "reg_html": {
+    "ok": true,
+    "path": "C:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.html",
+    "kind": "html",
+    "sizeBytes": 253,
+    "mtimeMs": 1784219830440.617,
+    "mimeType": "text/html",
+    "loadVia": "text"
+  },
+  "ui_html": {
+    "text": "PREVIEW DOCK預覽自動圖片影片HTML程式碼遠端圖c13-sample.htmlC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.htmlhtmlc13-sample.mp4C:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.mp4videoc13-sample.pngC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.pngimagec13-sample.tsC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.tscode外部 CSS／圖片可能缺失（CSP 刻意行為；本版不做同目錄資源解析）c13-sample.html253 BhtmlCtrl+Shift+V 開關",
+    "hasImg": false,
+    "hasVideo": false,
+    "hasIframe": true,
+    "hasPre": false
+  },
+  "reg_code": {
+    "ok": true,
+    "path": "C:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.ts",
+    "kind": "code",
+    "sizeBytes": 93,
+    "mtimeMs": 1784219830441.6167,
+    "mimeType": "text/typescript",
+    "loadVia": "text"
+  },
+  "ui_code": {
+    "text": "PREVIEW DOCK預覽自動圖片影片HTML程式碼遠端圖c13-sample.tsC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.tscodec13-sample.htmlC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.htmlhtmlc13-sample.mp4C:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.mp4videoc13-sample.pngC:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV\\c13-sample.pngimage語言自動換行複製// C13 code fixture\nexport function greet(name: string): string {\n  return `hello ${name",
+    "hasImg": false,
+    "hasVideo": false,
+    "hasIframe": false,
+    "hasPre": true
+  },
+  "c13": {
+    "kindsOk": true,
+    "viewportsOk": true,
+    "shotCount": 11,
+    "kinds": {
+      "image": true,
+      "video": true,
+      "html": true,
+      "code": true
+    },
+    "sessionReady": true
+  },
+  "ok": true,
+  "seriousA11y": 0,
+  "fixturesDir": "C:\\Users\\111\\AppData\\Local\\Temp\\grok-preview-fixtures-c4PWDV"
+}
