@@ -21,7 +21,7 @@ const billing: BillingInfo = {
 describe('QuotaRings', () => {
   afterEach(cleanup)
 
-  it('keeps total, Build, Imagine, and API visible in the enlarged summary', async () => {
+  it('keeps total, Build, Imagine, and API visible when product data exists', async () => {
     const user = userEvent.setup()
     render(<QuotaRings billing={billing} now={new Date('2026-07-12T02:38:18Z')} />)
 
@@ -44,16 +44,17 @@ describe('QuotaRings', () => {
     expect(screen.getByText('額度資料暫不可用')).toBeInTheDocument()
   })
 
-  it('does not misreport missing product usage as zero percent', () => {
+  it('P-QUOTA: hides product rings when productUsage is empty (keeps total)', () => {
     render(<QuotaRings billing={{ creditUsagePercent: 79, productUsage: [] }} />)
     const summary = within(screen.getByTestId('quota-summary'))
-    expect(summary.getByLabelText('Build 額度暫無資料')).toBeInTheDocument()
-    expect(summary.getByLabelText('Imagine 額度暫無資料')).toBeInTheDocument()
-    expect(summary.getByLabelText('API 額度暫無資料')).toBeInTheDocument()
+    expect(summary.getByLabelText('總額度已使用 79%')).toBeInTheDocument()
+    expect(summary.queryByLabelText(/Build/)).not.toBeInTheDocument()
+    expect(summary.queryByLabelText(/Imagine/)).not.toBeInTheDocument()
+    expect(summary.queryByLabelText(/API/)).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Build 已使用 0%')).not.toBeInTheDocument()
   })
 
-  it('T-Billing-1: unified weekly account with empty productUsage shows total + notice + em dashes', async () => {
+  it('T-Billing-1: unified weekly account with empty productUsage shows total + notice, no product rings', async () => {
     const user = userEvent.setup()
     render(<QuotaRings billing={{
       creditUsagePercent: 42,
@@ -64,10 +65,9 @@ describe('QuotaRings', () => {
 
     const summary = within(screen.getByTestId('quota-summary'))
     expect(summary.getByLabelText('總額度已使用 42%')).toBeInTheDocument()
-    expect(summary.getByLabelText('Build 額度暫無資料')).toBeInTheDocument()
-    expect(summary.getByLabelText('Imagine 額度暫無資料')).toBeInTheDocument()
-    expect(summary.getByLabelText('API 額度暫無資料')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Build 已使用 0%')).not.toBeInTheDocument()
+    expect(summary.queryByLabelText(/Build/)).not.toBeInTheDocument()
+    expect(summary.queryByLabelText(/Imagine/)).not.toBeInTheDocument()
+    expect(summary.queryByLabelText(/API/)).not.toBeInTheDocument()
 
     await user.hover(screen.getByTestId('quota-reactor'))
     const notice = screen.getByTestId('unified-billing-notice')
@@ -95,7 +95,7 @@ describe('QuotaRings', () => {
     expect(screen.queryByTestId('unified-billing-notice')).not.toBeInTheDocument()
   })
 
-  it('T-Billing-3: partial productUsage shows real % and — without main banner', async () => {
+  it('T-Billing-3 / P-QUOTA: partial productUsage shows only available rings', async () => {
     const user = userEvent.setup()
     render(<QuotaRings billing={{
       creditUsagePercent: 60,
@@ -105,8 +105,8 @@ describe('QuotaRings', () => {
 
     const summary = within(screen.getByTestId('quota-summary'))
     expect(summary.getByLabelText('Build 已使用 33%')).toBeInTheDocument()
-    expect(summary.getByLabelText('Imagine 額度暫無資料')).toBeInTheDocument()
-    expect(summary.getByLabelText('API 額度暫無資料')).toBeInTheDocument()
+    expect(summary.queryByLabelText(/Imagine/)).not.toBeInTheDocument()
+    expect(summary.queryByLabelText(/API/)).not.toBeInTheDocument()
     await user.hover(screen.getByTestId('quota-reactor'))
     expect(screen.queryByTestId('unified-billing-notice')).not.toBeInTheDocument()
   })

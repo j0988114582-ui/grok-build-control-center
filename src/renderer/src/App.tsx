@@ -91,6 +91,11 @@ import {
   formatOfficialCompactTitle,
   shouldEmitInferredCompact
 } from '../../shared/compact-infer'
+import {
+  canEnableYolo,
+  PERMISSION_ASK_ALREADY_NOTICE,
+  PERMISSION_ASK_TOOLTIP
+} from '../../shared/remote-yolo-mutex'
 import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock,
   SessionSummary, SessionUsage, UiSessionEvent
@@ -300,6 +305,12 @@ export function App(): React.JSX.Element {
   const [panel, setPanel] = useState<Panel>('none')
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('ask')
+  /**
+   * Remote control active flag (wave 5 remote-controller will own this).
+   * Wave 1: mutex hooks only; reset on unmount so YOLO gate never sticks open.
+   */
+  const [remoteControlActive, setRemoteControlActive] = useState(false)
+  useEffect(() => () => { setRemoteControlActive(false) }, [])
   const [runningMap, setRunningMap] = useState<Record<string, boolean>>({})
   const [yoloConfirm, setYoloConfirm] = useState(false)
   const [yoloBusy, setYoloBusy] = useState(false)
@@ -458,7 +469,9 @@ export function App(): React.JSX.Element {
     ? '請先停止所有執行中的回合（含 Agents Team）'
     : lifecycleBusy || sessionLoading
       ? '系統忙碌中，請稍候再切換權限模式'
-      : '工具權限模式（每次啟動重置為每次詢問）'
+      : remoteControlActive
+        ? `${PERMISSION_ASK_TOOLTIP}（遠端遙控啟用中，不可切換 YOLO）`
+        : PERMISSION_ASK_TOOLTIP
 
   useEffect(() => {
     if (permission) return
@@ -730,6 +743,12 @@ export function App(): React.JSX.Element {
       setNotice(running || anyRunning ? '請先停止所有執行中的回合（含 Agents Team），再切換權限模式' : '系統忙碌中，請稍候再切換權限模式')
       return
     }
+    const yoloGate = canEnableYolo(remoteControlActive)
+    if (!yoloGate.ok) {
+      setYoloConfirm(false)
+      setNotice(yoloGate.reason)
+      return
+    }
     setYoloBusy(true)
     try {
       await setPermissionModeWithBackend('always-approve')
@@ -739,17 +758,39 @@ export function App(): React.JSX.Element {
     }
   }
   const requestPermissionMode = (mode: AgentPermissionMode): void => {
-    if (mode === permissionMode || permissionControlsLocked) return
-    if (mode === 'always-approve') setYoloConfirm(true)
-    else void setPermissionModeWithBackend('ask')
+    if (permissionControlsLocked) return
+    // P-PERM-1: already on 每次詢問 and re-selected → notice + purpose
+    if (mode === permissionMode) {
+      if (mode === 'ask') setNotice(PERMISSION_ASK_ALREADY_NOTICE)
+      return
+    }
+    if (mode === 'always-approve') {
+      const yoloGate = canEnableYolo(remoteControlActive)
+      if (!yoloGate.ok) {
+        setNotice(yoloGate.reason)
+        return
+      }
+      setYoloConfirm(true)
+      return
+    }
+    void setPermissionModeWithBackend('ask')
   }
   const setPermissionModeWithBackend = async (mode: AgentPermissionMode): Promise<void> => {
+    if (mode === 'always-approve') {
+      const yoloGate = canEnableYolo(remoteControlActive)
+      if (!yoloGate.ok) {
+        setNotice(yoloGate.reason)
+        return
+      }
+    }
     const activeSession = active
     const wasConnected = status.connected
     try {
       const nextMode = await window.grokApi.setPermissionMode(mode)
       setPermissionMode(nextMode)
-      setNotice(nextMode === 'always-approve' ? '⚠️ 已切換到 YOLO 模式（本次啟動有效）' : '權限模式已切換為每次詢問')
+      setNotice(nextMode === 'always-approve'
+        ? '⚠️ 已切換到 YOLO 模式（本次啟動有效）'
+        : '權限模式已切換為「每次詢問」：工具操作前會先請你確認用途與風險。')
       if (wasConnected) {
         setReconnecting(true)
         try {

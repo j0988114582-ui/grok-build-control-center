@@ -10,6 +10,7 @@ import { BillingCache } from './billing-cache'
 import { AcpConnectionState, reportAsyncError } from './acp-connection-state'
 import { parseGrokVersion } from './grok-cli'
 import type { AgentPermissionMode } from '../shared/types'
+import { canEnableYolo, YOLO_BLOCKED_BY_REMOTE } from '../shared/remote-yolo-mutex'
 import {
   createGrokInstallerEnvironment,
   installGrokCli,
@@ -89,6 +90,17 @@ const acpConnection = new AcpConnectionState<GrokAcpClient>()
 let connectedExecutable = ''
 /** Always resets to `ask` when the process starts (not persisted). */
 let agentPermissionMode: AgentPermissionMode = 'ask'
+/**
+ * Remote control active (wave 5 remote-controller sets this).
+ * Main-process authority for YOLO ↔ Remote mutex (R-SEC-14b).
+ */
+let remoteControlActive = false
+export function setRemoteControlActive(active: boolean): void {
+  remoteControlActive = active
+}
+export function isRemoteControlActive(): boolean {
+  return remoteControlActive
+}
 const billingCache = new BillingCache<unknown>()
 const lifecycleOperation = new SingleLifecycleOperation()
 
@@ -302,6 +314,10 @@ function registerIpc(): void {
   ipcMain.handle('grok:permission-mode:set', async (_event, mode: AgentPermissionMode) => {
     if (mode !== 'ask' && mode !== 'always-approve') throw new Error('Invalid permission mode')
     if (agentPermissionMode === mode) return agentPermissionMode
+    if (mode === 'always-approve') {
+      const yoloGate = canEnableYolo(remoteControlActive)
+      if (!yoloGate.ok) throw new Error(yoloGate.reason || YOLO_BLOCKED_BY_REMOTE)
+    }
     agentPermissionMode = mode
     const wasConnected = acpConnection.current !== null || acpConnecting !== null
     disconnectAcp()

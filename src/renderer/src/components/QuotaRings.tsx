@@ -47,30 +47,30 @@ export function QuotaRings({ billing, unavailable = false, now }: QuotaRingsProp
     { product: 'GrokImagine', label: 'Imagine' },
     { product: 'Api', label: 'API' }
   ]
+  /** P-QUOTA: hide product rings with no data; never fabricate 0%. Keep total always. */
+  const visibleProducts = fixedProducts
+    .map((item) => ({ ...item, percent: usageFor(item.product) }))
+    .filter((item): item is typeof item & { percent: number } => item.percent !== undefined)
   const periodStart = billing.billingPeriodStart ?? billing.currentPeriod?.start
   const periodEnd = billing.billingPeriodEnd ?? billing.currentPeriod?.end
   const showUnifiedNotice = shouldShowUnifiedBillingNotice(billing)
-  const missingRingTitle = showUnifiedNotice
-    ? UNIFIED_BILLING_NOTICE
-    : '服務未提供此項額度'
 
   return <div className="quota-reactor" data-testid="quota-reactor" data-billing-zone="subscription" tabIndex={0}>
     <div className="quota-reactor-main" data-testid="quota-summary" aria-label="訂閱週額度摘要">
       <ReactorRing label="總額度" percent={billing.creditUsagePercent} />
-      {fixedProducts.map((item) => <ReactorRing key={item.product} label={item.label} percent={usageFor(item.product)} missingTitle={missingRingTitle} />)}
+      {visibleProducts.map((item) => <ReactorRing key={item.product} label={item.label} percent={item.percent} />)}
       <time>{formatBillingReset(periodEnd, now)}</time>
     </div>
     <section className="quota-popover" aria-label="週額度明細">
       <header><strong>訂閱週額度</strong><span>WEEKLY</span></header>
       {showUnifiedNotice && <p className="quota-unified-notice" data-testid="unified-billing-notice">{UNIFIED_BILLING_NOTICE}</p>}
-      <div className="quota-products">{fixedProducts.map((fixed) => {
-        const usage = usageFor(fixed.product)
-        return <div key={fixed.product} className={usage === undefined ? 'unavailable' : undefined}>
-          <label><span>{PRODUCT_LABELS[fixed.product]}</span><b>{usage === undefined ? '—' : `${Math.round(usage)}%`}</b></label>
-          <i>{usage !== undefined && <span className={quotaLevel(usage)} style={{ width: `${Math.min(100, Math.max(0, usage))}%` }} />}</i>
+      {visibleProducts.length > 0 && <div className="quota-products">{visibleProducts.map((fixed) => (
+        <div key={fixed.product}>
+          <label><span>{PRODUCT_LABELS[fixed.product]}</span><b>{`${Math.round(fixed.percent)}%`}</b></label>
+          <i><span className={quotaLevel(fixed.percent)} style={{ width: `${Math.min(100, Math.max(0, fixed.percent))}%` }} /></i>
         </div>
-      })}</div>
-      {showUnifiedNotice && <p className="quota-unified-hint">分項 Build／Imagine（Image）／API 為「—」表示服務未提供百分比，不是讀取失敗。</p>}
+      ))}</div>}
+      {showUnifiedNotice && <p className="quota-unified-hint">服務未提供分項 Build／Imagine（Image）／API 百分比時會隱藏分項環，僅保留總額度；並非讀取失敗。</p>}
       <footer><span>{periodStart ? new Date(periodStart).toLocaleDateString('zh-TW') : '—'}</span><em>→</em><span>{periodEnd ? new Date(periodEnd).toLocaleDateString('zh-TW') : '—'}</span></footer>
     </section>
   </div>
