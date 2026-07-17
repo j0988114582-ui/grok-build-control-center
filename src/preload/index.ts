@@ -61,6 +61,16 @@ const api: GrokBridgeApi = {
     const listener = (_event: Electron.IpcRendererEvent, value: CliStatusUpdate): void => callback(value)
     ipcRenderer.on('grok:status-update', listener)
     return () => ipcRenderer.removeListener('grok:status-update', listener)
+  },
+  remoteGetState: () => ipcRenderer.invoke('remote:get-state'),
+  remoteEnable: (options) => ipcRenderer.invoke('remote:enable', options),
+  remoteDisable: () => ipcRenderer.invoke('remote:disable'),
+  remoteRegeneratePairing: () => ipcRenderer.invoke('remote:regenerate-pairing'),
+  remoteSetFocus: (sessionId) => ipcRenderer.invoke('remote:set-focus', sessionId),
+  onRemoteState: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: import('../shared/bridge').RemoteDesktopState): void => callback(value)
+    ipcRenderer.on('remote:state', listener)
+    return () => ipcRenderer.removeListener('remote:state', listener)
   }
 }
 

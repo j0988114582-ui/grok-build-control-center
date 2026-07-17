@@ -118,6 +118,7 @@ import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock,
   SessionSummary, SessionUsage, UiSessionEvent
 } from '../../shared/types'
+import type { RemoteDesktopState } from '../../shared/bridge'
 
 const EMPTY_CAPS: AgentCapabilities = { loadSession: false, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [] }
 const emptyStatus: CliStatus = { executable: '', found: false, connected: false }
@@ -323,12 +324,11 @@ export function App(): React.JSX.Element {
   const [panel, setPanel] = useState<Panel>('none')
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('ask')
-  /**
-   * Remote control active flag (wave 5 remote-controller will own this).
-   * Wave 1: mutex hooks only; reset on unmount so YOLO gate never sticks open.
-   */
   const [remoteControlActive, setRemoteControlActive] = useState(false)
-  useEffect(() => () => { setRemoteControlActive(false) }, [])
+  const [remoteState, setRemoteState] = useState<RemoteDesktopState | null>(null)
+  const [remoteBusy, setRemoteBusy] = useState(false)
+  const [remoteAllowPhonePerms, setRemoteAllowPhonePerms] = useState(false)
+  const [remoteUseQuickTunnel, setRemoteUseQuickTunnel] = useState(false)
   const [runningMap, setRunningMap] = useState<Record<string, boolean>>({})
   const [yoloConfirm, setYoloConfirm] = useState(false)
   const [yoloBusy, setYoloBusy] = useState(false)
@@ -638,6 +638,23 @@ export function App(): React.JSX.Element {
     const timer = window.setInterval(() => { void refreshBillingRef.current() }, 600_000)
     return () => window.clearInterval(timer)
   }, [status.connected])
+
+  useEffect(() => {
+    void window.grokApi.remoteGetState().then((state) => {
+      setRemoteState(state)
+      setRemoteControlActive(state.enabled)
+    }).catch(() => undefined)
+    const off = window.grokApi.onRemoteState((state) => {
+      setRemoteState(state)
+      setRemoteControlActive(state.enabled)
+    })
+    return off
+  }, [])
+
+  useEffect(() => {
+    if (!remoteControlActive) return
+    void window.grokApi.remoteSetFocus(active?.id ?? null).catch(() => undefined)
+  }, [active?.id, remoteControlActive])
 
   useEffect(() => {
     if (!settingsHydrated) return
@@ -2219,6 +2236,76 @@ export function App(): React.JSX.Element {
             </div>
           </div>
           {active && <button className="secondary wide" onClick={() => openTui(active.cwd)}><TerminalSquare />在 GROK TUI 開啟</button>}
+          <div className="settings-section remote-panel" data-testid="remote-panel" style={{ borderTop: '1px dashed var(--line)', paddingTop: '15px', marginTop: '16px' }}>
+            <div className="section-title"><h3>手機 QR 遙控</h3><small>預設關閉 · 僅 127.0.0.1 · 不可與 YOLO 並用</small></div>
+            <p className="drawer-intro">
+              流量經 Cloudflare Quick Tunnel（實驗性）時，供應商在邊緣終止 TLS，技術上可處理 HTTP 內容。用完請切斷。Named Tunnel + Access 為重複使用推薦路徑（請自備）。
+            </p>
+            {!remoteControlActive ? (
+              <>
+                <label className="toggle-row"><span><strong>允許手機核准權限</strong><small>預設關閉</small></span><input type="checkbox" checked={remoteAllowPhonePerms} onChange={(e) => setRemoteAllowPhonePerms(e.target.checked)} /></label>
+                <label className="toggle-row"><span><strong>Quick Tunnel（實驗性）</strong><small>需本機 cloudflared；每次確認風險</small></span><input type="checkbox" checked={remoteUseQuickTunnel} onChange={(e) => setRemoteUseQuickTunnel(e.target.checked)} /></label>
+                <button
+                  type="button"
+                  className="primary wide"
+                  disabled={remoteBusy || permissionMode === 'always-approve'}
+                  onClick={() => {
+                    if (permissionMode === 'always-approve') {
+                      setNotice('YOLO 啟用中，無法開啟遠端遙控。請先改回「每次詢問」。')
+                      return
+                    }
+                    if (remoteUseQuickTunnel) {
+                      const ok = window.confirm('即將啟用實驗性 Quick Tunnel（無 SLA）。Cloudflare 會終止訪客 TLS 並可能處理提示／權限摘要等內容。確定繼續？')
+                      if (!ok) return
+                    }
+                    setRemoteBusy(true)
+                    void window.grokApi.remoteEnable({ allowPhonePermissions: remoteAllowPhonePerms, useQuickTunnel: remoteUseQuickTunnel })
+                      .then((state) => {
+                        setRemoteState(state)
+                        setRemoteControlActive(true)
+                        setNotice(state.experimentalTunnel ? '遠端已啟用（實驗性隧道）' : '遠端已啟用（本機 loopback；外網請自備隧道）')
+                      })
+                      .catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+                      .finally(() => setRemoteBusy(false))
+                  }}
+                >{remoteBusy ? '啟動中…' : '啟用遙控'}</button>
+              </>
+            ) : (
+              <>
+                <p data-testid="remote-banner">狀態：{remoteState?.banner ?? '—'}{remoteState?.experimentalTunnel ? ' · Experimental Tunnel' : ''}</p>
+                {remoteState?.pin && <p data-testid="remote-pin">PIN：<strong style={{ fontSize: '1.4em', letterSpacing: '0.12em' }}>{remoteState.pin}</strong></p>}
+                {remoteState?.publicBaseUrl && remoteState.pairingSecret && (
+                  <p className="drawer-intro" style={{ wordBreak: 'break-all' }}>
+                    配對網址（僅在本機／已驗證隧道顯示）：{remoteState.publicBaseUrl}/#/pair?t=…
+                    <br />掃碼請用桌面顯示的完整 QR（密鑰在 fragment，不進 query log）。
+                  </p>
+                )}
+                {remoteState?.publicBaseUrl && (
+                  <code style={{ display: 'block', fontSize: 11, wordBreak: 'break-all' }}>{remoteState.publicBaseUrl}/#/pair?t={remoteState.pairingSecret ?? ''}</code>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                  <button type="button" className="secondary" disabled={remoteBusy} onClick={() => {
+                    setRemoteBusy(true)
+                    void window.grokApi.remoteRegeneratePairing()
+                      .then((state) => { setRemoteState(state); setNotice('已重新產生配對碼') })
+                      .catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+                      .finally(() => setRemoteBusy(false))
+                  }}>重新產生配對</button>
+                  <button type="button" className="secondary" disabled={remoteBusy} onClick={() => {
+                    setRemoteBusy(true)
+                    void window.grokApi.remoteDisable()
+                      .then((state) => {
+                        setRemoteState(state)
+                        setRemoteControlActive(false)
+                        setNotice('已關閉遠端遙控')
+                      })
+                      .catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+                      .finally(() => setRemoteBusy(false))
+                  }}>切斷遙控</button>
+                </div>
+              </>
+            )}
+          </div>
         </aside>
       )}
     </div>

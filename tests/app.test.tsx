@@ -46,7 +46,13 @@ const createApiMock = (): GrokBridgeApi => ({
   previewChooseFile: vi.fn().mockResolvedValue(null),
   revealPath: vi.fn().mockResolvedValue(true),
   openPath: vi.fn().mockResolvedValue(''),
-  onEvent: vi.fn().mockReturnValue(() => {}), onPermission: vi.fn().mockReturnValue(() => {}), onStatus: vi.fn().mockReturnValue(() => {})
+  onEvent: vi.fn().mockReturnValue(() => {}), onPermission: vi.fn().mockReturnValue(() => {}), onStatus: vi.fn().mockReturnValue(() => {}),
+  remoteGetState: vi.fn().mockResolvedValue({ enabled: false, banner: 'off', pin: null, pairingSecret: null, expiresAt: null, publicBaseUrl: null, allowPhonePermissions: false, experimentalTunnel: false }),
+  remoteEnable: vi.fn().mockResolvedValue({ enabled: true, banner: 'pairable', pin: '123456', pairingSecret: 'sec', expiresAt: Date.now() + 60_000, publicBaseUrl: 'http://127.0.0.1:9', allowPhonePermissions: false, experimentalTunnel: false }),
+  remoteDisable: vi.fn().mockResolvedValue({ enabled: false, banner: 'off', pin: null, pairingSecret: null, expiresAt: null, publicBaseUrl: null, allowPhonePermissions: false, experimentalTunnel: false }),
+  remoteRegeneratePairing: vi.fn().mockResolvedValue({ enabled: true, banner: 'pairable', pin: '654321', pairingSecret: 'sec2', expiresAt: Date.now() + 60_000, publicBaseUrl: 'http://127.0.0.1:9', allowPhonePermissions: false, experimentalTunnel: false }),
+  remoteSetFocus: vi.fn().mockResolvedValue(true),
+  onRemoteState: vi.fn().mockReturnValue(() => {})
 } as unknown as GrokBridgeApi)
 
 describe('App', () => {

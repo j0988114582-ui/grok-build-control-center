@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Grok Build 遙控</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <main id="app" class="app">
+    <header>
+      <h1>Grok Build 遙控</h1>
+      <p id="banner" class="banner">連線中…</p>
+    </header>
+    <section id="pair-panel" class="card hidden">
+      <h2>配對</h2>
+      <p>請輸入桌面顯示的 PIN（配對密鑰已由 QR 帶入，不會出現在網址列）。</p>
+      <label>PIN <input id="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="8" /></label>
+      <button id="pair-btn" type="button">配對</button>
+      <p id="pair-error" class="error" role="alert"></p>
+    </section>
+    <section id="main-panel" class="card hidden">
+      <div class="status-row">
+        <span id="focus-label">焦點對話：—</span>
+        <span id="running-label"></span>
+      </div>
+      <div id="permissions" class="permissions"></div>
+      <div id="tail" class="tail" aria-live="polite"></div>
+      <label class="prompt-label">提示
+        <textarea id="prompt" rows="3" maxlength="4000" placeholder="傳送給目前焦點對話…"></textarea>
+      </label>
+      <div class="actions">
+        <button id="send-btn" type="button">送出</button>
+        <button id="cancel-btn" type="button" class="danger">停止</button>
+        <button id="logout-btn" type="button" class="ghost">切斷</button>
+      </div>
+      <p id="main-error" class="error" role="alert"></p>
+      <p id="notices" class="notices"></p>
+    </section>
+    <footer class="privacy">
+      <p>流量經 Cloudflare 等隧道供應商時，供應商在邊緣終止 TLS，技術上可處理 HTTP 內容（提示、權限摘要、對話片段）。用完請切斷，勿分享 QR 螢幕。</p>
+    </footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

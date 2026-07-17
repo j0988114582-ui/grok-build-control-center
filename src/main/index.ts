@@ -9,8 +9,11 @@ import { GrokAcpClient } from './acp-client'
 import { BillingCache } from './billing-cache'
 import { AcpConnectionState, reportAsyncError } from './acp-connection-state'
 import { parseGrokVersion } from './grok-cli'
-import type { AgentPermissionMode } from '../shared/types'
+import type { AgentPermissionMode, AppSettings, CliStatus, PromptBlock } from '../shared/types'
 import { canEnableYolo, YOLO_BLOCKED_BY_REMOTE } from '../shared/remote-yolo-mutex'
+import { RemoteController } from './remote-controller'
+import { defaultRemoteWebRoot, RemoteServer } from './remote-server'
+import { RemoteTunnelManager } from './remote-tunnel'
 import {
   createGrokInstallerEnvironment,
   installGrokCli,
@@ -31,7 +34,6 @@ import {
   preparePasteImagePayload,
   selectPasteFilesToDelete
 } from '../shared/paste-image'
-import type { AppSettings, CliStatus, PromptBlock } from '../shared/types'
 import { assertRevealAllowed, ExportPathAllowlist } from '../shared/export-reveal'
 import { SessionReadyGate } from './session-ready-gate'
 import {
@@ -90,19 +92,39 @@ const acpConnection = new AcpConnectionState<GrokAcpClient>()
 let connectedExecutable = ''
 /** Always resets to `ask` when the process starts (not persisted). */
 let agentPermissionMode: AgentPermissionMode = 'ask'
-/**
- * Remote control active (wave 5 remote-controller sets this).
- * Main-process authority for YOLO ↔ Remote mutex (R-SEC-14b).
- */
-let remoteControlActive = false
-export function setRemoteControlActive(active: boolean): void {
-  remoteControlActive = active
-}
-export function isRemoteControlActive(): boolean {
-  return remoteControlActive
-}
 const billingCache = new BillingCache<unknown>()
 const lifecycleOperation = new SingleLifecycleOperation()
+
+const remoteController = new RemoteController({
+  getPermissionMode: () => agentPermissionMode,
+  listSessions: () => listLocalSessions(grokHome()),
+  isSessionReady: (sessionId) => sessionReadyGate.isReady(sessionId),
+  prompt: async (sessionId, text) => {
+    sessionReadyGate.assertReady(sessionId)
+    const blocks: PromptBlock[] = [{ type: 'text', text }]
+    await (await connectAcp()).prompt(sessionId, blocks)
+  },
+  cancel: async (sessionId) => {
+    sessionReadyGate.assertReady(sessionId)
+    await (await connectAcp()).cancel(sessionId)
+  },
+  respondPermission: (requestId, optionId) => {
+    acpConnection.current?.respondPermission(requestId, optionId)
+  },
+  onStateChange: () => {
+    send('remote:state', remoteController.getDesktopPairingView())
+  }
+})
+let remoteServer: RemoteServer | null = null
+let remoteTunnel = new RemoteTunnelManager()
+let remoteAllowedHosts: string[] = []
+
+export function setRemoteControlActive(active: boolean): void {
+  if (!active) remoteController.disable()
+}
+export function isRemoteControlActive(): boolean {
+  return remoteController.isEnabled()
+}
 
 const settings = (): AppSettings => normalizeSettings(settingsStore.store, homedir())
 const grokHome = (): string => process.env.GROK_HOME?.trim() || path.join(homedir(), '.grok')
@@ -121,6 +143,16 @@ const executeLifecycleFile: ExecuteFile = async (executable, args, options) => {
 const sessionReadyGate = new SessionReadyGate()
 const previewRoots = new PreviewRootTracker()
 const previewAllowlist = new PreviewMediaAllowlist()
+
+async function stopRemoteSubsystem(): Promise<void> {
+  remoteController.disable()
+  await remoteTunnel.stop()
+  if (remoteServer) {
+    await remoteServer.stop()
+    remoteServer = null
+  }
+  remoteAllowedHosts = []
+}
 
 function disconnectAcp(): void {
   const current = acpConnection.current
@@ -170,8 +202,14 @@ async function connectAcp(): Promise<GrokAcpClient> {
   const generation = acpConnection.begin()
   void previous?.stop()
   const client = new GrokAcpClient(executable, {
-    onEvent: (event) => send('grok:event', event),
-    onPermission: (request) => send('grok:permission-request', request),
+    onEvent: (event) => {
+      remoteController.pushEvent(event)
+      send('grok:event', event)
+    },
+    onPermission: (request) => {
+      remoteController.onPermissionRequest(request)
+      send('grok:permission-request', request)
+    },
     onStderr: (text) => send('grok:status-update', { stderr: text.trim().slice(0, 500) }),
     onExit: (message) => {
       if (!acpConnection.release(client)) return
@@ -315,10 +353,11 @@ function registerIpc(): void {
     if (mode !== 'ask' && mode !== 'always-approve') throw new Error('Invalid permission mode')
     if (agentPermissionMode === mode) return agentPermissionMode
     if (mode === 'always-approve') {
-      const yoloGate = canEnableYolo(remoteControlActive)
+      const yoloGate = canEnableYolo(remoteController.isEnabled())
       if (!yoloGate.ok) throw new Error(yoloGate.reason || YOLO_BLOCKED_BY_REMOTE)
     }
     agentPermissionMode = mode
+    remoteController.onPermissionModeChanged(mode)
     const wasConnected = acpConnection.current !== null || acpConnecting !== null
     disconnectAcp()
     send('grok:status-update', {
@@ -464,6 +503,92 @@ function registerIpc(): void {
     previewRoots.addDialogPath(file)
     return file
   })
+
+  // ── Remote control (loopback + optional experimental Quick Tunnel) ──
+  ipcMain.handle('remote:get-state', () => remoteController.getDesktopPairingView())
+  ipcMain.handle('remote:set-focus', (_event, sessionId: unknown) => {
+    remoteController.setFocusSession(typeof sessionId === 'string' ? sessionId : null)
+    return true
+  })
+  ipcMain.handle('remote:enable', async (_event, options?: { allowPhonePermissions?: boolean; useQuickTunnel?: boolean }) => {
+    const gate = remoteController.enable({
+      allowPhonePermissions: options?.allowPhonePermissions === true,
+      experimentalTunnel: options?.useQuickTunnel === true
+    })
+    if (!gate.ok) throw new Error(gate.reason)
+    try {
+      if (remoteServer) await remoteServer.stop()
+      remoteServer = new RemoteServer({
+        controller: remoteController,
+        getAllowedHosts: () => remoteAllowedHosts,
+        webRoot: defaultRemoteWebRoot(),
+        // Secure cookies for HTTPS tunnels; loopback HTTP keeps Secure off so browser accepts cookie.
+        cookieSecure: () => Boolean(remoteController.getPublicBaseUrl()?.startsWith('https://'))
+      })
+      const { port, healthNonce } = await remoteServer.start()
+      remoteAllowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`]
+      remoteController.setBanner('starting')
+
+      if (options?.useQuickTunnel) {
+        // Experimental: require cloudflared on PATH or known locations — no auto-download in 0.8.0 without checksum pin ship.
+        const candidates = [
+          path.join(homedir(), '.cloudflared', 'cloudflared.exe'),
+          path.join(homedir(), '.grok', 'bin', 'cloudflared.exe'),
+          'cloudflared'
+        ]
+        let started: { ok: true; url: string } | { ok: false; reason: string } = { ok: false, reason: '未找到 cloudflared' }
+        for (const candidate of candidates) {
+          const result = await remoteTunnel.startQuickTunnel({ cloudflaredPath: candidate, port })
+          if (result.ok) {
+            started = result
+            break
+          }
+          started = result
+        }
+        if (!started.ok) {
+          remoteController.setBanner('tunnel_failed')
+          throw new Error(`Quick Tunnel 啟動失敗（實驗性）：${started.reason}`)
+        }
+        // Nonce health proof through public URL
+        try {
+          const healthUrl = `${started.url}/api/health?nonce=${encodeURIComponent(healthNonce)}`
+          const res = await fetch(healthUrl, { signal: AbortSignal.timeout(12_000) })
+          const json = await res.json() as { ok?: boolean; nonce?: string }
+          if (!res.ok || json.nonce !== healthNonce) throw new Error('隧道 health 驗證失敗')
+          try {
+            const host = new URL(started.url).host
+            remoteAllowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`, host]
+          } catch { /* keep loopback */ }
+          remoteController.setPublicBaseUrl(started.url)
+          remoteController.setBanner('url_verified')
+        } catch (error) {
+          await remoteTunnel.stop()
+          remoteController.setBanner('tunnel_failed')
+          throw new Error(error instanceof Error ? error.message : String(error))
+        }
+      } else {
+        remoteController.setPublicBaseUrl(`http://127.0.0.1:${port}`)
+        remoteController.setBanner('url_verified')
+      }
+
+      const pairing = remoteController.regeneratePairing()
+      if (!pairing) throw new Error('無法產生配對')
+      remoteController.setBanner('pairable')
+      return remoteController.getDesktopPairingView()
+    } catch (error) {
+      await stopRemoteSubsystem()
+      throw error
+    }
+  })
+  ipcMain.handle('remote:disable', async () => {
+    await stopRemoteSubsystem()
+    return remoteController.getDesktopPairingView()
+  })
+  ipcMain.handle('remote:regenerate-pairing', () => {
+    const pairing = remoteController.regeneratePairing()
+    if (!pairing) throw new Error('遠端未啟用或無法產生配對')
+    return remoteController.getDesktopPairingView()
+  })
   ipcMain.handle('shell:reveal-path', async (_event, filePath: unknown) => {
     if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('無效的檔案路徑')
     if (!isAbsoluteLocalPath(filePath) && rejectUnsafePreviewPath(filePath)) {
@@ -513,9 +638,12 @@ app.on('before-quit', (event) => {
   if (isQuitting) return
   event.preventDefault()
   isQuitting = true
-  void stopAllAcpClients().finally(() => {
-    app.quit()
-  })
+  void stopRemoteSubsystem()
+    .catch(() => undefined)
+    .then(() => stopAllAcpClients())
+    .finally(() => {
+      app.quit()
+    })
 })
 
 app.on('window-all-closed', () => {

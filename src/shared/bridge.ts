@@ -74,4 +74,22 @@ export interface GrokBridgeApi {
   onEvent(callback: (event: UiSessionEvent) => void): () => void
   onPermission(callback: (request: PermissionRequest) => void): () => void
   onStatus(callback: (status: CliStatusUpdate) => void): () => void
+  /** Remote control (default off). */
+  remoteGetState(): Promise<RemoteDesktopState>
+  remoteEnable(options?: { allowPhonePermissions?: boolean; useQuickTunnel?: boolean }): Promise<RemoteDesktopState>
+  remoteDisable(): Promise<RemoteDesktopState>
+  remoteRegeneratePairing(): Promise<RemoteDesktopState>
+  remoteSetFocus(sessionId: string | null): Promise<boolean>
+  onRemoteState(callback: (state: RemoteDesktopState) => void): () => void
+}
+
+export type RemoteDesktopState = {
+  enabled: boolean
+  banner: string
+  pin: string | null
+  pairingSecret: string | null
+  expiresAt: number | null
+  publicBaseUrl: string | null
+  allowPhonePermissions: boolean
+  experimentalTunnel: boolean
 }

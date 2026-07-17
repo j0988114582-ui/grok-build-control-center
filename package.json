@@ -71,6 +71,7 @@
     "asar": true,
     "files": [
       "out/**/*",
+      "resources/remote-web/**/*",
       "package.json",
       "LICENSE",
       "PRIVACY.md",
