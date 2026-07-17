@@ -284,34 +284,28 @@ export class RemoteController {
     return { ok: true, sessionToken: result.value.sessionToken }
   }
 
-  /** E2: main-owned focus + load */
+  /** E2: main-owned focus + load — only commit focus after session is known valid. */
   async handleFocus(sessionId: string): Promise<HandlerResult> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
-    // Bump generation BEFORE any await so concurrent/stale focus cannot overwrite later.
+    // Bump BEFORE await so concurrent focus requests supersede in-flight work.
     const gen = ++this.loadGeneration
-    this.focusSessionId = sessionId
-    this.focusError = undefined
-    this.focusStatus = 'loading'
-    this.deps.onFocusChanged?.(sessionId)
-    this.emit()
 
     await this.refreshSessions()
-    if (gen !== this.loadGeneration || this.focusSessionId !== sessionId) {
+    if (gen !== this.loadGeneration) {
       return { ok: false, code: 'not_ready', message: '焦點已變更' }
     }
     if (!this.sessionsListFresh) {
-      this.focusStatus = 'error'
-      this.focusError = '無法刷新 session 列表，拒絕切換焦點'
-      this.emit()
-      return { ok: false, code: 'not_ready', message: this.focusError }
+      return { ok: false, code: 'not_ready', message: '無法刷新 session 列表，拒絕切換焦點' }
     }
     const summary = this.lastSessions.find((item) => item.id === sessionId)
     if (!summary) {
-      this.focusStatus = 'error'
-      this.focusError = '找不到該對話'
-      this.emit()
-      return { ok: false, code: 'not_found', message: this.focusError }
+      return { ok: false, code: 'not_found', message: '找不到該對話' }
     }
+
+    // Commit focus only after validation (rejected requests never replace authoritative focus)
+    this.focusSessionId = sessionId
+    this.focusError = undefined
+    this.deps.onFocusChanged?.(sessionId)
 
     if (this.deps.isSessionReady(sessionId)) {
       if (gen !== this.loadGeneration) return { ok: false, code: 'not_ready', message: '焦點已變更' }
@@ -321,7 +315,9 @@ export class RemoteController {
     }
 
     if (!this.deps.loadSession) {
-      if (gen === this.loadGeneration && this.focusSessionId === sessionId) {
+      // Roll back focus if we cannot load — keep previous only if gen still ours is complex;
+      // leave focus on requested id with error so UI can show failure without acting on it.
+      if (gen === this.loadGeneration) {
         this.focusStatus = 'error'
         this.focusError = '載入對話能力未就緒'
         this.emit()
@@ -387,8 +383,8 @@ export class RemoteController {
       const key = normalizeCwdKey(session.cwd)
       if (!key) continue
       if (!set.has(key)) {
-        const display = path.normalize(session.cwd.trim())
-        set.set(key, display.replace(/[\\/]+$/, '') || display)
+        // Prefer canonical key shape for equality (drive roots stay `c:\`)
+        set.set(key, key)
       }
     }
     return [...set.values()].sort((a, b) => a.localeCompare(b))
@@ -531,6 +527,9 @@ export class RemoteController {
   async handleInterject(text: string): Promise<HandlerResult> {
     const sessionId = this.focusSessionId
     if (!sessionId) return { ok: false, code: 'not_ready', message: '尚未選定對話' }
+    if (this.focusStatus !== 'ready' || !this.deps.isSessionReady(sessionId)) {
+      return { ok: false, code: 'not_ready', message: '對話尚未就緒' }
+    }
     if (!this.runningBySession.get(sessionId)) return { ok: false, code: 'invalid_request', message: '僅執行中可插話' }
     if (!this.deps.interject) return { ok: false, code: 'not_ready', message: '插話能力未就緒' }
     const trimmed = text.trim()
@@ -552,6 +551,9 @@ export class RemoteController {
   async handleDoNow(text: string): Promise<HandlerResult> {
     const sessionId = this.focusSessionId
     if (!sessionId) return { ok: false, code: 'not_ready', message: '尚未選定對話' }
+    if (this.focusStatus !== 'ready' || !this.deps.isSessionReady(sessionId)) {
+      return { ok: false, code: 'not_ready', message: '對話尚未就緒' }
+    }
     const trimmed = text.trim()
     if (!trimmed) return { ok: false, code: 'invalid_request', message: '提示不可為空' }
     const running = this.runningBySession.get(sessionId) === true || this.inFlightPrompt.has(sessionId)
@@ -576,6 +578,9 @@ export class RemoteController {
   handleQueue(text: string, source: 'mobile-remote' | 'desktop' = 'mobile-remote'): HandlerResult {
     const sessionId = this.focusSessionId
     if (!sessionId) return { ok: false, code: 'not_ready', message: '尚未選定對話' }
+    if (this.focusStatus === 'loading' || this.focusStatus === 'error' || !this.deps.isSessionReady(sessionId)) {
+      return { ok: false, code: 'not_ready', message: '對話載入中或未就緒，無法排隊' }
+    }
     const trimmed = text.trim()
     if (!trimmed) return { ok: false, code: 'invalid_request', message: '排隊內容不可為空' }
     this.queue = { sessionId, text: trimmed, source }
