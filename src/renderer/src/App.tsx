@@ -108,6 +108,12 @@ import {
   type PathChip
 } from '../../shared/drop-paths'
 import { fitMainComposer } from '../../shared/composer-autogrow'
+import {
+  cwdDisplayName,
+  filterSessionsByCwd,
+  listSessionCwds,
+  suggestedCleanupSessions
+} from '../../shared/session-hygiene'
 import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock,
   SessionSummary, SessionUsage, UiSessionEvent
@@ -340,6 +346,9 @@ export function App(): React.JSX.Element {
   localQueueRef.current = localQueue
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  /** P-FOLDER: full-cwd filter (`all` = every project). */
+  const [folderFilter, setFolderFilter] = useState<string | 'all'>('all')
+  const [showCleanupSuggestions, setShowCleanupSuggestions] = useState(false)
   /** Agents Team: multi-session side-by-side (opt-in). */
   const [teamEnabled, setTeamEnabled] = useState(false)
   const [team, setTeam] = useState<AgentsTeamState>(() => emptyAgentsTeam())
@@ -728,14 +737,25 @@ export function App(): React.JSX.Element {
     return buildSessionSearchIndex(sessions, { titleOverrides: settings.sessionTitles, drafts })
   }, [sessions, settings.sessionTitles, drafts])
 
-  const filteredSessions = useMemo(() => {
+  const searchFilteredSessions = useMemo(() => {
     return filterSessionsBySearch(sessions, sessionSearchIndex, sessionQuery)
   }, [sessions, sessionSearchIndex, sessionQuery])
+  const folderOptions = useMemo(() => listSessionCwds(sessions), [sessions])
+  const filteredSessions = useMemo(
+    () => filterSessionsByCwd(searchFilteredSessions, folderFilter),
+    [searchFilteredSessions, folderFilter]
+  )
   const { pinned, unpinned } = useMemo(
     () => partitionPinnedSessions(filteredSessions, settings.pinnedSessions),
     [filteredSessions, settings.pinnedSessions]
   )
   const sessionGroups = useMemo(() => groupSessionsByProject(unpinned), [unpinned])
+  const cleanupCandidates = useMemo(() => suggestedCleanupSessions(sessions, {
+    nowMs: Date.now(),
+    pinnedIds: settings.pinnedSessions,
+    activeSessionId: active?.id,
+    teamSessionIds: team.slots
+  }), [sessions, settings.pinnedSessions, active?.id, team.slots])
   const selectedCount = selectedIds.size
   const selectedSessions = useMemo(() => sessions.filter((session) => selectedIds.has(session.id)), [sessions, selectedIds])
   const showTeamBoard = teamEnabled && team.slots.length >= 2
@@ -1908,21 +1928,91 @@ export function App(): React.JSX.Element {
           />
         </div>
         <label className="searchbox"><Search /><input ref={sessionSearchRef} placeholder={`搜尋 sessions  ${shortcutFor('searchSessions').replaceAll('+', ' ')}`} value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} /></label>
-        <div className="session-caption"><span>{teamEnabled ? 'AGENTS · SESSIONS' : 'RECENT SESSIONS'}</span><em>{filteredSessions.length}</em></div>
+        <label className="folder-filter" data-testid="folder-filter">
+          <span>資料夾</span>
+          <select
+            aria-label="依完整專案路徑篩選"
+            value={folderFilter}
+            onChange={(event) => setFolderFilter(event.target.value as string | 'all')}
+          >
+            <option value="all">全部資料夾（{sessions.length}）</option>
+            {folderOptions.map((cwd) => (
+              <option key={cwd} value={cwd} title={cwd}>
+                {cwdDisplayName(cwd)} — {cwd}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="session-caption">
+          <span>{teamEnabled ? 'AGENTS · SESSIONS' : 'RECENT SESSIONS'}</span>
+          <em>{filteredSessions.length}{folderFilter !== 'all' ? ' · 已篩選' : ''}</em>
+        </div>
         <div className="sidebar-select-bar">
-          {!selectMode && <button onClick={() => setSelectMode(true)}>多選</button>}
+          {!selectMode && <button type="button" className="multi-select-entry" data-testid="multi-select-entry" onClick={() => setSelectMode(true)} title="可跨資料夾勾選後批次刪除">多選</button>}
           {selectMode && <>
-            <button onClick={() => { setSelectMode(false); clearSelection() }}>取消</button>
-            <button onClick={() => selectAllVisibleSessions()}>全選可見</button>
-            <button className={selectedCount > 0 ? '' : undefined} onClick={beginBatchDelete} disabled={selectedCount === 0}><span className="danger-text">刪除所選({selectedCount})</span></button>
+            <button type="button" onClick={() => { setSelectMode(false); clearSelection() }}>取消</button>
+            <button type="button" onClick={() => selectAllVisibleSessions()}>全選可見</button>
+            <button type="button" className={selectedCount > 0 ? '' : undefined} onClick={beginBatchDelete} disabled={selectedCount === 0}><span className="danger-text">刪除所選({selectedCount})</span></button>
           </>}
         </div>
+        {cleanupCandidates.length > 0 && (
+          <div className="cleanup-suggest-bar" data-testid="cleanup-suggest-bar">
+            <button
+              type="button"
+              className="cleanup-suggest-button"
+              data-testid="cleanup-suggest-button"
+              aria-expanded={showCleanupSuggestions}
+              onClick={() => setShowCleanupSuggestions((value) => !value)}
+            >
+              建議清理（{cleanupCandidates.length}）
+            </button>
+            {showCleanupSuggestions && (
+              <div className="cleanup-suggest-panel" data-testid="cleanup-suggest-panel">
+                <p>空對話、超過 10 天未活動，或同資料夾過多的較舊項。僅建議、不會自動刪除。可多選後批次刪。</p>
+                <button
+                  type="button"
+                  className="cleanup-select-all"
+                  onClick={() => {
+                    setSelectMode(true)
+                    setSelectedIds(new Set(cleanupCandidates.map((item) => item.id)))
+                  }}
+                >全選建議項</button>
+                <ul>
+                  {cleanupCandidates.slice(0, 40).map((session) => {
+                    const title = sessionDisplayTitle(session, settings.sessionTitles)
+                    const checked = selectedIds.has(session.id)
+                    return (
+                      <li key={session.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => {
+                              setSelectMode(true)
+                              toggleSessionSelection(session.id, event.currentTarget.checked)
+                            }}
+                          />
+                          <span title={`${title}\n${session.cwd}`}>{title}</span>
+                        </label>
+                      </li>
+                    )
+                  })}
+                </ul>
+                {selectedCount > 0 && (
+                  <button type="button" className="cleanup-batch-delete" onClick={beginBatchDelete}>
+                    刪除所選（{selectedCount}）
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <nav className="session-list">
           {pinned.length > 0 && <section className="session-group pinned" key="pinned-group">
             <header><span>已釘選</span><em>{pinned.length}</em></header>
             {pinned.map(renderSessionRow)}
           </section>}
-          {sessionGroups.map((group) => <section className="session-group" key={group.cwd}><header><span>{group.name}</span><em>{group.sessions.length}</em></header>{group.sessions.map(renderSessionRow)}</section>)}
+          {sessionGroups.map((group) => <section className="session-group" key={group.cwd}><header><span title={group.cwd}>{group.name}</span><em>{group.sessions.length}</em></header>{group.sessions.map(renderSessionRow)}</section>)}
         </nav>
         <div className="sidebar-footer"><button onClick={() => setPanel('features')}><Gauge />功能矩陣</button><button onClick={() => setPanel('settings')}><Settings />設定</button></div>
       </aside>
