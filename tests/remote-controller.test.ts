@@ -413,6 +413,80 @@ describe('remote-controller (v0.9 coexistence)', () => {
     expect(snap.tail.length).toBeLessThan(40)
   })
 
+  it('disable then re-enable does not revive pre-disable focus', async () => {
+    let releaseList: () => void
+    const listGate = new Promise<void>((r) => { releaseList = r })
+    const loadSession = vi.fn().mockResolvedValue(undefined)
+    const controller = makeController({
+      listSessions: async () => {
+        await listGate
+        return sessions
+      },
+      isSessionReady: () => true,
+      loadSession
+    })
+    controller.enable()
+    const pending = controller.handleFocus('s1')
+    await new Promise((r) => setTimeout(r, 5))
+    controller.disable()
+    controller.enable()
+    releaseList!()
+    const result = await pending
+    expect(result.ok).toBe(false)
+    expect(controller.getFocusSessionId()).toBeNull()
+    expect(loadSession).not.toHaveBeenCalled()
+  })
+
+  it('later valid focus wins when refreshes resolve out of order', async () => {
+    const both = [
+      { id: 's1', cwd: 'C:\\repo', title: 'A' },
+      { id: 's2', cwd: 'C:\\repo', title: 'B' }
+    ]
+    let armed = false
+    const pendingResolvers: Array<() => void> = []
+    const controller = makeController({
+      listSessions: async () => {
+        if (!armed) return both
+        await new Promise<void>((r) => { pendingResolvers.push(r) })
+        return both
+      },
+      isSessionReady: () => true
+    })
+    controller.enable()
+    await controller.refreshSessions()
+    armed = true
+    const p1 = controller.handleFocus('s1')
+    await new Promise((r) => setTimeout(r, 5))
+    const p2 = controller.handleFocus('s2')
+    await new Promise((r) => setTimeout(r, 5))
+    expect(pendingResolvers.length).toBe(2)
+    // Resolve s2's refresh first, then the older s1 refresh
+    pendingResolvers[1]!()
+    await p2
+    pendingResolvers[0]!()
+    const r1 = await p1
+    expect(r1.ok).toBe(false)
+    expect(controller.getFocusSessionId()).toBe('s2')
+    expect(controller.getSnapshot().focusStatus).toBe('ready')
+  })
+
+  it('create success keeps optimistic session visible in snapshot', async () => {
+    const listed: SessionSummary[] = [{ id: 's1', cwd: 'C:\\repo', title: 'Alpha' }]
+    const controller = makeController({
+      listSessions: () => listed,
+      createSession: async () => ({ sessionId: 's2', cwd: 'C:\\repo' }),
+      isSessionReady: (id) => id === 's2' || id === 's1',
+      loadSession: vi.fn().mockResolvedValue(undefined)
+    })
+    controller.enable()
+    await controller.refreshSessions()
+    const result = await controller.handleCreateSession('C:\\repo')
+    expect(result.ok).toBe(true)
+    const snap = controller.getSnapshot()
+    expect(snap.sessions.some((s) => s.id === 's2')).toBe(true)
+    expect(snap.focusSessionId).toBe('s2')
+  })
+
   it('yolo disable switches to ask without revoking remote', async () => {
     const setPermissionMode = vi.fn().mockResolvedValue('ask')
     let mode: 'ask' | 'always-approve' = 'always-approve'

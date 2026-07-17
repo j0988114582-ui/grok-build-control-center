@@ -96,7 +96,16 @@ export class RemoteController {
   private optimisticSessions = new Map<string, SessionSummary>()
   private queue: RemoteQueuedPrompt | null = null
   private loadGeneration = 0
-  /** Serializes concurrent handleFocus intents (supersede without stranding loads). */
+  /**
+   * Lifecycle epoch: advanced on disable so in-flight ops from a prior enable
+   * cannot commit after disable→re-enable.
+   */
+  private enableEpoch = 0
+  /** Monotonic call-order for handleFocus (assigned at entry, before any await). */
+  private focusIntentSeq = 0
+  /** Highest intent id that successfully validated (last-writer-wins across refresh races). */
+  private latestValidatedFocusIntent = 0
+  /** Reserved / debug counter for committed focus claims. */
   private focusRequestId = 0
 
   constructor(private deps: RemoteControllerDeps) {}
@@ -175,8 +184,11 @@ export class RemoteController {
     this.focusSessionId = null
     this.focusStatus = 'none'
     this.focusError = undefined
+    this.enableEpoch += 1
     this.loadGeneration += 1
     this.focusRequestId += 1
+    // Invalidate any in-flight intent ordering against a future re-enable
+    this.latestValidatedFocusIntent = this.focusIntentSeq
     this.emit()
   }
 
@@ -204,6 +216,8 @@ export class RemoteController {
   /** Desktop/UI may set focus without load (wave 5 UI align). Prefer handleFocus for remote. */
   setFocusSession(sessionId: string | null): void {
     this.loadGeneration += 1 // cancel in-flight handleFocus/restore loads
+    // Any earlier remote focus intent must not overwrite desktop focus after validation
+    this.latestValidatedFocusIntent = this.focusIntentSeq
     this.focusSessionId = sessionId
     this.focusStatus = !sessionId ? 'none' : this.deps.isSessionReady(sessionId) ? 'ready' : 'loading'
     this.focusError = undefined
@@ -299,16 +313,18 @@ export class RemoteController {
 
   /**
    * E2: main-owned focus + load.
-   * Invalid / refresh-failed requests must NOT cancel an in-flight valid load
-   * (they never bump `loadGeneration`). Only a validated, newer focus claims
-   * generation and supersedes. `disable()` also advances generation + clears focus.
+   * - Call-order intent id is assigned at entry (last-writer-wins across out-of-order refresh).
+   * - Invalid / refresh-failed requests never bump `loadGeneration` or latest validated intent.
+   * - `enableEpoch` (advanced on disable) prevents disable→re-enable resurrection.
    */
   async handleFocus(sessionId: string): Promise<HandlerResult> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
 
+    const epoch = this.enableEpoch
+    const intentId = ++this.focusIntentSeq
+
     await this.refreshSessions()
-    // Lifecycle boundary: disable/revoke during refresh must not resurrect focus
-    if (!this.enabled) {
+    if (!this.sameFocusLifecycle(epoch)) {
       return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
     }
     if (!this.sessionsListFresh) {
@@ -317,11 +333,17 @@ export class RemoteController {
     }
     const summary = this.lastSessions.find((item) => item.id === sessionId)
     if (!summary) {
-      // Rejected: leave incumbent focus + loadGeneration untouched
+      // Rejected: leave incumbent focus + loadGeneration + latestValidated untouched
       return { ok: false, code: 'not_found', message: '找不到該對話' }
     }
 
-    // Valid focus claims the slot — supersedes in-flight loads only now
+    // Older valid intent that lost the race to a newer validated focus
+    if (intentId < this.latestValidatedFocusIntent) {
+      return { ok: false, code: 'not_ready', message: '焦點已變更' }
+    }
+    this.latestValidatedFocusIntent = intentId
+
+    // Valid focus claims the load slot — supersedes in-flight loads only now
     const gen = ++this.loadGeneration
     this.focusRequestId += 1
     this.focusSessionId = sessionId
@@ -329,7 +351,7 @@ export class RemoteController {
     this.deps.onFocusChanged?.(sessionId)
 
     if (this.deps.isSessionReady(sessionId)) {
-      if (gen !== this.loadGeneration || !this.enabled) {
+      if (!this.sameFocusLifecycle(epoch) || gen !== this.loadGeneration) {
         return { ok: false, code: 'not_ready', message: '焦點已變更' }
       }
       this.focusStatus = 'ready'
@@ -338,7 +360,7 @@ export class RemoteController {
     }
 
     if (!this.deps.loadSession) {
-      if (gen === this.loadGeneration && this.enabled) {
+      if (this.sameFocusLifecycle(epoch) && gen === this.loadGeneration) {
         this.focusStatus = 'error'
         this.focusError = '載入對話能力未就緒'
         this.emit()
@@ -350,14 +372,14 @@ export class RemoteController {
     this.emit()
     try {
       await this.deps.loadSession(sessionId, summary.cwd)
-      if (gen !== this.loadGeneration || this.focusSessionId !== sessionId || !this.enabled) {
+      if (!this.sameFocusLifecycle(epoch) || gen !== this.loadGeneration || this.focusSessionId !== sessionId) {
         return { ok: false, code: 'not_ready', message: '焦點已變更' }
       }
       this.focusStatus = this.deps.isSessionReady(sessionId) ? 'ready' : 'loading'
       this.emit()
       return { ok: true, sessionId }
     } catch (error) {
-      if (gen === this.loadGeneration && this.focusSessionId === sessionId && this.enabled) {
+      if (this.sameFocusLifecycle(epoch) && gen === this.loadGeneration && this.focusSessionId === sessionId) {
         this.focusStatus = 'error'
         this.focusError = error instanceof Error ? error.message : String(error)
         this.emit()
@@ -366,19 +388,24 @@ export class RemoteController {
     }
   }
 
+  private sameFocusLifecycle(epoch: number): boolean {
+    return this.enabled && this.enableEpoch === epoch
+  }
+
   /** After ACP reconnect (e.g. YOLO), main reloads focus session. */
   async restoreFocusAfterReconnect(): Promise<void> {
     const id = this.focusSessionId
     if (!id || !this.enabled) return
+    const epoch = this.enableEpoch
     const gen = ++this.loadGeneration
     this.focusStatus = 'loading'
     this.focusError = undefined
     this.emit()
     await this.refreshSessions()
-    if (!this.enabled || gen !== this.loadGeneration || this.focusSessionId !== id) return
+    if (!this.sameFocusLifecycle(epoch) || gen !== this.loadGeneration || this.focusSessionId !== id) return
     const summary = this.lastSessions.find((item) => item.id === id)
     if (!summary || !this.deps.loadSession) {
-      if (this.enabled && this.focusSessionId === id && gen === this.loadGeneration) {
+      if (this.sameFocusLifecycle(epoch) && this.focusSessionId === id && gen === this.loadGeneration) {
         this.focusStatus = 'error'
         this.focusError = '重連後無法恢復焦點對話'
         this.emit()
@@ -387,11 +414,11 @@ export class RemoteController {
     }
     try {
       await this.deps.loadSession(id, summary.cwd)
-      if (!this.enabled || gen !== this.loadGeneration || this.focusSessionId !== id) return
+      if (!this.sameFocusLifecycle(epoch) || gen !== this.loadGeneration || this.focusSessionId !== id) return
       this.focusStatus = this.deps.isSessionReady(id) ? 'ready' : 'loading'
       this.focusError = undefined
     } catch (error) {
-      if (this.enabled && this.focusSessionId === id && gen === this.loadGeneration) {
+      if (this.sameFocusLifecycle(epoch) && this.focusSessionId === id && gen === this.loadGeneration) {
         this.focusStatus = 'error'
         this.focusError = error instanceof Error ? error.message : String(error)
       }
@@ -724,18 +751,26 @@ export class RemoteController {
   }
 
   getSnapshot(): RemoteSnapshot {
-    let list = this.lastSessions
     try {
       const maybe = this.deps.listSessions()
       if (Array.isArray(maybe)) {
-        list = maybe
+        for (const row of maybe) this.optimisticSessions.delete(row.id)
         this.lastSessions = maybe
+        this.mergeOptimisticIntoLastSessions()
       } else {
-        void maybe.then((rows) => { this.lastSessions = rows }).catch(() => undefined)
+        void maybe
+          .then((rows) => {
+            for (const row of rows) this.optimisticSessions.delete(row.id)
+            this.lastSessions = rows
+            this.mergeOptimisticIntoLastSessions()
+          })
+          .catch(() => undefined)
       }
     } catch {
-      /* keep last */
+      /* keep last (still merge optimistics below) */
+      this.mergeOptimisticIntoLastSessions()
     }
+    const list = this.lastSessions
     const sessions = list.map((session): RemoteSessionListItem => ({
       id: session.id,
       title: session.title,
