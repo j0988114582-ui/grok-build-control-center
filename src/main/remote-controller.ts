@@ -2,7 +2,7 @@ import path from 'node:path'
 import type { AgentPermissionMode, PermissionRequest, SessionSummary, UiSessionEvent } from '../shared/types'
 import {
   REMOTE_PROMPT_MAX_CHARS,
-  REMOTE_TAIL_MAX_CHARS,
+  REMOTE_TAIL_MAX_BYTES,
   REMOTE_TAIL_MAX_ITEMS,
   type RemoteBannerState,
   type RemoteFocusStatus,
@@ -92,6 +92,8 @@ export class RemoteController {
   private experimentalTunnel = false
   private lastSessions: SessionSummary[] = []
   private sessionsListFresh = false
+  /** Create results not yet visible on disk — merged into list until index catches up. */
+  private optimisticSessions = new Map<string, SessionSummary>()
   private queue: RemoteQueuedPrompt | null = null
   private loadGeneration = 0
   /** Serializes concurrent handleFocus intents (supersede without stranding loads). */
@@ -169,6 +171,7 @@ export class RemoteController {
     this.pending.clear()
     this.inFlightPrompt.clear()
     this.queue = null
+    this.optimisticSessions.clear()
     this.focusSessionId = null
     this.focusStatus = 'none'
     this.focusError = undefined
@@ -248,10 +251,16 @@ export class RemoteController {
     const list = this.tails.get(event.sessionId) ?? []
     list.push(item)
     while (list.length > REMOTE_TAIL_MAX_ITEMS) list.shift()
-    let total = list.reduce((sum, row) => sum + row.text.length, 0)
-    while (list.length > 1 && total > REMOTE_TAIL_MAX_CHARS) {
+    // T1: enforce UTF-8 byte budget (not JS UTF-16 char length)
+    let total = list.reduce((sum, row) => sum + remoteTranscriptItemBytes(row), 0)
+    while (list.length > 1 && total > REMOTE_TAIL_MAX_BYTES) {
       const removed = list.shift()
-      total -= removed?.text.length ?? 0
+      total -= removed ? remoteTranscriptItemBytes(removed) : 0
+    }
+    // Single oversize item: hard-trim text to fit budget
+    if (list.length === 1 && total > REMOTE_TAIL_MAX_BYTES) {
+      const only = list[0]!
+      only.text = trimUtf8ToBytes(only.text, Math.max(0, REMOTE_TAIL_MAX_BYTES - remoteTranscriptItemBytes({ ...only, text: '' })))
     }
     this.tails.set(event.sessionId, list)
     if (event.kind === 'turn') {
@@ -288,40 +297,48 @@ export class RemoteController {
     return { ok: true, sessionToken: result.value.sessionToken }
   }
 
-  /** E2: main-owned focus + load — only commit focus after session is known valid. */
+  /**
+   * E2: main-owned focus + load.
+   * Invalid / refresh-failed requests must NOT cancel an in-flight valid load
+   * (they never bump `loadGeneration`). Only a validated, newer focus claims
+   * generation and supersedes. `disable()` also advances generation + clears focus.
+   */
   async handleFocus(sessionId: string): Promise<HandlerResult> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
-    // Bump BEFORE await so concurrent focus requests supersede in-flight work.
-    const gen = ++this.loadGeneration
 
     await this.refreshSessions()
-    if (gen !== this.loadGeneration) {
-      return { ok: false, code: 'not_ready', message: '焦點已變更' }
+    // Lifecycle boundary: disable/revoke during refresh must not resurrect focus
+    if (!this.enabled) {
+      return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
     }
     if (!this.sessionsListFresh) {
+      // Fail closed without canceling an incumbent valid load
       return { ok: false, code: 'not_ready', message: '無法刷新 session 列表，拒絕切換焦點' }
     }
     const summary = this.lastSessions.find((item) => item.id === sessionId)
     if (!summary) {
+      // Rejected: leave incumbent focus + loadGeneration untouched
       return { ok: false, code: 'not_found', message: '找不到該對話' }
     }
 
-    // Commit focus only after validation (rejected requests never replace authoritative focus)
+    // Valid focus claims the slot — supersedes in-flight loads only now
+    const gen = ++this.loadGeneration
+    this.focusRequestId += 1
     this.focusSessionId = sessionId
     this.focusError = undefined
     this.deps.onFocusChanged?.(sessionId)
 
     if (this.deps.isSessionReady(sessionId)) {
-      if (gen !== this.loadGeneration) return { ok: false, code: 'not_ready', message: '焦點已變更' }
+      if (gen !== this.loadGeneration || !this.enabled) {
+        return { ok: false, code: 'not_ready', message: '焦點已變更' }
+      }
       this.focusStatus = 'ready'
       this.emit()
       return { ok: true, sessionId }
     }
 
     if (!this.deps.loadSession) {
-      // Roll back focus if we cannot load — keep previous only if gen still ours is complex;
-      // leave focus on requested id with error so UI can show failure without acting on it.
-      if (gen === this.loadGeneration) {
+      if (gen === this.loadGeneration && this.enabled) {
         this.focusStatus = 'error'
         this.focusError = '載入對話能力未就緒'
         this.emit()
@@ -333,14 +350,14 @@ export class RemoteController {
     this.emit()
     try {
       await this.deps.loadSession(sessionId, summary.cwd)
-      if (gen !== this.loadGeneration || this.focusSessionId !== sessionId) {
+      if (gen !== this.loadGeneration || this.focusSessionId !== sessionId || !this.enabled) {
         return { ok: false, code: 'not_ready', message: '焦點已變更' }
       }
       this.focusStatus = this.deps.isSessionReady(sessionId) ? 'ready' : 'loading'
       this.emit()
       return { ok: true, sessionId }
     } catch (error) {
-      if (gen === this.loadGeneration && this.focusSessionId === sessionId) {
+      if (gen === this.loadGeneration && this.focusSessionId === sessionId && this.enabled) {
         this.focusStatus = 'error'
         this.focusError = error instanceof Error ? error.message : String(error)
         this.emit()
@@ -355,12 +372,13 @@ export class RemoteController {
     if (!id || !this.enabled) return
     const gen = ++this.loadGeneration
     this.focusStatus = 'loading'
+    this.focusError = undefined
     this.emit()
     await this.refreshSessions()
-    if (gen !== this.loadGeneration || this.focusSessionId !== id) return
+    if (!this.enabled || gen !== this.loadGeneration || this.focusSessionId !== id) return
     const summary = this.lastSessions.find((item) => item.id === id)
     if (!summary || !this.deps.loadSession) {
-      if (this.focusSessionId === id) {
+      if (this.enabled && this.focusSessionId === id && gen === this.loadGeneration) {
         this.focusStatus = 'error'
         this.focusError = '重連後無法恢復焦點對話'
         this.emit()
@@ -369,10 +387,11 @@ export class RemoteController {
     }
     try {
       await this.deps.loadSession(id, summary.cwd)
-      if (gen !== this.loadGeneration || this.focusSessionId !== id) return
+      if (!this.enabled || gen !== this.loadGeneration || this.focusSessionId !== id) return
       this.focusStatus = this.deps.isSessionReady(id) ? 'ready' : 'loading'
+      this.focusError = undefined
     } catch (error) {
-      if (this.focusSessionId === id && gen === this.loadGeneration) {
+      if (this.enabled && this.focusSessionId === id && gen === this.loadGeneration) {
         this.focusStatus = 'error'
         this.focusError = error instanceof Error ? error.message : String(error)
       }
@@ -404,7 +423,7 @@ export class RemoteController {
 
   async handleCreateSession(cwd: string): Promise<HandlerResult> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
-    const refreshed = await this.refreshSessions()
+    await this.refreshSessions()
     if (!this.sessionsListFresh) {
       return { ok: false, code: 'not_ready', message: '無法刷新 session 列表，拒絕建立（fail-closed）' }
     }
@@ -416,25 +435,19 @@ export class RemoteController {
     }
     try {
       const created = await this.deps.createSession(path.normalize(cwd.trim()))
-      // Optimistically index so delayed disk listing cannot fail-closed a successful create
+      // Authoritative create result — keep until disk index catches up (E4)
       const optimistic: SessionSummary = {
         id: created.sessionId,
         cwd: created.cwd || path.normalize(cwd.trim()),
         title: created.sessionId
       }
-      if (!this.lastSessions.some((s) => s.id === created.sessionId)) {
-        this.lastSessions = [optimistic, ...this.lastSessions]
-      }
+      this.optimisticSessions.set(created.sessionId, optimistic)
+      this.mergeOptimisticIntoLastSessions()
       this.sessionsListFresh = true
       await this.refreshSessions()
-      // Ensure created session remains visible even if refresh is partial
-      if (!this.lastSessions.some((s) => s.id === created.sessionId)) {
-        this.lastSessions = [optimistic, ...this.lastSessions]
-        this.sessionsListFresh = true
-      }
       const focused = await this.handleFocus(created.sessionId)
       if (!focused.ok) {
-        // Session exists; report partial success with sessionId so client can retry focus
+        // Session exists; report success with sessionId so client can retry focus
         this.notices = [`對話已建立（${created.sessionId.slice(0, 8)}…）但焦點未就緒，請再點選`]
         this.emit()
         return { ok: true, sessionId: created.sessionId }
@@ -444,8 +457,6 @@ export class RemoteController {
       return { ok: true, sessionId: created.sessionId }
     } catch (error) {
       return { ok: false, code: 'server_error', message: error instanceof Error ? error.message : String(error) }
-    } finally {
-      void refreshed
     }
   }
 
@@ -773,13 +784,27 @@ export class RemoteController {
   async refreshSessions(): Promise<SessionSummary[]> {
     try {
       const list = await Promise.resolve(this.deps.listSessions())
+      // Drop optimistic rows once disk shows them
+      for (const row of list) {
+        this.optimisticSessions.delete(row.id)
+      }
       this.lastSessions = list
+      this.mergeOptimisticIntoLastSessions()
       this.sessionsListFresh = true
-      return list
+      return this.lastSessions
     } catch {
       this.sessionsListFresh = false
       return this.lastSessions
     }
+  }
+
+  private mergeOptimisticIntoLastSessions(): void {
+    if (this.optimisticSessions.size === 0) return
+    const merged = [...this.lastSessions]
+    for (const row of this.optimisticSessions.values()) {
+      if (!merged.some((s) => s.id === row.id)) merged.unshift(row)
+    }
+    this.lastSessions = merged
   }
 }
 
@@ -804,4 +829,23 @@ function toRemoteTranscriptItem(event: UiSessionEvent): RemoteTranscriptItem | n
     }
   }
   return null
+}
+
+/** Conservative public-tail size: UTF-8 of string fields + fixed JSON overhead. */
+function remoteTranscriptItemBytes(row: RemoteTranscriptItem): number {
+  let n = 48 // keys/punctuation overhead per object
+  n += Buffer.byteLength(row.id, 'utf8')
+  n += Buffer.byteLength(row.kind, 'utf8')
+  n += Buffer.byteLength(row.text, 'utf8')
+  if (row.role) n += Buffer.byteLength(row.role, 'utf8')
+  if (row.status) n += Buffer.byteLength(row.status, 'utf8')
+  return n
+}
+
+function trimUtf8ToBytes(text: string, maxBytes: number): string {
+  if (maxBytes <= 0) return ''
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text
+  let end = Math.min(text.length, maxBytes)
+  while (end > 0 && Buffer.byteLength(text.slice(0, end), 'utf8') > maxBytes) end -= 1
+  return text.slice(0, end)
 }

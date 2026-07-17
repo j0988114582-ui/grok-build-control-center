@@ -10,7 +10,10 @@ export const REMOTE_SESSION_ABSOLUTE_MS = 72 * 60 * 60_000
 export const REMOTE_PROMPT_MAX_CHARS = 12_000
 /** T1 tail only (no full history reader in 0.9). */
 export const REMOTE_TAIL_MAX_ITEMS = 120
-export const REMOTE_TAIL_MAX_CHARS = 64_000
+/** UTF-8 byte budget for public tail payload (not JS string length). */
+export const REMOTE_TAIL_MAX_BYTES = 64_000
+/** @deprecated use REMOTE_TAIL_MAX_BYTES — kept for older imports */
+export const REMOTE_TAIL_MAX_CHARS = REMOTE_TAIL_MAX_BYTES
 export const REMOTE_ELEVATE_PIN_FAIL_LIMIT = 5
 export const REMOTE_ELEVATE_RATE_LIMIT = 5
 export const REMOTE_ELEVATE_RATE_WINDOW_MS = 10 * 60_000

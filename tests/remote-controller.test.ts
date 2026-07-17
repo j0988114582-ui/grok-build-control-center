@@ -281,4 +281,156 @@ describe('remote-controller (v0.9 coexistence)', () => {
     expect(result.ok).toBe(false)
     expect(prompt).not.toHaveBeenCalled()
   })
+
+  it('invalid focus does not strand a valid loading session', async () => {
+    let releaseLoad: () => void
+    const loadGate = new Promise<void>((r) => { releaseLoad = r })
+    let ready = false
+    const controller = makeController({
+      isSessionReady: () => ready,
+      loadSession: async () => {
+        await loadGate
+        ready = true
+      }
+    })
+    controller.enable()
+    const p1 = controller.handleFocus('s1')
+    await new Promise((r) => setTimeout(r, 5))
+    const forged = await controller.handleFocus('forged-missing')
+    expect(forged.ok).toBe(false)
+    if (!forged.ok) expect(forged.code).toBe('not_found')
+    expect(controller.getFocusSessionId()).toBe('s1')
+    releaseLoad!()
+    const ok = await p1
+    expect(ok.ok).toBe(true)
+    expect(controller.getSnapshot().focusStatus).toBe('ready')
+    const prompt = await controller.handlePrompt('still works')
+    expect(prompt.ok).toBe(true)
+  })
+
+  it('disable during refresh does not resurrect focus', async () => {
+    let releaseList: () => void
+    const listGate = new Promise<void>((r) => { releaseList = r })
+    const onFocusChanged = vi.fn()
+    const loadSession = vi.fn().mockResolvedValue(undefined)
+    const controller = makeController({
+      listSessions: async () => {
+        await listGate
+        return sessions
+      },
+      isSessionReady: () => false,
+      loadSession,
+      onFocusChanged
+    })
+    controller.enable()
+    const pending = controller.handleFocus('s1')
+    await new Promise((r) => setTimeout(r, 5))
+    controller.disable()
+    releaseList!()
+    const result = await pending
+    expect(result.ok).toBe(false)
+    expect(controller.getFocusSessionId()).toBeNull()
+    expect(controller.isEnabled()).toBe(false)
+    expect(loadSession).not.toHaveBeenCalled()
+    // onFocusChanged may fire only if commit happened before disable — must not leave focus
+    expect(controller.getFocusSessionId()).toBeNull()
+  })
+
+  it('disable during load cancels ready transition', async () => {
+    let releaseLoad: () => void
+    const loadGate = new Promise<void>((r) => { releaseLoad = r })
+    let ready = false
+    const controller = makeController({
+      isSessionReady: () => ready,
+      loadSession: async () => {
+        await loadGate
+        ready = true
+      }
+    })
+    controller.enable()
+    const pending = controller.handleFocus('s1')
+    await new Promise((r) => setTimeout(r, 5))
+    expect(controller.getSnapshot().focusStatus).toBe('loading')
+    controller.disable()
+    releaseLoad!()
+    await pending
+    expect(controller.getFocusSessionId()).toBeNull()
+    expect(controller.getSnapshot().focusStatus).toBe('none')
+  })
+
+  it('create succeeds when disk index lags behind createSession', async () => {
+    const listed: SessionSummary[] = [{ id: 's1', cwd: 'C:\\repo', title: 'Alpha' }]
+    const createSession = vi.fn().mockResolvedValue({ sessionId: 's2', cwd: 'C:\\repo' })
+    const controller = makeController({
+      listSessions: () => listed,
+      createSession,
+      isSessionReady: (id) => id === 's2' || id === 's1',
+      loadSession: vi.fn().mockResolvedValue(undefined)
+    })
+    controller.enable()
+    await controller.refreshSessions()
+    // Disk still only has s1 when create returns
+    const result = await controller.handleCreateSession('C:\\repo')
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.sessionId).toBe('s2')
+    expect(createSession).toHaveBeenCalled()
+    expect(controller.getFocusSessionId()).toBe('s2')
+  })
+
+  it('queue last writer wins across mobile and desktop', async () => {
+    const prompt = vi.fn().mockResolvedValue(undefined)
+    const controller = makeController({ prompt })
+    controller.enable()
+    controller.setFocusSession('s1')
+    controller.setRunning('s1', true)
+    expect(controller.handleQueue('from-mobile', 'mobile-remote').ok).toBe(true)
+    expect(controller.handleQueue('from-desktop', 'desktop').ok).toBe(true)
+    expect(controller.getQueue()?.text).toBe('from-desktop')
+    controller.setRunning('s1', false)
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledWith('s1', 'from-desktop'))
+    expect(prompt).not.toHaveBeenCalledWith('s1', 'from-mobile')
+  })
+
+  it('T1 tail enforces UTF-8 byte budget not char length', () => {
+    const controller = makeController()
+    controller.enable()
+    controller.setFocusSession('s1')
+    // Each CJK char is 3 UTF-8 bytes; 800 chars ≈ 2400 bytes text + overhead
+    const cjk = '測'.repeat(800)
+    for (let i = 0; i < 80; i++) {
+      controller.pushEvent({
+        id: `m${i}`,
+        sessionId: 's1',
+        kind: 'message',
+        role: 'assistant',
+        text: cjk
+      })
+    }
+    const snap = controller.getSnapshot()
+    const payload = JSON.stringify(snap.tail)
+    expect(Buffer.byteLength(payload, 'utf8')).toBeLessThanOrEqual(64_000 + 4_096) // budget + small JSON array overhead slack
+    // Must have dropped many of the 80 items (char-only cap would keep far more)
+    expect(snap.tail.length).toBeLessThan(40)
+  })
+
+  it('yolo disable switches to ask without revoking remote', async () => {
+    const setPermissionMode = vi.fn().mockResolvedValue('ask')
+    let mode: 'ask' | 'always-approve' = 'always-approve'
+    const controller = makeController({
+      getPermissionMode: () => mode,
+      setPermissionMode: async (next) => {
+        mode = next as typeof mode
+        return setPermissionMode(next)
+      }
+    })
+    controller.enable()
+    const opened = controller.regeneratePairing()!
+    const paired = controller.auth.pair(opened.pairingSecret, opened.pin, 1_000_000)
+    expect(paired.ok).toBe(true)
+    const result = await controller.handleYoloDisable()
+    expect(result.ok).toBe(true)
+    expect(setPermissionMode).toHaveBeenCalledWith('ask')
+    expect(controller.isEnabled()).toBe(true)
+    expect(controller.auth.hasActiveSession(1_000_001)).toBe(true)
+  })
 })
