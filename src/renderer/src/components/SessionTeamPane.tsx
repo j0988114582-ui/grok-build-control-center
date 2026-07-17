@@ -1,10 +1,11 @@
-import React from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import { Virtuoso } from 'react-virtuoso'
 import {
   LoaderCircle, MessageSquare, Send, Square, Users, X, Zap
 } from 'lucide-react'
 import type { PromptBlock, SessionSummary, UiSessionEvent } from '../../../shared/types'
 import { sessionDisplayTitle } from './session-groups'
+import { fitTextareaHeight, teamComposerMaxPx, TEAM_COMPOSER_MIN_PX } from '../../../shared/composer-autogrow'
 
 import { PROMPT_TEMPLATES } from '../../../shared/prompt-templates'
 
@@ -45,8 +46,32 @@ export function SessionTeamPane({
   EventCard
 }: Props): React.JSX.Element {
   const title = titleOverride || sessionDisplayTitle(session, {})
+  const paneRef = useRef<HTMLElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const syncTeamComposer = useCallback((): void => {
+    const ta = textareaRef.current
+    const pane = paneRef.current
+    if (!ta || !pane) return
+    const maxPx = teamComposerMaxPx(pane.getBoundingClientRect().height || 0)
+    fitTextareaHeight(ta, { minPx: TEAM_COMPOSER_MIN_PX, maxPx })
+  }, [])
+
+  useEffect(() => {
+    syncTeamComposer()
+  }, [draft, running, syncTeamComposer])
+
+  useEffect(() => {
+    const pane = paneRef.current
+    if (!pane || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => syncTeamComposer())
+    ro.observe(pane)
+    return () => ro.disconnect()
+  }, [syncTeamComposer])
+
   return (
     <section
+      ref={paneRef}
       className={`team-pane ${focused ? 'focused' : ''} ${running ? 'running' : ''}`}
       data-testid="team-pane"
       data-session-id={session.id}
@@ -96,12 +121,17 @@ export function SessionTeamPane({
           </div>
         )}
         <textarea
+          ref={textareaRef}
           value={draft}
-          rows={3}
+          rows={2}
           disabled={!ready}
+          data-testid="team-composer-input"
           placeholder={!ready ? '此對話尚未在目前連線就緒（載入中、失敗或已斷線）' : running ? '對此 agent 插話…' : '對此 agent 下指令…'}
           onFocus={onFocus}
-          onChange={(e) => onDraftChange(e.target.value)}
+          onChange={(e) => {
+            onDraftChange(e.target.value)
+            requestAnimationFrame(() => syncTeamComposer())
+          }}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return
             if (e.key === 'Enter' && !e.shiftKey) {

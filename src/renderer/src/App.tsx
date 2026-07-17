@@ -107,6 +107,7 @@ import {
   upsertPathChips,
   type PathChip
 } from '../../shared/drop-paths'
+import { fitMainComposer } from '../../shared/composer-autogrow'
 import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock,
   SessionSummary, SessionUsage, UiSessionEvent
@@ -375,6 +376,8 @@ export function App(): React.JSX.Element {
   const virtuoso = useRef<VirtuosoHandle>(null)
   const sessionSearchRef = useRef<HTMLInputElement>(null)
   const transcriptSearchRef = useRef<HTMLInputElement>(null)
+  const mainComposerRef = useRef<HTMLDivElement>(null)
+  const mainComposerTextareaRef = useRef<HTMLTextAreaElement>(null)
   const createSessionRef = useRef<() => void>(() => {})
   const jumpToLatestRef = useRef<() => void>(() => {})
   const followTailRef = useRef(true)
@@ -639,6 +642,33 @@ export function App(): React.JSX.Element {
     const timer = setInterval(() => { void refreshUsageRef.current(sessionId) }, 5000)
     return () => clearInterval(timer)
   }, [running, active?.id])
+
+  /** P-COMP-MAIN: grow whole .composer up to 50vh; shrink when draft cleared. */
+  const syncMainComposerHeight = useCallback((): void => {
+    const box = mainComposerRef.current
+    const ta = mainComposerTextareaRef.current
+    if (!box || !ta) return
+    fitMainComposer(box, ta, window.innerHeight)
+  }, [])
+
+  useEffect(() => {
+    syncMainComposerHeight()
+  }, [syncMainComposerHeight, active?.id, drafts, running, attachments.length, pathChips.length])
+
+  useEffect(() => {
+    const box = mainComposerRef.current
+    if (!box || typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', syncMainComposerHeight)
+      return () => window.removeEventListener('resize', syncMainComposerHeight)
+    }
+    const ro = new ResizeObserver(() => syncMainComposerHeight())
+    ro.observe(box)
+    window.addEventListener('resize', syncMainComposerHeight)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', syncMainComposerHeight)
+    }
+  }, [syncMainComposerHeight, active?.id])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
@@ -1971,12 +2001,17 @@ export function App(): React.JSX.Element {
                 >{item.label}</button>
               ))}
             </div>}
-            <div className="composer">
+            <div className="composer" ref={mainComposerRef} data-testid="main-composer">
               <button className="attach-button" aria-label="加入檔案" disabled={!activeReady} onClick={() => void chooseFiles()}><Paperclip /></button>
               <textarea
+                ref={mainComposerTextareaRef}
                 value={drafts[active.id] ?? ''}
                 disabled={!activeReady}
-                onChange={(event) => setDrafts((current) => ({ ...current, [active.id]: event.target.value }))}
+                onChange={(event) => {
+                  setDrafts((current) => ({ ...current, [active.id]: event.target.value }))
+                  // Grow immediately on keystroke (effect also syncs)
+                  requestAnimationFrame(() => syncMainComposerHeight())
+                }}
                 onKeyDown={composerKey}
                 onPaste={paste}
                 placeholder={!activeReady ? '此對話尚未在目前連線就緒（載入中、失敗或已斷線）' : running ? '回合進行中可插話、排隊下一輪，或立刻改做…' : '交給 Grok 一個任務，或拖放本機檔案／資料夾（絕對路徑）…'}
