@@ -81,6 +81,7 @@ export class RemoteController {
   private pairingExpiresAt: number | null = null
   private experimentalTunnel = false
   private lastSessions: SessionSummary[] = []
+  private sessionsListFresh = false
   private queue: RemoteQueuedPrompt | null = null
   private loadGeneration = 0
 
@@ -321,27 +322,35 @@ export class RemoteController {
   async restoreFocusAfterReconnect(): Promise<void> {
     const id = this.focusSessionId
     if (!id || !this.enabled) return
+    const gen = ++this.loadGeneration
     this.focusStatus = 'loading'
     this.emit()
+    await this.refreshSessions()
+    if (gen !== this.loadGeneration || this.focusSessionId !== id) return
     const summary = this.lastSessions.find((item) => item.id === id)
-      ?? (await this.refreshSessions(), this.lastSessions.find((item) => item.id === id))
     if (!summary || !this.deps.loadSession) {
-      this.focusStatus = 'error'
-      this.focusError = '重連後無法恢復焦點對話'
-      this.emit()
+      if (this.focusSessionId === id) {
+        this.focusStatus = 'error'
+        this.focusError = '重連後無法恢復焦點對話'
+        this.emit()
+      }
       return
     }
     try {
       await this.deps.loadSession(id, summary.cwd)
+      if (gen !== this.loadGeneration || this.focusSessionId !== id) return
       this.focusStatus = this.deps.isSessionReady(id) ? 'ready' : 'loading'
     } catch (error) {
-      this.focusStatus = 'error'
-      this.focusError = error instanceof Error ? error.message : String(error)
+      if (this.focusSessionId === id && gen === this.loadGeneration) {
+        this.focusStatus = 'error'
+        this.focusError = error instanceof Error ? error.message : String(error)
+      }
     }
     this.emit()
   }
 
   listCwdUnion(): string[] {
+    // Callers that authorize create must refreshSessions first (fail-closed if not fresh).
     const set = new Map<string, string>()
     for (const session of this.lastSessions) {
       const key = normalizeCwdKey(session.cwd)
@@ -351,6 +360,7 @@ export class RemoteController {
   }
 
   isCwdInUnion(cwd: string): boolean {
+    if (!this.sessionsListFresh) return false
     const key = normalizeCwdKey(cwd)
     if (!key || key.includes('..')) return false
     // exact key only — no child path of union member
@@ -359,7 +369,10 @@ export class RemoteController {
 
   async handleCreateSession(cwd: string): Promise<HandlerResult> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
-    await this.refreshSessions()
+    const refreshed = await this.refreshSessions()
+    if (!this.sessionsListFresh) {
+      return { ok: false, code: 'not_ready', message: '無法刷新 session 列表，拒絕建立（fail-closed）' }
+    }
     if (!this.isCwdInUnion(cwd)) {
       return { ok: false, code: 'forbidden', message: '路徑不在既有專案列表中' }
     }
@@ -369,12 +382,21 @@ export class RemoteController {
     try {
       const created = await this.deps.createSession(path.normalize(cwd.trim()))
       await this.refreshSessions()
-      await this.handleFocus(created.sessionId)
+      const focused = await this.handleFocus(created.sessionId)
+      if (!focused.ok) {
+        return {
+          ok: false,
+          code: focused.code,
+          message: `對話已建立但焦點未就緒：${focused.message}`
+        }
+      }
       this.notices = ['來自手機遙控：已建立對話']
       this.emit()
       return { ok: true, sessionId: created.sessionId }
     } catch (error) {
       return { ok: false, code: 'server_error', message: error instanceof Error ? error.message : String(error) }
+    } finally {
+      void refreshed
     }
   }
 
@@ -536,10 +558,25 @@ export class RemoteController {
   private async drainQueueIfIdle(sessionId: string): Promise<void> {
     const q = this.queue
     if (!q || q.sessionId !== sessionId) return
+    // Only drain if focus still matches queued session (avoid s1 queue firing on s2)
+    if (this.focusSessionId !== sessionId) {
+      this.queue = null
+      this.notices = ['排隊已取消：焦點對話已變更']
+      this.emit()
+      return
+    }
     if (this.runningBySession.get(sessionId) || this.inFlightPrompt.has(sessionId)) return
     this.queue = null
     this.emit()
-    await this.handlePrompt(q.text)
+    // Pass explicit sessionId so prompt cannot retarget after a late focus change
+    await this.handlePromptForSession(sessionId, q.text)
+  }
+
+  private async handlePromptForSession(sessionId: string, text: string): Promise<HandlerResult> {
+    if (this.focusSessionId !== sessionId) {
+      return { ok: false, code: 'not_ready', message: '焦點已變更，取消送出' }
+    }
+    return this.handlePrompt(text)
   }
 
   async handleCancel(): Promise<HandlerResult> {
@@ -647,8 +684,10 @@ export class RemoteController {
     try {
       const list = await Promise.resolve(this.deps.listSessions())
       this.lastSessions = list
+      this.sessionsListFresh = true
       return list
     } catch {
+      this.sessionsListFresh = false
       return this.lastSessions
     }
   }

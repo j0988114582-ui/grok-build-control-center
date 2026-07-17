@@ -184,4 +184,34 @@ describe('remote-controller (v0.9 coexistence)', () => {
     controller.setRunning('s1', false)
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledWith('s1', 'next job'))
   })
+
+  it('queue is dropped if focus changes before drain', async () => {
+    const prompt = vi.fn().mockResolvedValue(undefined)
+    const controller = makeController({
+      prompt,
+      listSessions: () => [
+        { id: 's1', cwd: 'C:\\repo', title: 'Alpha' },
+        { id: 's2', cwd: 'C:\\repo', title: 'Beta' }
+      ]
+    })
+    controller.enable()
+    await controller.refreshSessions()
+    controller.setFocusSession('s1')
+    controller.setRunning('s1', true)
+    expect(controller.handleQueue('for s1').ok).toBe(true)
+    controller.setFocusSession('s2')
+    controller.setRunning('s1', false)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(prompt).not.toHaveBeenCalled()
+    expect(controller.getQueue()).toBeNull()
+  })
+
+  it('create session fails closed when list refresh fails', async () => {
+    const controller = makeController({
+      listSessions: () => { throw new Error('disk down') }
+    })
+    controller.enable()
+    const result = await controller.handleCreateSession('C:\\repo')
+    expect(result.ok).toBe(false)
+  })
 })
