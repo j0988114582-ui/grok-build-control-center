@@ -213,7 +213,8 @@ export class RemoteController {
   /**
    * v0.9 E1: mode switch must NOT revoke remote session/cookie/pinHash/72h clock.
    */
-  onPermissionModeChanged(_mode: AgentPermissionMode): void {
+  onPermissionModeChanged(mode: AgentPermissionMode): void {
+    void mode
     if (!this.enabled) {
       this.emit()
       return

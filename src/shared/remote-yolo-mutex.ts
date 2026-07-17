@@ -32,7 +32,8 @@ export type MutexDecision = { ok: true } | { ok: false; reason: string }
  * Desktop/UI: enabling YOLO is always allowed at the mutex layer.
  * When Remote is active, caller must still collect PIN and call elevate API.
  */
-export function canEnableYolo(_remoteActive: boolean): MutexDecision {
+export function canEnableYolo(remoteActive: boolean): MutexDecision {
+  void remoteActive
   return { ok: true }
 }
 
@@ -45,7 +46,8 @@ export function requiresPinForYoloElevation(remoteActive: boolean): boolean {
  * Starting Remote is allowed in ask or always-approve.
  * When already YOLO, UI should show REMOTE_START_WHILE_YOLO_CONFIRM once.
  */
-export function canEnableRemote(_permissionMode: AgentPermissionMode): MutexDecision {
+export function canEnableRemote(permissionMode: AgentPermissionMode): MutexDecision {
+  void permissionMode
   return { ok: true }
 }
 
