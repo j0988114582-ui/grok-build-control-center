@@ -94,6 +94,8 @@ export class RemoteController {
   private sessionsListFresh = false
   private queue: RemoteQueuedPrompt | null = null
   private loadGeneration = 0
+  /** Serializes concurrent handleFocus intents (supersede without stranding loads). */
+  private focusRequestId = 0
 
   constructor(private deps: RemoteControllerDeps) {}
 
@@ -170,6 +172,8 @@ export class RemoteController {
     this.focusSessionId = null
     this.focusStatus = 'none'
     this.focusError = undefined
+    this.loadGeneration += 1
+    this.focusRequestId += 1
     this.emit()
   }
 
@@ -412,14 +416,28 @@ export class RemoteController {
     }
     try {
       const created = await this.deps.createSession(path.normalize(cwd.trim()))
+      // Optimistically index so delayed disk listing cannot fail-closed a successful create
+      const optimistic: SessionSummary = {
+        id: created.sessionId,
+        cwd: created.cwd || path.normalize(cwd.trim()),
+        title: created.sessionId
+      }
+      if (!this.lastSessions.some((s) => s.id === created.sessionId)) {
+        this.lastSessions = [optimistic, ...this.lastSessions]
+      }
+      this.sessionsListFresh = true
       await this.refreshSessions()
+      // Ensure created session remains visible even if refresh is partial
+      if (!this.lastSessions.some((s) => s.id === created.sessionId)) {
+        this.lastSessions = [optimistic, ...this.lastSessions]
+        this.sessionsListFresh = true
+      }
       const focused = await this.handleFocus(created.sessionId)
       if (!focused.ok) {
-        return {
-          ok: false,
-          code: focused.code,
-          message: `對話已建立但焦點未就緒：${focused.message}`
-        }
+        // Session exists; report partial success with sessionId so client can retry focus
+        this.notices = [`對話已建立（${created.sessionId.slice(0, 8)}…）但焦點未就緒，請再點選`]
+        this.emit()
+        return { ok: true, sessionId: created.sessionId }
       }
       this.notices = ['來自手機遙控：已建立對話']
       this.emit()
