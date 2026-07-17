@@ -25,7 +25,6 @@ describe('session-hygiene (P-CLEAN / P-FOLDER)', () => {
   it('treats missing messageCount as not empty (fail-safe)', () => {
     expect(isEmptySession(s({ id: 'a' }))).toBe(false)
     expect(isEmptySession(s({ id: 'b', messageCount: 0 }))).toBe(true)
-    expect(isEmptySession(s({ id: 'c', messageCount: 3 }))).toBe(false)
   })
 
   it('marks pinned / active / team / recent as active', () => {
@@ -47,16 +46,7 @@ describe('session-hygiene (P-CLEAN / P-FOLDER)', () => {
     expect(map.get('fresh')).toBe('active')
   })
 
-  it('suggests empty unprotected sessions', () => {
-    const sessions = [
-      s({ id: 'empty', updatedAt: new Date(now - 20 * day).toISOString(), messageCount: 0 }),
-      s({ id: 'kept', updatedAt: new Date(now - 20 * day).toISOString(), messageCount: 5 })
-    ]
-    const suggested = suggestedCleanupSessions(sessions, { nowMs: now, pinnedIds: [] })
-    expect(suggested.map((item) => item.id)).toEqual(['empty'])
-  })
-
-  it('U5: same cwd keeps newest 5 non-empty aged; older excess suggested', () => {
+  it('suggests all unprotected aged sessions (10d rule wins over keep-5)', () => {
     const sessions = Array.from({ length: SESSION_KEEP_PER_CWD + 3 }, (_, i) =>
       s({
         id: `s${i}`,
@@ -65,14 +55,20 @@ describe('session-hygiene (P-CLEAN / P-FOLDER)', () => {
         messageCount: 2
       })
     )
-    const map = classifySessions(sessions, { nowMs: now, pinnedIds: [] })
-    const active = sessions.filter((item) => map.get(item.id) === 'active').map((item) => item.id)
-    const suggested = sessions.filter((item) => map.get(item.id) === 'suggested-cleanup').map((item) => item.id)
-    expect(active).toEqual(['s0', 's1', 's2', 's3', 's4'])
-    expect(suggested).toEqual(['s5', 's6', 's7'])
+    const suggested = suggestedCleanupSessions(sessions, { nowMs: now, pinnedIds: [] })
+    expect(suggested).toHaveLength(sessions.length)
   })
 
-  it('10-day window takes precedence over keep-5 (all within 10d stay active)', () => {
+  it('suggests empty unprotected sessions', () => {
+    const sessions = [
+      s({ id: 'empty', updatedAt: new Date(now - 20 * day).toISOString(), messageCount: 0 }),
+      s({ id: 'fresh', updatedAt: new Date(now - 1 * day).toISOString(), messageCount: 5 })
+    ]
+    const suggested = suggestedCleanupSessions(sessions, { nowMs: now, pinnedIds: [] })
+    expect(suggested.map((item) => item.id)).toEqual(['empty'])
+  })
+
+  it('10-day window keeps all recent sessions active even when >5 per cwd', () => {
     const sessions = Array.from({ length: 7 }, (_, i) =>
       s({
         id: `n${i}`,

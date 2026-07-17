@@ -80,7 +80,6 @@ export interface GrokBridgeApi {
     allowPhonePermissions?: boolean
     useQuickTunnel?: boolean
     riskAcknowledged?: boolean
-    cloudflaredPath?: string
   }): Promise<RemoteDesktopState>
   remoteDisable(): Promise<RemoteDesktopState>
   remoteRegeneratePairing(): Promise<RemoteDesktopState>

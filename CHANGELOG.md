@@ -37,6 +37,9 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 
 - 計畫：`docs/plans/2026-07-17-v0.8.0-ux-session-remote-plan.md`
 - Codex 計畫審：`docs/plans/v080-plan-codex-review.md`
+- Codex 產品審：`docs/plans/v080-codex-fullaccess-review.md` — **Remote NO-GO** until 4G hand-test + remaining R-SEC items; **desktop path ships**.
+- Installer：**NotSigned**（`outputs/installer/Grok-Build-Control-Center-Setup-0.8.0.exe`）。
+- cloudflared：**未完整**版本+checksum 釘選（R-SEC-20 部分）；Quick Tunnel 僅實驗路徑，不接受 renderer 任意執行檔路徑。
 
 ## [0.7.0] - 2026-07-16
 

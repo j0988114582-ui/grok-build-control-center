@@ -518,7 +518,6 @@ function registerIpc(): void {
     allowPhonePermissions?: boolean
     useQuickTunnel?: boolean
     riskAcknowledged?: boolean
-    cloudflaredPath?: string
   }) => {
     if (options?.useQuickTunnel && options.riskAcknowledged !== true) {
       throw new Error('啟用 Experimental Quick Tunnel 前必須確認風險（供應商可處理 HTTP 內容，無 SLA）')
@@ -541,8 +540,9 @@ function registerIpc(): void {
       remoteController.setBanner('starting')
 
       if (options?.useQuickTunnel) {
+        // R-SEC-20: do not accept arbitrary executable paths from renderer.
+        // Checksum pin is incomplete in 0.8.0 — only well-known local paths / PATH name.
         const candidates = [
-          ...(typeof options.cloudflaredPath === 'string' && options.cloudflaredPath.trim() ? [options.cloudflaredPath.trim()] : []),
           path.join(homedir(), '.cloudflared', 'cloudflared.exe'),
           path.join(homedir(), '.grok', 'bin', 'cloudflared.exe'),
           'cloudflared'
@@ -561,18 +561,19 @@ function registerIpc(): void {
           throw new Error(`Quick Tunnel 啟動失敗（實驗性）：${started.reason}`)
         }
         try {
+          // Allow public Host before health (Cloudflare may forward original Host).
+          const publicHost = new URL(started.url).host
+          remoteAllowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`, publicHost]
           const healthUrl = `${started.url}/api/health?nonce=${encodeURIComponent(healthNonce)}`
           const res = await fetch(healthUrl, { signal: AbortSignal.timeout(12_000) })
           const json = await res.json() as { ok?: boolean; nonce?: string }
           if (!res.ok || json.nonce !== healthNonce) throw new Error('隧道 health 驗證失敗')
-          try {
-            const host = new URL(started.url).host
-            remoteAllowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`, host]
-          } catch { /* keep loopback */ }
           remoteController.setPublicBaseUrl(started.url)
           remoteController.setBanner('url_verified')
         } catch (error) {
           await remoteTunnel.stop()
+          remoteAllowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`]
+          remoteController.setPublicBaseUrl(null)
           remoteController.setBanner('tunnel_failed')
           throw new Error(error instanceof Error ? error.message : String(error))
         }

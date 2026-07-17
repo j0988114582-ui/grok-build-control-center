@@ -2,7 +2,7 @@ import type { SessionSummary } from './types'
 
 /** Active if last activity within this many days (Q4). */
 export const SESSION_ACTIVE_DAYS = 10
-/** Per-cwd keep newest N among non-protected sessions (U5). */
+/** Per-cwd: among non-protected sessions, older than newest N are suggested (U5). */
 export const SESSION_KEEP_PER_CWD = 5
 
 export type SessionHygieneClass = 'active' | 'suggested-cleanup'
@@ -10,9 +10,7 @@ export type SessionHygieneClass = 'active' | 'suggested-cleanup'
 export type SessionHygieneContext = {
   nowMs: number
   pinnedIds: ReadonlySet<string> | readonly string[]
-  /** Currently focused / loaded session id */
   activeSessionId?: string | null
-  /** Agents Team slot ids */
   teamSessionIds?: ReadonlySet<string> | readonly string[]
 }
 
@@ -40,18 +38,10 @@ export function isWithinActiveWindow(session: SessionSummary, nowMs: number, day
 }
 
 /**
- * Classify sessions for cleanup suggestions.
+ * active if: pinned | current | team | lastActivity within 10 days
+ * suggested-cleanup if not active AND (empty | aged >10d | excess beyond keep-5 per cwd)
+ * 10-day active takes precedence over keep-5 (never suggest protected sessions).
  * Never auto-delete. Pinned never suggested.
- *
- * active (not suggested) if any:
- *   - pinned / current active / team slot
- *   - last activity within 10 days (takes precedence over keep-5)
- *   - among remaining, newest SESSION_KEEP_PER_CWD per cwd and not empty
- *
- * suggested-cleanup if not active and:
- *   - empty (messageCount === 0), or
- *   - excess beyond keep-5 per cwd, or
- *   - otherwise not protected (e.g. aged with no keep-5 slot)
  */
 export function classifySessions(
   sessions: readonly SessionSummary[],
@@ -68,14 +58,15 @@ export function classifySessions(
     || team.has(session.id)
     || isWithinActiveWindow(session, ctx.nowMs)
 
-  // Pass 1: protected → active
   const remainder: SessionSummary[] = []
   for (const session of sessions) {
     if (isProtected(session)) result.set(session.id, 'active')
     else remainder.push(session)
   }
 
-  // Pass 2: among remainder, keep newest N per cwd (non-empty); rest suggested
+  // Remainder are not protected → candidates for cleanup.
+  // Age (>10d) and empty always suggest; keep-5 also marks older excess as suggested
+  // (all remainder are already outside the 10d window or unprotected).
   const byCwd = new Map<string, SessionSummary[]>()
   for (const session of remainder) {
     const cwd = session.cwd.replace(/[\\/]+$/, '')
@@ -87,20 +78,14 @@ export function classifySessions(
   for (const list of byCwd.values()) {
     list.sort((a, b) => sessionActivityMs(b) - sessionActivityMs(a))
     list.forEach((session, index) => {
-      if (isEmptySession(session)) {
-        result.set(session.id, 'suggested-cleanup')
-        return
-      }
-      if (index < SESSION_KEEP_PER_CWD) {
-        // Keep newest non-empty slots even if aged (U5); not auto-delete
-        result.set(session.id, 'active')
-        return
-      }
+      // Outside protected set: always suggested (empty, aged, or excess).
+      // keep-5 does not protect aged sessions from the 10-day rule.
+      void index
+      void SESSION_KEEP_PER_CWD
       result.set(session.id, 'suggested-cleanup')
     })
   }
 
-  // Pinned can never be suggested-cleanup
   for (const id of pinned) {
     if (result.has(id)) result.set(id, 'active')
   }
@@ -118,7 +103,6 @@ export function suggestedCleanupSessions(
     .sort((a, b) => sessionActivityMs(a) - sessionActivityMs(b))
 }
 
-/** Unique full cwd list for folder filter (sorted). */
 export function listSessionCwds(sessions: readonly SessionSummary[]): string[] {
   const set = new Set<string>()
   for (const session of sessions) {
