@@ -15,6 +15,12 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 
 ## [0.9.0] - 2026-07-17（可作業遙控 · **Remote 仍實驗**）
 
+### Review hardening（2026-07-19，Fable 5 兩輪對抗式審查後併入）
+
+- 修復：手機 12,000 字 CJK 提示被 32KB body 上限誤拒；`/api/prompt` 改 **accepted-then-run**（200＝已受理，隧道 ~100 秒逾時不再誤報失敗）；權限卡桌面⇄手機三向同步；執行中禁止切換 YOLO（與桌面防呆一致）；手機登出桌面同步顯示過期；桌面失聯時手機顯示「連線中斷」；快照未變不重繪 DOM（不閃爍、不中斷選字）；模型／工作模式改下拉選單（effort 連動、手動備援）；「立刻改做」競態、樂觀 session 10 分鐘 TTL、刪除對話的遙控端清理、手機側操作納入 lifecycle 互斥。
+- 驗證：新增真 cloudflared 隧道＋Playwright 模擬手機 E2E（`npm run smoke:remote-e2e`，23 檢查全過）；348 測試／lint／typecheck／build／axe 全綠。
+- 報告：`docs/plans/v090-claude-fable5-review-report.md`。
+
 ### Added / Changed
 
 - **可作業遙控契約（單人高風險）**：72h 絕對連線、不因閒置斷線；App 重開記憶體清空必重配對。
