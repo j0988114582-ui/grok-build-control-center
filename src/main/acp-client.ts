@@ -246,6 +246,11 @@ export class GrokAcpClient {
     return parseInterjectResult(response)
   }
 
+  /** Read-only view of the capability cache (models/modes/commands) for remote snapshot. */
+  getCachedCapabilities(): AgentCapabilities {
+    return this.capabilities
+  }
+
   respondPermission(requestId: string, optionId: string): void {
     const pending = this.permissions.get(requestId)
     if (!pending) throw new Error('Permission request is no longer active')

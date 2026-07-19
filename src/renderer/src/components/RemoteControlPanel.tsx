@@ -69,6 +69,17 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
     return `${state.publicBaseUrl}/#/pair?t=${state.pairingSecret}`
   }, [state?.publicBaseUrl, state?.pairingSecret])
 
+  /** Loopback QR only works on this PC — phones hit their own 127.0.0.1. */
+  const isLoopbackPairUrl = useMemo(() => {
+    if (!state?.publicBaseUrl) return false
+    try {
+      const host = new URL(state.publicBaseUrl).hostname
+      return host === '127.0.0.1' || host === 'localhost' || host === '[::1]'
+    } catch {
+      return /127\.0\.0\.1|localhost/i.test(state.publicBaseUrl)
+    }
+  }, [state?.publicBaseUrl])
+
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [copyDone, setCopyDone] = useState(false)
 
@@ -109,10 +120,12 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
     <div className="settings-section remote-panel" data-testid="remote-panel" style={{ borderTop: '1px dashed var(--line)', paddingTop: '15px', marginTop: '16px' }}>
       <div className="section-title">
         <h3>手機 QR 遙控</h3>
-        <small>單人高風險 · 72h 絕對期限 · 預設 loopback</small>
+        <small>單人高風險 · 72h 絕對期限 · 手機須 Quick Tunnel</small>
       </div>
       <p className="drawer-intro">
-        可與 YOLO 並用（{YOLO_REMOTE_COEXIST_NOTICE}）。Quick Tunnel 無 SLA，供應商可處理邊緣 HTTPS 內容；URL 變更後書籤失效，需重新掃碼。App 重啟後記憶體 session 清空，必須重配對。
+        可與 YOLO 並用（{YOLO_REMOTE_COEXIST_NOTICE}）。伺服器<strong>只綁 127.0.0.1</strong>：未開隧道時 QR 是本機網址，
+        <strong>手機掃了無法開啟</strong>（會連到手機自己）。要在 4G／另一台裝置配對，必須勾選下方
+        <strong>Quick Tunnel</strong> 且本機已安裝 <code>cloudflared</code>。隧道無 SLA，供應商可處理邊緣 HTTPS 內容；URL 變更後書籤失效。App 重啟後必須重配對。
       </p>
 
       {!active ? (
@@ -122,9 +135,22 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
             <input type="checkbox" checked={allowPhonePerms} onChange={(e) => onAllowPhonePerms(e.target.checked)} />
           </label>
           <label className="toggle-row">
-            <span><strong>Quick Tunnel（實驗性）</strong><small>需本機 cloudflared；每次確認風險</small></span>
-            <input type="checkbox" checked={useQuickTunnel} onChange={(e) => onUseQuickTunnel(e.target.checked)} />
+            <span>
+              <strong>Quick Tunnel（實驗性 · 手機必開）</strong>
+              <small>需本機 cloudflared（%USERPROFILE%\.cloudflared\ 或 PATH）；每次確認風險</small>
+            </span>
+            <input
+              type="checkbox"
+              data-testid="remote-quick-tunnel"
+              checked={useQuickTunnel}
+              onChange={(e) => onUseQuickTunnel(e.target.checked)}
+            />
           </label>
+          {!useQuickTunnel && (
+            <p className="drawer-intro" data-testid="remote-loopback-prewarn" style={{ color: 'var(--warn, #c4a35a)' }}>
+              目前未勾隧道：啟用後 QR 僅供<strong>本機瀏覽器</strong>測試。手機掃碼會連不上配對頁。
+            </p>
+          )}
           <button
             type="button"
             className="primary wide"
@@ -139,6 +165,11 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
                   '即將啟用實驗性 Quick Tunnel（無 SLA）。Cloudflare 會終止訪客 TLS 並可能處理提示／權限摘要等內容。確定繼續？'
                 )
                 if (!ok) return
+              } else {
+                const ok = window.confirm(
+                  '未啟用 Quick Tunnel。配對網址將是 http://127.0.0.1（僅本機）。手機掃 QR 無法進入配對頁。若只想本機測可按確定；若要用手機請先取消並勾選 Quick Tunnel。'
+                )
+                if (!ok) return
               }
               onBusy(true)
               void onEnable({
@@ -149,9 +180,19 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
                 .then((next) => {
                   onState(next)
                   onActiveChange(true)
-                  onNotice(next.experimentalTunnel ? '遠端已啟用（實驗性隧道）' : '遠端已啟用（本機 loopback；外網請自備隧道）')
+                  onNotice(
+                    next.experimentalTunnel
+                      ? '遠端已啟用（實驗性隧道 · 可用手機掃 QR）'
+                      : '遠端已啟用（本機 loopback · 手機掃 QR 無效；請切斷後勾 Quick Tunnel 重開）'
+                  )
                 })
-                .catch((error) => onNotice(error instanceof Error ? error.message : String(error)))
+                .catch((error) => {
+                  const msg = error instanceof Error ? error.message : String(error)
+                  const hint = /cloudflared|隧道|tunnel/i.test(msg)
+                    ? '。請安裝 cloudflared 至 PATH，或放到 %USERPROFILE%\\.cloudflared\\cloudflared.exe 後重試。'
+                    : ''
+                  onNotice(msg + hint)
+                })
                 .finally(() => onBusy(false))
             }}
           >
@@ -162,8 +203,27 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
         <>
           <p data-testid="remote-banner">
             狀態：{bannerLabel(state?.banner)}
-            {state?.experimentalTunnel ? ' · 實驗性隧道' : ''}
+            {state?.experimentalTunnel ? ' · 實驗性隧道（手機可連）' : ' · 僅本機 loopback'}
           </p>
+          {isLoopbackPairUrl && (
+            <p
+              className="drawer-intro"
+              data-testid="remote-loopback-warn"
+              role="status"
+              style={{
+                color: 'var(--warn, #c4a35a)',
+                border: '1px solid var(--line)',
+                borderRadius: 8,
+                padding: '10px 12px',
+                marginTop: 8
+              }}
+            >
+              <strong>手機掃此 QR 進不去是正常的。</strong>
+              目前網址是本機 <code>127.0.0.1</code>，只在這台電腦的瀏覽器有效。
+              請按「切斷遙控」→ 勾選 <strong>Quick Tunnel</strong> → 再啟用（需已安裝 cloudflared），QR 會變成
+              <code>https://….trycloudflare.com</code> 後再用手機掃。
+            </p>
+          )}
           <p className="drawer-intro" data-testid="remote-ttl-hint">
             配對 session 絕對期限 <strong>72 小時</strong>（無閒置斷線）。到期或 App 重啟後需重新配對。
           </p>
@@ -175,8 +235,18 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
           )}
           {qrDataUrl && (
             <div data-testid="remote-qr" style={{ margin: '12px 0', textAlign: 'center' }}>
-              <img src={qrDataUrl} alt="手機遙控配對 QR" width={200} height={200} style={{ borderRadius: 8, background: '#fff' }} />
-              <p className="drawer-intro" style={{ marginTop: 6 }}>本機產生 QR（不上網）。密鑰在 URL fragment，不進 query log。</p>
+              <img
+                src={qrDataUrl}
+                alt={isLoopbackPairUrl ? '本機測試配對 QR（手機無效）' : '手機遙控配對 QR'}
+                width={200}
+                height={200}
+                style={{ borderRadius: 8, background: '#fff', opacity: isLoopbackPairUrl ? 0.72 : 1 }}
+              />
+              <p className="drawer-intro" style={{ marginTop: 6 }}>
+                {isLoopbackPairUrl
+                  ? '本機測試 QR（手機掃了無效）。密鑰在 URL fragment。'
+                  : '公網配對 QR（本機產生、不上第三方 QR API）。密鑰在 URL fragment，不進 query log。'}
+              </p>
             </div>
           )}
           {pairUrl && (
@@ -185,7 +255,7 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
                 {pairUrl}
               </code>
               <button type="button" className="secondary wide" data-testid="remote-copy-url" disabled={busy} onClick={() => void copyPairUrl()} style={{ marginTop: 8 }}>
-                {copyDone ? '已複製' : '複製配對網址'}
+                {copyDone ? '已複製' : isLoopbackPairUrl ? '複製本機測試網址' : '複製配對網址'}
               </button>
             </>
           )}

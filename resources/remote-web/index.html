@@ -53,14 +53,23 @@
 
       <aside id="overflow-panel" class="drawer hidden" aria-label="溢位選單">
         <h2>更多</h2>
-        <label>模型 ID
+        <label id="model-select-wrap" class="hidden">模型（點選）
+          <select id="model-select"></select>
+        </label>
+        <label id="effort-select-wrap" class="hidden">reasoning effort
+          <select id="effort-select"></select>
+        </label>
+        <label id="model-id-wrap">模型 ID（手動備援）
           <input id="model-id" placeholder="例如 grok-4.5" autocomplete="off" />
         </label>
-        <label>reasoning effort（可空）
+        <label id="model-effort-wrap">reasoning effort（可空）
           <input id="model-effort" placeholder="high / medium / low" autocomplete="off" />
         </label>
         <button id="set-model-btn" type="button" class="secondary">套用模型</button>
-        <label>工作模式 ID
+        <label id="mode-select-wrap" class="hidden">工作模式（點選）
+          <select id="mode-select"></select>
+        </label>
+        <label id="mode-id-wrap">工作模式 ID（手動備援）
           <input id="mode-id" placeholder="例如 build" autocomplete="off" />
         </label>
         <button id="set-mode-btn" type="button" class="secondary">套用工作模式</button>
@@ -73,7 +82,7 @@
           <button id="yolo-off-btn" type="button" class="ghost">關閉 YOLO</button>
         </div>
         <label id="yolo-pin-wrap" class="hidden">YOLO PIN
-          <input id="yolo-pin" inputmode="numeric" maxlength="8" autocomplete="one-time-code" />
+          <input id="yolo-pin" type="password" inputmode="numeric" maxlength="8" autocomplete="one-time-code" />
         </label>
       </aside>
 
@@ -86,15 +95,17 @@
         <button id="donow-btn" type="button" class="secondary">立刻改做</button>
       </div>
 
-      <label class="prompt-label">提示
-        <textarea id="prompt" rows="3" maxlength="12000" placeholder="傳送給目前焦點對話…"></textarea>
-      </label>
-      <div class="actions composer-actions">
-        <button id="send-btn" type="button">送出</button>
-        <button id="cancel-btn" type="button" class="danger">停止</button>
+      <div class="composer-dock">
+        <label class="prompt-label">提示
+          <textarea id="prompt" rows="3" maxlength="12000" placeholder="傳送給目前焦點對話…"></textarea>
+        </label>
+        <div class="actions composer-actions">
+          <button id="send-btn" type="button">送出</button>
+          <button id="cancel-btn" type="button" class="danger">停止</button>
+        </div>
+        <p id="main-error" class="error" role="alert"></p>
+        <p id="notices" class="notices"></p>
       </div>
-      <p id="main-error" class="error" role="alert"></p>
-      <p id="notices" class="notices"></p>
     </section>
 
     <footer class="privacy">

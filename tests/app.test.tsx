@@ -59,6 +59,7 @@ const createApiMock = (): GrokBridgeApi => ({
   remoteQueueClear: vi.fn().mockResolvedValue({ ok: true }),
   onRemoteState: vi.fn().mockReturnValue(() => {}),
   onRemoteFocusChanged: vi.fn().mockReturnValue(() => {}),
+  onPermissionResolved: vi.fn().mockReturnValue(() => {}),
   exportSession: vi.fn(), revealExport: vi.fn().mockResolvedValue(true), openTui: vi.fn(), openExternal: vi.fn(),
   notify: vi.fn().mockResolvedValue(false),
   previewStat: vi.fn().mockResolvedValue({ ok: false, reason: '找不到檔案，可能已被移動或刪除' }),

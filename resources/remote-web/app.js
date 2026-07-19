@@ -30,6 +30,15 @@
   const cwdSelect = $('cwd-select')
   const yoloPinWrap = $('yolo-pin-wrap')
   const yoloPin = $('yolo-pin')
+  const modelSelectWrap = $('model-select-wrap')
+  const modelSelect = $('model-select')
+  const effortSelectWrap = $('effort-select-wrap')
+  const effortSelect = $('effort-select')
+  const modelIdWrap = $('model-id-wrap')
+  const modelEffortWrap = $('model-effort-wrap')
+  const modeSelectWrap = $('mode-select-wrap')
+  const modeSelect = $('mode-select')
+  const modeIdWrap = $('mode-id-wrap')
 
   let pairingSecret = null
   let pinDigits = ''
@@ -37,6 +46,17 @@
   let pollTimer = null
   let pollMs = 2500
   let lastSnap = null
+  /** After pair, pick first session once so user is not stuck on「尚未選定對話」. */
+  let autoFocusAttempted = false
+  /** Consecutive snapshot failures — desktop gone should not freeze silently. */
+  let snapshotFailures = 0
+  /** Render keys: skip DOM rebuilds when a section did not change (no flicker / selection loss). */
+  let lastSessionsKey = ''
+  let lastPermissionsKey = ''
+  let lastTailKey = ''
+  /** Separate keys: a model change must not rebuild (and reset) the mode picker, and vice versa. */
+  let lastModelsKey = ''
+  let lastModesKey = ''
 
   function setBanner(text) {
     bannerEl.textContent = text
@@ -228,12 +248,23 @@
     return parts.slice(-2).join('/') || cwd
   }
 
+  function turnLabel(status) {
+    if (status === 'running') return '─ 回合開始 ─'
+    if (status === 'completed') return '─ 回合完成 ─'
+    if (status === 'cancelled') return '─ 回合已取消 ─'
+    return '─ 回合結束（' + (status || '') + '）─'
+  }
+
   function renderSnapshot(snap) {
     if (!snap) return
     lastSnap = snap
     setBanner(snap.paired ? (snap.banner === 'expired' ? '已過期' : '已配對') : '未配對')
     noticesEl.textContent = (snap.notices || []).join(' · ')
     focusStatus.textContent = focusStatusText(snap)
+
+    // Running turn → send is not actionable (would 409); interject/queue row is the affordance.
+    sendBtn.disabled = !!snap.running
+    sendBtn.textContent = snap.running ? '執行中…' : '送出'
 
     const ttl = formatTtl(snap.sessionExpiresAt)
     if (ttl) {
@@ -256,8 +287,31 @@
     if (snap.running) runningTools.classList.remove('hidden')
     else runningTools.classList.add('hidden')
 
-    renderSessions(snap)
+    const sessionsKey = JSON.stringify(snap.sessions || []) + '|' + snap.focusSessionId
+    if (sessionsKey !== lastSessionsKey) {
+      lastSessionsKey = sessionsKey
+      renderSessions(snap)
+    }
 
+    renderControls(snap)
+
+    if (
+      paired
+      && !autoFocusAttempted
+      && !snap.focusSessionId
+      && Array.isArray(snap.sessions)
+      && snap.sessions.length > 0
+    ) {
+      autoFocusAttempted = true
+      void focusSession(snap.sessions[0].id)
+    }
+
+    const permissionsKey = JSON.stringify(snap.permissions || [])
+    if (permissionsKey === lastPermissionsKey) {
+      renderTail(snap)
+      return
+    }
+    lastPermissionsKey = permissionsKey
     permissionsEl.innerHTML = ''
     ;(snap.permissions || []).forEach(function (perm) {
       const card = document.createElement('div')
@@ -283,6 +337,13 @@
       permissionsEl.appendChild(card)
     })
 
+    renderTail(snap)
+  }
+
+  function renderTail(snap) {
+    const tailKey = JSON.stringify(snap.tail || [])
+    if (tailKey === lastTailKey) return
+    lastTailKey = tailKey
     const nearBottom = tailEl.scrollHeight - tailEl.scrollTop - tailEl.clientHeight < 96
     tailEl.innerHTML = ''
     ;(snap.tail || []).forEach(function (item) {
@@ -292,6 +353,18 @@
         tool.className = 'tool'
         tool.textContent = '工具 · ' + (item.status || '') + ' · ' + (item.text || '')
         art.appendChild(tool)
+      } else if (item.kind === 'turn') {
+        art.className = 'turn-item'
+        const mark = document.createElement('div')
+        mark.className = 'turn-mark'
+        mark.textContent = turnLabel(item.text)
+        art.appendChild(mark)
+      } else if (item.kind === 'error') {
+        art.className = 'error-item'
+        const body = document.createElement('div')
+        body.className = 'error-text'
+        body.textContent = '錯誤：' + (item.text || '')
+        art.appendChild(body)
       } else {
         if (item.role) {
           const role = document.createElement('div')
@@ -309,6 +382,71 @@
     if (nearBottom) tailEl.scrollTop = tailEl.scrollHeight
   }
 
+  /** Model/mode pickers from snapshot capability cache; manual inputs stay as fallback. */
+  function renderControls(snap) {
+    const modelsKey = JSON.stringify(snap.models || null)
+    if (modelsKey !== lastModelsKey) {
+      lastModelsKey = modelsKey
+      const models = snap.models
+      const hasModels = !!(models && models.availableModels && models.availableModels.length)
+      modelSelectWrap.classList.toggle('hidden', !hasModels)
+      effortSelectWrap.classList.toggle('hidden', !hasModels)
+      modelIdWrap.classList.toggle('hidden', hasModels)
+      modelEffortWrap.classList.toggle('hidden', hasModels)
+      if (hasModels) {
+        modelSelect.innerHTML = ''
+        models.availableModels.forEach(function (model) {
+          const opt = document.createElement('option')
+          opt.value = model.modelId
+          opt.textContent = model.name || model.modelId
+          if (model.modelId === models.currentModelId) opt.selected = true
+          modelSelect.appendChild(opt)
+        })
+        renderEffortOptions(models)
+      }
+    }
+
+    const modesKey = JSON.stringify(snap.modes || null)
+    if (modesKey !== lastModesKey) {
+      lastModesKey = modesKey
+      const modes = snap.modes
+      const hasModes = !!(modes && modes.availableModes && modes.availableModes.length)
+      modeSelectWrap.classList.toggle('hidden', !hasModes)
+      modeIdWrap.classList.toggle('hidden', hasModes)
+      if (hasModes) {
+        modeSelect.innerHTML = ''
+        modes.availableModes.forEach(function (mode) {
+          const opt = document.createElement('option')
+          opt.value = mode.id
+          opt.textContent = mode.name || mode.id
+          if (mode.id === modes.currentModeId) opt.selected = true
+          modeSelect.appendChild(opt)
+        })
+      }
+    }
+  }
+
+  function renderEffortOptions(models) {
+    const list = (models && models.availableModels) || []
+    const chosen = list.find(function (m) { return m.modelId === modelSelect.value }) || list[0]
+    effortSelect.innerHTML = ''
+    const none = document.createElement('option')
+    none.value = ''
+    none.textContent = '（預設）'
+    effortSelect.appendChild(none)
+    ;((chosen && chosen.reasoningEfforts) || []).forEach(function (effort) {
+      const opt = document.createElement('option')
+      opt.value = effort.value
+      opt.textContent = effort.label || effort.value
+      if (chosen && effort.value === chosen.currentReasoningEffort) opt.selected = true
+      effortSelect.appendChild(opt)
+    })
+  }
+
+  modelSelect.addEventListener('change', function () {
+    renderEffortOptions(lastSnap && lastSnap.models ? lastSnap.models : null)
+  })
+
   /** One-shot snapshot (does NOT schedule poll — avoids duplicate loops / rate limits). */
   async function fetchSnapshotOnce() {
     if (!paired) return
@@ -316,6 +454,7 @@
       const { res, data } = await api('/api/snapshot')
       if (res.status === 401) {
         paired = false
+        autoFocusAttempted = false
         stopPolling()
         setBanner('工作階段已失效（72h 到期或桌面切斷），請重新配對')
         showPair()
@@ -324,12 +463,23 @@
       }
       if (res.ok) {
         pollMs = 2500
+        snapshotFailures = 0
         renderSnapshot(data)
       } else {
         pollMs = Math.min(10000, pollMs + 1000)
+        noteSnapshotFailure()
       }
     } catch (_) {
       pollMs = Math.min(10000, pollMs + 1000)
+      noteSnapshotFailure()
+    }
+  }
+
+  /** Desktop closed remote / app quit / network drop — say so instead of freezing silently. */
+  function noteSnapshotFailure() {
+    snapshotFailures += 1
+    if (snapshotFailures >= 3) {
+      setBanner('連線中斷：連不上電腦（遙控可能已關閉或網路變更），畫面非最新')
     }
   }
 
@@ -405,7 +555,8 @@
       const ok = await postAction('/api/prompt', { text: text })
       if (ok) promptEl.value = ''
     } finally {
-      sendBtn.disabled = false
+      // Stay disabled when the accepted prompt is now running (snapshot will confirm).
+      sendBtn.disabled = !!(lastSnap && lastSnap.running)
     }
   }
 
@@ -432,6 +583,7 @@
         return
       }
       paired = false
+      autoFocusAttempted = false
       stopPolling()
       setBanner('已切斷 — 需回電腦重新配對')
       showPair()
@@ -478,17 +630,19 @@
   })
 
   $('set-model-btn').addEventListener('click', function () {
-    const modelId = ($('model-id').value || '').trim()
-    if (!modelId) { mainError.textContent = '請輸入 modelId'; return }
-    const effort = ($('model-effort').value || '').trim()
+    const usingPicker = !modelSelectWrap.classList.contains('hidden')
+    const modelId = usingPicker ? modelSelect.value : ($('model-id').value || '').trim()
+    if (!modelId) { mainError.textContent = usingPicker ? '請先選擇模型' : '請輸入 modelId'; return }
+    const effort = usingPicker ? effortSelect.value : ($('model-effort').value || '').trim()
     void postAction('/api/model', {
       modelId: modelId,
       reasoningEffort: effort || undefined
     }, '已切換模型')
   })
   $('set-mode-btn').addEventListener('click', function () {
-    const modeId = ($('mode-id').value || '').trim()
-    if (!modeId) { mainError.textContent = '請輸入 modeId'; return }
+    const usingPicker = !modeSelectWrap.classList.contains('hidden')
+    const modeId = usingPicker ? modeSelect.value : ($('mode-id').value || '').trim()
+    if (!modeId) { mainError.textContent = usingPicker ? '請先選擇工作模式' : '請輸入 modeId'; return }
     void postAction('/api/mode', { modeId: modeId }, '已切換工作模式')
   })
   $('create-session-btn').addEventListener('click', function () {
@@ -498,13 +652,25 @@
   })
 
   $('yolo-on-btn').addEventListener('click', function () {
-    yoloPinWrap.classList.remove('hidden')
+    // Two-step: first tap reveals the PIN field (guidance, not an error tone).
+    if (yoloPinWrap.classList.contains('hidden')) {
+      yoloPinWrap.classList.remove('hidden')
+      noticesEl.textContent = '請輸入桌面顯示的 PIN，再按一次「開啟 YOLO」'
+      yoloPin.focus()
+      return
+    }
     const pin = (yoloPin.value || '').trim()
     if (!pin) {
       mainError.textContent = '開啟 YOLO 需輸入 PIN'
+      yoloPin.focus()
       return
     }
-    void postAction('/api/yolo/enable', { pin: pin }, '已請求開啟 YOLO')
+    void postAction('/api/yolo/enable', { pin: pin }, '已請求開啟 YOLO').then(function (ok) {
+      if (ok) {
+        yoloPin.value = ''
+        yoloPinWrap.classList.add('hidden')
+      }
+    })
   })
   $('yolo-off-btn').addEventListener('click', function () {
     void postAction('/api/yolo/disable', {}, '已關閉 YOLO（遙控仍連線）')

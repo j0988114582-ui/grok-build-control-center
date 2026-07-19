@@ -53,5 +53,44 @@ describe('remote-web SPA (wave4)', () => {
   it('CSS enforces 44px touch targets', () => {
     expect(css).toMatch(/--touch:\s*44px/)
     expect(css).toMatch(/min-height:\s*var\(--touch\)/)
+    expect(css).toMatch(/button:disabled/)
+  })
+
+  it('signals dropped desktop connection instead of freezing silently', () => {
+    expect(js).toMatch(/noteSnapshotFailure/)
+    expect(js).toMatch(/連線中斷/)
+  })
+
+  it('skips DOM rebuilds when snapshot sections are unchanged (no flicker)', () => {
+    expect(js).toMatch(/lastTailKey/)
+    expect(js).toMatch(/lastSessionsKey/)
+    expect(js).toMatch(/lastPermissionsKey/)
+  })
+
+  it('disables send while a turn is running (interject row is the affordance)', () => {
+    expect(js).toMatch(/sendBtn\.disabled = !!snap\.running/)
+  })
+
+  it('YOLO PIN is a two-step reveal with masked input', () => {
+    expect(html).toMatch(/id="yolo-pin"[^>]*type="password"/)
+    expect(js).toMatch(/再按一次「開啟 YOLO」/)
+  })
+
+  it('renders turn markers and errors distinctly in the tail', () => {
+    expect(js).toMatch(/turnLabel/)
+    expect(js).toMatch(/回合完成/)
+    expect(js).toMatch(/error-item/)
+    expect(css).toMatch(/turn-mark/)
+  })
+
+  it('offers model/mode pickers from snapshot with manual fallback', () => {
+    expect(html).toMatch(/id="model-select"/)
+    expect(html).toMatch(/id="effort-select"/)
+    expect(html).toMatch(/id="mode-select"/)
+    expect(html).toMatch(/id="model-id"/)
+    expect(html).toMatch(/id="mode-id"/)
+    expect(js).toMatch(/renderControls/)
+    expect(js).toMatch(/renderEffortOptions/)
+    expect(js).toMatch(/snap\.models/)
   })
 })

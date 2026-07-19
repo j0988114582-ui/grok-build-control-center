@@ -11,7 +11,11 @@ import {
 import { buildClearSessionCookie, buildSessionCookie, parseCookie } from './remote-auth'
 import type { RemoteController } from './remote-controller'
 
-const BODY_LIMIT = 32_768
+/**
+ * Must fit REMOTE_PROMPT_MAX_CHARS (12,000) of CJK in JSON UTF-8: worst case
+ * ≈ 6 bytes/char escaped (72KB) + envelope. 32KB used to reject ~10.7k CJK chars.
+ */
+const BODY_LIMIT = 131_072
 const JSON_TYPE = 'application/json'
 
 export type RemoteServerOptions = {
@@ -260,13 +264,15 @@ export class RemoteServer {
 
     if (pathname === '/api/logout' && req.method === 'POST') {
       if (!requireJsonMutation(req, res)) return
-      controller.auth.revokeAll()
+      // Controller-owned so the desktop panel is told (banner/notices emit), not just auth.
+      controller.handleLogout()
       sendJson(res, 200, { ok: true }, { 'Set-Cookie': buildClearSessionCookie(this.cookieSecure()) })
       return
     }
 
     if (pathname === '/api/snapshot' && req.method === 'GET') {
-      if (!controller.auth.rateLimit(`snap:${session.value.tokenHash}`, 30, 60_000, now)) {
+      // 2.5s poll = 24/min baseline + per-action refreshes; 30/min sat on the edge.
+      if (!controller.auth.rateLimit(`snap:${session.value.tokenHash}`, 60, 60_000, now)) {
         sendJson(res, 429, remoteError('rate_limited', '請求過於頻繁'))
         return
       }

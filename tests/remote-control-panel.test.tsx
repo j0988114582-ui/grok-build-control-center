@@ -110,4 +110,56 @@ describe('RemoteControlPanel (v0.9 wave3)', () => {
     )
     expect(screen.getByTestId('remote-panel').textContent).not.toMatch(/不可與 YOLO/)
   })
+
+  it('warns when active pair URL is loopback (phone cannot open)', async () => {
+    render(
+      <RemoteControlPanel
+        active
+        state={{
+          ...baseState,
+          publicBaseUrl: 'http://127.0.0.1:54321',
+          experimentalTunnel: false
+        }}
+        busy={false}
+        permissionMode="ask"
+        allowPhonePerms={false}
+        useQuickTunnel={false}
+        onAllowPhonePerms={vi.fn()}
+        onUseQuickTunnel={vi.fn()}
+        onNotice={vi.fn()}
+        onEnable={vi.fn()}
+        onDisable={vi.fn()}
+        onRegenerate={vi.fn()}
+        onState={vi.fn()}
+        onActiveChange={vi.fn()}
+        onBusy={vi.fn()}
+      />
+    )
+    expect(screen.getByTestId('remote-loopback-warn').textContent).toMatch(/手機掃此 QR 進不去/)
+    expect(screen.getByTestId('remote-banner').textContent).toMatch(/loopback/)
+    await waitFor(() => expect(screen.getByTestId('remote-pair-url').textContent).toContain('127.0.0.1'))
+  })
+
+  it('shows pre-enable loopback warning when Quick Tunnel unchecked', () => {
+    render(
+      <RemoteControlPanel
+        active={false}
+        state={null}
+        busy={false}
+        permissionMode="ask"
+        allowPhonePerms={false}
+        useQuickTunnel={false}
+        onAllowPhonePerms={vi.fn()}
+        onUseQuickTunnel={vi.fn()}
+        onNotice={vi.fn()}
+        onEnable={vi.fn()}
+        onDisable={vi.fn()}
+        onRegenerate={vi.fn()}
+        onState={vi.fn()}
+        onActiveChange={vi.fn()}
+        onBusy={vi.fn()}
+      />
+    )
+    expect(screen.getByTestId('remote-loopback-prewarn').textContent).toMatch(/手機掃碼會連不上/)
+  })
 })

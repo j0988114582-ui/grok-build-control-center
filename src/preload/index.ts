@@ -57,6 +57,11 @@ const api: GrokBridgeApi = {
     ipcRenderer.on('grok:permission-request', listener)
     return () => ipcRenderer.removeListener('grok:permission-request', listener)
   },
+  onPermissionResolved: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: { requestId: string }): void => callback(value)
+    ipcRenderer.on('grok:permission-resolved', listener)
+    return () => ipcRenderer.removeListener('grok:permission-resolved', listener)
+  },
   onStatus: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, value: CliStatusUpdate): void => callback(value)
     ipcRenderer.on('grok:status-update', listener)

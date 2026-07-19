@@ -162,6 +162,8 @@ class GalaxyEngine implements StarfieldEngine {
   private current = motionProfile('idle')
   private destroyed = false
   private resizeObserver?: ResizeObserver
+  private readonly onWindowResize = (): void => { this.resize({ kick: true }) }
+  private readonly onRoResize = (): void => { this.resize({ kick: true }) }
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly options: EngineOptions) {
     let gl: WebGLRenderingContext | null = null
@@ -177,15 +179,15 @@ class GalaxyEngine implements StarfieldEngine {
     this.programs = gl ? this.initializeWebGl(gl) : null
     this.renderer = this.programs ? 'webgl' : context2d ? 'canvas2d' : 'none'
     this.canvasStars = this.createCanvasStars(densityToStarCount(options.density))
-    this.resize = this.resize.bind(this)
     this.onVisibility = this.onVisibility.bind(this)
     this.onContextLost = this.onContextLost.bind(this)
     this.onContextRestored = this.onContextRestored.bind(this)
-    this.resize()
+    // Constructor size only — sync render follows; do not double-schedule RAF.
+    this.resize({ kick: false })
     if (typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver(this.resize)
+      this.resizeObserver = new ResizeObserver(this.onRoResize)
       this.resizeObserver.observe(canvas)
-    } else window.addEventListener('resize', this.resize)
+    } else window.addEventListener('resize', this.onWindowResize)
     document.addEventListener('visibilitychange', this.onVisibility)
     canvas.addEventListener('webglcontextlost', this.onContextLost)
     canvas.addEventListener('webglcontextrestored', this.onContextRestored)
@@ -206,7 +208,7 @@ class GalaxyEngine implements StarfieldEngine {
     this.destroyed = true
     if (this.frame) cancelAnimationFrame(this.frame)
     this.resizeObserver?.disconnect()
-    window.removeEventListener('resize', this.resize)
+    window.removeEventListener('resize', this.onWindowResize)
     document.removeEventListener('visibilitychange', this.onVisibility)
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost)
     this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored)
@@ -233,7 +235,7 @@ class GalaxyEngine implements StarfieldEngine {
       return
     }
     this.renderer = 'webgl'
-    this.resize()
+    this.resize({ kick: false })
     if (this.options.static) this.render(performance.now())
     else if (!document.hidden && !this.frame) this.frame = requestAnimationFrame((time) => this.render(time))
   }
@@ -243,14 +245,23 @@ class GalaxyEngine implements StarfieldEngine {
     else if (!document.hidden && !this.options.static && !this.destroyed && this.renderer !== 'none' && !this.frame) this.frame = requestAnimationFrame((time) => this.render(time))
   }
 
-  private resize(): void {
+  private resize(options?: { kick?: boolean }): void {
+    // Prefer real layout; fall back to window only when canvas still has no box (cold start).
+    const layoutW = this.canvas.clientWidth
+    const layoutH = this.canvas.clientHeight
+    const cssW = layoutW > 0 ? layoutW : (window.innerWidth || 1)
+    const cssH = layoutH > 0 ? layoutH : (window.innerHeight || 1)
     const ratio = Math.min(1.5, window.devicePixelRatio || 1)
-    const width = Math.max(1, Math.floor((this.canvas.clientWidth || window.innerWidth || 1) * ratio))
-    const height = Math.max(1, Math.floor((this.canvas.clientHeight || window.innerHeight || 1) * ratio))
+    const width = Math.max(1, Math.floor(cssW * ratio))
+    const height = Math.max(1, Math.floor(cssH * ratio))
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width
       this.canvas.height = height
-      if (this.options.static && !this.destroyed && this.renderer !== 'none') this.render(performance.now())
+      // kick:true when ResizeObserver/window resize fires after a tiny cold buffer.
+      if (options?.kick && !this.destroyed && this.renderer !== 'none') {
+        if (this.options.static) this.render(performance.now())
+        else if (!this.frame && !document.hidden) this.frame = requestAnimationFrame((time) => this.render(time))
+      }
     }
   }
 

@@ -1,11 +1,13 @@
 import path from 'node:path'
-import type { AgentPermissionMode, PermissionRequest, SessionSummary, UiSessionEvent } from '../shared/types'
+import type { AgentPermissionMode, ModelState, PermissionRequest, SessionSummary, UiSessionEvent } from '../shared/types'
 import {
   REMOTE_PROMPT_MAX_CHARS,
   REMOTE_TAIL_MAX_BYTES,
   REMOTE_TAIL_MAX_ITEMS,
   type RemoteBannerState,
   type RemoteFocusStatus,
+  type RemoteModelState,
+  type RemoteModeState,
   type RemotePermissionCard,
   type RemoteSessionListItem,
   type RemoteSnapshot,
@@ -44,7 +46,9 @@ export type RemoteControllerDeps = {
   setMode?: (sessionId: string, modeId: string) => Promise<void>
   interject?: (sessionId: string, text: string) => Promise<void>
   setPermissionMode?: (mode: AgentPermissionMode) => Promise<AgentPermissionMode>
-  onFocusChanged?: (sessionId: string | null) => void
+  /** Live ACP capability cache — lets the phone pick models/modes instead of typing ids. */
+  getCapabilities?: () => { modelState?: ModelState; modes?: Array<{ id: string; name: string }>; currentModeId?: string } | null
+  onFocusChanged?: (sessionId: string | null, focusStatus?: RemoteFocusStatus) => void
   onStateChange?: () => void
   now?: () => number
 }
@@ -53,8 +57,8 @@ export type HandlerResult =
   | { ok: true; sessionId?: string }
   | { ok: false; code: string; message: string }
 
-/** Normalize absolute paths for case-insensitive exact compare. Relative → null. */
-export function normalizeCwdKey(cwd: string): string | null {
+/** Shared shape normalization (no case folding) — display keeps original casing. */
+export function normalizeCwdDisplay(cwd: string): string | null {
   const trimmed = cwd.trim()
   if (!trimmed || trimmed.includes('..')) return null
   const abs = path.isAbsolute(trimmed) || /^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith('\\\\')
@@ -66,6 +70,13 @@ export function normalizeCwdKey(cwd: string): string | null {
   } else if (!/^\\\\[^\\]+\\[^\\]+$/i.test(n)) {
     n = n.replace(/[\\/]+$/, '')
   }
+  return n
+}
+
+/** Normalize absolute paths for case-insensitive exact compare. Relative → null. */
+export function normalizeCwdKey(cwd: string): string | null {
+  const n = normalizeCwdDisplay(cwd)
+  if (n === null) return null
   return process.platform === 'win32' ? n.toLowerCase() : n
 }
 
@@ -92,8 +103,8 @@ export class RemoteController {
   private experimentalTunnel = false
   private lastSessions: SessionSummary[] = []
   private sessionsListFresh = false
-  /** Create results not yet visible on disk — merged into list until index catches up. */
-  private optimisticSessions = new Map<string, SessionSummary>()
+  /** Create results not yet visible on disk — merged into list until index catches up or TTL. */
+  private optimisticSessions = new Map<string, { summary: SessionSummary; addedAt: number }>()
   private queue: RemoteQueuedPrompt | null = null
   private loadGeneration = 0
   /**
@@ -243,7 +254,7 @@ export class RemoteController {
     this.focusSessionId = sessionId
     this.focusStatus = !sessionId ? 'none' : this.deps.isSessionReady(sessionId) ? 'ready' : 'loading'
     this.focusError = undefined
-    this.deps.onFocusChanged?.(sessionId)
+    this.deps.onFocusChanged?.(sessionId, this.focusStatus)
     this.emit()
   }
 
@@ -294,9 +305,20 @@ export class RemoteController {
       this.runningBySession.set(event.sessionId, event.status === 'running')
       if (event.status !== 'running') {
         this.inFlightPrompt.delete(event.sessionId)
+        // Same as desktop: a finished/cancelled turn invalidates its pending permission cards.
+        this.clearPermissionsForSession(event.sessionId)
         void this.drainQueueIfIdle(event.sessionId)
       }
     }
+  }
+
+  /** Any turn running or prompt in flight — blocks phone YOLO toggles (parity with desktop lock). */
+  hasRunningActivity(): boolean {
+    if (this.inFlightPrompt.size > 0) return true
+    for (const running of this.runningBySession.values()) {
+      if (running) return true
+    }
+    return false
   }
 
   assertCanEnableYolo(): { ok: true } | { ok: false; reason: string } {
@@ -322,6 +344,46 @@ export class RemoteController {
     this.banner = 'paired'
     this.emit()
     return { ok: true, sessionToken: result.value.sessionToken }
+  }
+
+  /**
+   * Desktop deleted a session — drop every remote trace so the phone cannot keep
+   * prompting a ghost (focus, tail, running flags, queue, pending permissions).
+   */
+  onSessionDeleted(sessionId: string): void {
+    this.runningBySession.delete(sessionId)
+    this.inFlightPrompt.delete(sessionId)
+    this.tails.delete(sessionId)
+    this.optimisticSessions.delete(sessionId)
+    for (const [id, item] of this.pending) {
+      if (item.sessionId === sessionId) this.pending.delete(id)
+    }
+    if (this.queue?.sessionId === sessionId) this.queue = null
+    this.lastSessions = this.lastSessions.filter((session) => session.id !== sessionId)
+    if (this.focusSessionId === sessionId) {
+      this.loadGeneration += 1
+      this.latestValidatedFocusIntent = this.focusIntentSeq
+      this.focusSessionId = null
+      this.focusStatus = 'none'
+      this.focusError = undefined
+      this.deps.onFocusChanged?.(null, 'none')
+    }
+    this.emit()
+  }
+
+  /** Phone-side logout: revoke sessions AND reflect it on the desktop panel (F4). */
+  handleLogout(): void {
+    this.auth.revokeAll()
+    this.pending.clear()
+    this.banner = 'expired'
+    this.notices = ['手機端已切斷遠端連線；要再配對請按「重新產生配對」']
+    this.emit()
+  }
+
+  /** Transient progress line for the desktop notices toast (e.g. tunnel health retries). */
+  setStatusNotice(text: string): void {
+    this.notices = [text]
+    this.emit()
   }
 
   /**
@@ -362,7 +424,9 @@ export class RemoteController {
     this.focusRequestId += 1
     this.focusSessionId = sessionId
     this.focusError = undefined
-    this.deps.onFocusChanged?.(sessionId)
+    // Status is decided before notifying so the renderer payload carries it (F5).
+    this.focusStatus = this.deps.isSessionReady(sessionId) ? 'ready' : 'loading'
+    this.deps.onFocusChanged?.(sessionId, this.focusStatus)
 
     if (this.deps.isSessionReady(sessionId)) {
       if (!this.sameFocusLifecycle(epoch) || gen !== this.loadGeneration) {
@@ -447,8 +511,8 @@ export class RemoteController {
       const key = normalizeCwdKey(session.cwd)
       if (!key) continue
       if (!set.has(key)) {
-        // Prefer canonical key shape for equality (drive roots stay `c:\`)
-        set.set(key, key)
+        // Display keeps original casing; equality still runs on the folded key.
+        set.set(key, normalizeCwdDisplay(session.cwd) ?? key)
       }
     }
     return [...set.values()].sort((a, b) => a.localeCompare(b))
@@ -482,7 +546,7 @@ export class RemoteController {
         cwd: created.cwd || path.normalize(cwd.trim()),
         title: created.sessionId
       }
-      this.optimisticSessions.set(created.sessionId, optimistic)
+      this.optimisticSessions.set(created.sessionId, { summary: optimistic, addedAt: this.now() })
       this.mergeOptimisticIntoLastSessions()
       this.sessionsListFresh = true
       await this.refreshSessions()
@@ -506,6 +570,11 @@ export class RemoteController {
     if (this.deps.getPermissionMode() === 'always-approve') {
       return { ok: true }
     }
+    // Parity with desktop permissionControlsLocked: mode switch reconnects ACP and
+    // would kill any in-flight turn — refuse instead of silently dropping work.
+    if (this.hasRunningActivity()) {
+      return { ok: false, code: 'in_flight', message: '有回合執行中：請先停止（或等它完成）再切換 YOLO' }
+    }
     const pinResult = this.auth.verifyElevationPin(pin, tokenHash, this.now())
     if (!pinResult.ok) return { ok: false, code: pinResult.code, message: pinResult.message }
     if (!this.deps.setPermissionMode) {
@@ -525,6 +594,9 @@ export class RemoteController {
   async handleYoloDisable(): Promise<HandlerResult> {
     if (!this.enabled) return { ok: false, code: 'forbidden', message: '遠端遙控未啟用' }
     if (this.deps.getPermissionMode() === 'ask') return { ok: true }
+    if (this.hasRunningActivity()) {
+      return { ok: false, code: 'in_flight', message: '有回合執行中：請先停止（或等它完成）再切換 YOLO' }
+    }
     if (!this.deps.setPermissionMode) {
       return { ok: false, code: 'not_ready', message: '權限模式切換未就緒' }
     }
@@ -585,13 +657,20 @@ export class RemoteController {
     this.inFlightPrompt.add(sessionId)
     this.notices = ['來自手機遙控：已送出提示']
     this.emit()
-    try {
-      await this.deps.prompt(sessionId, trimmed)
-      return { ok: true, sessionId }
-    } catch (error) {
+    // Accepted-then-run: the ACP prompt resolves only when the whole turn ends, which can
+    // exceed tunnel proxy timeouts (~100s) and make the phone mis-report failure. Return
+    // immediately; progress flows via snapshot polling, failures via notices + turn events.
+    this.firePrompt(sessionId, trimmed)
+    return { ok: true, sessionId }
+  }
+
+  private firePrompt(sessionId: string, text: string): void {
+    void this.deps.prompt(sessionId, text).catch((error) => {
       this.inFlightPrompt.delete(sessionId)
-      return { ok: false, code: 'server_error', message: error instanceof Error ? error.message : String(error) }
-    }
+      const message = error instanceof Error ? error.message : String(error)
+      this.notices = [`提示送出失敗：${message}`]
+      this.emit()
+    })
   }
 
   async handleInterject(text: string): Promise<HandlerResult> {
@@ -633,6 +712,12 @@ export class RemoteController {
     this.queue = null
     try {
       await this.deps.cancel(sessionId)
+      if (this.focusSessionId !== sessionId) {
+        return { ok: false, code: 'not_ready', message: '焦點已變更，取消立刻改做' }
+      }
+      // Let the cancelled turn's stop event land first — otherwise its pushEvent would
+      // wipe the NEW prompt's in-flight flag and open a duplicate-prompt window.
+      await this.waitForTurnIdle(sessionId)
       this.inFlightPrompt.delete(sessionId)
       this.runningBySession.set(sessionId, false)
       if (this.focusSessionId !== sessionId) {
@@ -641,6 +726,15 @@ export class RemoteController {
       return await this.handlePromptForSession(sessionId, trimmed)
     } catch (error) {
       return { ok: false, code: 'server_error', message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** Bounded wait for the turn-stop event after cancel (fallback: force-clear at timeout). */
+  private async waitForTurnIdle(sessionId: string, maxMs = 1_200): Promise<void> {
+    const step = 50
+    for (let waited = 0; waited < maxMs; waited += step) {
+      if (!this.runningBySession.get(sessionId) && !this.inFlightPrompt.has(sessionId)) return
+      await new Promise((resolve) => setTimeout(resolve, step))
     }
   }
 
@@ -714,17 +808,13 @@ export class RemoteController {
       source === 'desktop' ? '來自桌面：已送出排隊提示' : '來自手機遙控：已送出提示'
     ]
     this.emit()
-    try {
-      if (this.focusSessionId !== sessionId) {
-        this.inFlightPrompt.delete(sessionId)
-        return { ok: false, code: 'not_ready', message: '焦點已變更，取消送出' }
-      }
-      await this.deps.prompt(sessionId, trimmed)
-      return { ok: true, sessionId }
-    } catch (error) {
+    if (this.focusSessionId !== sessionId) {
       this.inFlightPrompt.delete(sessionId)
-      return { ok: false, code: 'server_error', message: error instanceof Error ? error.message : String(error) }
+      return { ok: false, code: 'not_ready', message: '焦點已變更，取消送出' }
     }
+    // Same accepted-then-run contract as handlePrompt (tunnel-safe response time).
+    this.firePrompt(sessionId, trimmed)
+    return { ok: true, sessionId }
   }
 
   async handleCancel(): Promise<HandlerResult> {
@@ -765,8 +855,10 @@ export class RemoteController {
       this.deps.respondPermission(requestId, optionId)
       this.emit()
       return { ok: true }
-    } catch (error) {
-      return { ok: false, code: 'server_error', message: error instanceof Error ? error.message : String(error) }
+    } catch {
+      // Race with desktop click / turn end: ACP no longer holds the request.
+      this.emit()
+      return { ok: false, code: 'permission_mismatch', message: '權限請求已由桌面處理或已失效' }
     }
   }
 
@@ -829,11 +921,41 @@ export class RemoteController {
       sessions,
       permissions,
       tail: focus ? (this.tails.get(focus) ?? []) : [],
+      models: this.snapshotModels(),
+      modes: this.snapshotModes(),
       notices: [...this.notices],
       sessionExpiresAt: this.auth.getSessionExpiresAt(this.now()),
       elevationLocked: this.auth.isElevationLocked(),
       experimentalTunnel: this.experimentalTunnel
     }
+  }
+
+  /** Bounded projection of the ACP model cache (phone picker; wire-size capped). */
+  private snapshotModels(): RemoteModelState | null {
+    const caps = this.deps.getCapabilities?.()
+    const state = caps?.modelState
+    if (!state || !Array.isArray(state.availableModels)) return null
+    const availableModels = state.availableModels.slice(0, 16).map((model) => ({
+      modelId: String(model.modelId).slice(0, 64),
+      name: String(model.name).slice(0, 80),
+      ...(model.currentReasoningEffort ? { currentReasoningEffort: String(model.currentReasoningEffort).slice(0, 32) } : {}),
+      reasoningEfforts: (model.reasoningEfforts ?? []).slice(0, 8).map((effort) => ({
+        id: String(effort.id).slice(0, 32),
+        value: String(effort.value).slice(0, 32),
+        label: String(effort.label).slice(0, 48)
+      }))
+    }))
+    return { currentModelId: state.currentModelId ? String(state.currentModelId).slice(0, 64) : null, availableModels }
+  }
+
+  private snapshotModes(): RemoteModeState | null {
+    const caps = this.deps.getCapabilities?.()
+    if (!caps || !Array.isArray(caps.modes) || caps.modes.length === 0) return null
+    const availableModes = caps.modes.slice(0, 16).map((mode) => ({
+      id: String(mode.id).slice(0, 64),
+      name: String(mode.name).slice(0, 80)
+    }))
+    return { currentModeId: caps.currentModeId ? String(caps.currentModeId).slice(0, 64) : null, availableModes }
   }
 
   async refreshSessions(): Promise<SessionSummary[]> {
@@ -853,11 +975,19 @@ export class RemoteController {
     }
   }
 
+  /** CLI never wrote the session to disk → stop advertising it after 10 minutes. */
+  private static readonly OPTIMISTIC_TTL_MS = 10 * 60_000
+
   private mergeOptimisticIntoLastSessions(): void {
     if (this.optimisticSessions.size === 0) return
+    const now = this.now()
+    for (const [id, entry] of this.optimisticSessions) {
+      if (now - entry.addedAt > RemoteController.OPTIMISTIC_TTL_MS) this.optimisticSessions.delete(id)
+    }
+    if (this.optimisticSessions.size === 0) return
     const merged = [...this.lastSessions]
-    for (const row of this.optimisticSessions.values()) {
-      if (!merged.some((s) => s.id === row.id)) merged.unshift(row)
+    for (const entry of this.optimisticSessions.values()) {
+      if (!merged.some((s) => s.id === entry.summary.id)) merged.unshift(entry.summary)
     }
     this.lastSessions = merged
   }

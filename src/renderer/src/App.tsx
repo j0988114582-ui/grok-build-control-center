@@ -635,6 +635,10 @@ export function App(): React.JSX.Element {
       if (current.length === 0 && document.activeElement instanceof HTMLElement) permissionReturnFocusRef.current = document.activeElement
       return [...current, request]
     }))
+    // Phone answered a permission — remove the matching desktop modal instead of leaving
+    // a stale card that errors with「no longer active」when clicked.
+    const offPermissionResolved = window.grokApi.onPermissionResolved?.((payload) =>
+      setPermissions((current) => current.filter((item) => item.requestId !== payload.requestId)))
     const offStatus = window.grokApi.onStatus((next) => {
       if (next.connected !== undefined) setStatus((current) => ({ ...current, connected: next.connected === true }))
       if (next.connected === false) {
@@ -653,7 +657,7 @@ export function App(): React.JSX.Element {
       if (next.stderr) console.warn('[grok stderr]', next.stderr)
       if (next.message) setNotice(next.message)
     })
-    return () => { offEvent(); offPermission(); offStatus() }
+    return () => { offEvent(); offPermission(); offPermissionResolved?.(); offStatus() }
   }, [])
 
   useEffect(() => {
@@ -885,17 +889,19 @@ export function App(): React.JSX.Element {
       {selectMode && <input className="session-check" type="checkbox" aria-label={`選擇對話 ${title}`} checked={isSelected} onChange={(event) => toggleSessionSelection(session.id, event.currentTarget.checked)} />}
       <button className="session-open" disabled={lifecycleBusy || loadingSessionIds.includes(session.id)} onClick={() => void loadSession(session)}>
         <span className="session-dot" />
-        <div><strong>{title}{inTeam ? <em className="team-badge">TEAM</em> : null}</strong><small>{session.cwd}</small><time>{formatDate(session.updatedAt)}</time></div>
+        <div className="session-meta"><strong>{title}{inTeam ? <em className="team-badge">TEAM</em> : null}</strong><small>{session.cwd}</small><time>{formatDate(session.updatedAt)}</time></div>
       </button>
-      {!selectMode && <>
-        {teamEnabled && <button className={`session-team ${inTeam ? 'active' : ''}`} title={inTeam ? '移出 Agents Team' : '加入 Agents Team'} aria-label={inTeam ? `移出 Team ${title}` : `加入 Team ${title}`} onClick={() => {
-          if (inTeam) setTeam((current) => toggleTeamSlot(current, session.id))
-          else void loadSession(session)
-        }}><Users /></button>}
-        <button className={`session-pin ${isPinned ? 'pinned' : ''}`} title={isPinned ? '取消釘選' : '釘選'} aria-label={isPinned ? `取消釘選 ${title}` : `釘選 ${title}`} onClick={() => togglePinned(session)}><Pin /></button>
-        <button className="session-rename" title="重新命名" aria-label={`重新命名 ${title}`} onClick={() => { setRenameTarget(session); setRenameDraft(title) }}><Pencil /></button>
-        <button className="session-delete" data-nova-tone="danger" title="刪除對話" aria-label={`刪除對話 ${title}`} onClick={() => setDeleteTarget(session)}><Trash2 /></button>
-      </>}
+      {!selectMode && (
+        <div className="session-actions" data-testid="session-actions">
+          {teamEnabled && <button type="button" className={`session-team ${inTeam ? 'active' : ''}`} title={inTeam ? '移出 Agents Team' : '加入 Agents Team'} aria-label={inTeam ? `移出 Team ${title}` : `加入 Team ${title}`} onClick={() => {
+            if (inTeam) setTeam((current) => toggleTeamSlot(current, session.id))
+            else void loadSession(session)
+          }}><Users /></button>}
+          <button type="button" className={`session-pin ${isPinned ? 'pinned' : ''}`} title={isPinned ? '取消釘選' : '釘選'} aria-label={isPinned ? `取消釘選 ${title}` : `釘選 ${title}`} onClick={() => togglePinned(session)}><Pin /></button>
+          <button type="button" className="session-rename" title="重新命名" aria-label={`重新命名 ${title}`} onClick={() => { setRenameTarget(session); setRenameDraft(title) }}><Pencil /></button>
+          <button type="button" className="session-delete" data-nova-tone="danger" title="刪除對話" aria-label={`刪除對話 ${title}`} onClick={() => setDeleteTarget(session)}><Trash2 /></button>
+        </div>
+      )}
     </div>
   }
   const togglePinned = (session: SessionSummary): void => {

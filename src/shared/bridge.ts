@@ -73,6 +73,8 @@ export interface GrokBridgeApi {
   openPath(filePath: string): Promise<string>
   onEvent(callback: (event: UiSessionEvent) => void): () => void
   onPermission(callback: (request: PermissionRequest) => void): () => void
+  /** A permission request was answered elsewhere (phone remote) — close matching desktop UI. */
+  onPermissionResolved(callback: (payload: { requestId: string }) => void): () => void
   onStatus(callback: (status: CliStatusUpdate) => void): () => void
   /** Remote control (default off). */
   remoteGetState(): Promise<RemoteDesktopState>

@@ -586,6 +586,202 @@ describe('remote-controller (v0.9 coexistence)', () => {
     expect(controller.getSnapshot().focusStatus).toBe('ready')
   })
 
+  it('yolo toggle is refused while a turn is running (parity with desktop lock)', async () => {
+    const setPermissionMode = vi.fn().mockResolvedValue('always-approve')
+    const controller = makeController({ setPermissionMode })
+    controller.enable()
+    const opened = controller.regeneratePairing()!
+    const paired = controller.auth.pair(opened.pairingSecret, opened.pin, 1_000_000)
+    expect(paired.ok).toBe(true)
+    if (!paired.ok) return
+    const v = controller.auth.validateSession(paired.value.sessionToken, 1_000_001)
+    expect(v.ok).toBe(true)
+    if (!v.ok) return
+    controller.setFocusSession('s1')
+    controller.setRunning('s1', true)
+    const enable = await controller.handleYoloEnable(opened.pin, v.value.tokenHash)
+    expect(enable.ok).toBe(false)
+    if (!enable.ok) expect(enable.code).toBe('in_flight')
+    expect(setPermissionMode).not.toHaveBeenCalled()
+    controller.setRunning('s1', false)
+    const enableIdle = await controller.handleYoloEnable(opened.pin, v.value.tokenHash)
+    expect(enableIdle.ok).toBe(true)
+  })
+
+  it('turn end clears pending permission cards like the desktop', () => {
+    const controller = makeController()
+    controller.enable({ allowPhonePermissions: true })
+    controller.setFocusSession('s1')
+    controller.onPermissionRequest({
+      requestId: 'permission:9',
+      sessionId: 's1',
+      title: 'Run shell',
+      options: [{ optionId: 'once', name: 'Allow once', kind: 'allow_once' }]
+    })
+    expect(controller.getSnapshot().permissions).toHaveLength(1)
+    controller.pushEvent({ id: 't-end', sessionId: 's1', kind: 'turn', status: 'cancelled' })
+    expect(controller.getSnapshot().permissions).toHaveLength(0)
+    expect(controller.handlePermissionRespond('permission:9', 'once').ok).toBe(false)
+  })
+
+  it('prompt responds accepted before the turn completes; failure surfaces via notices', async () => {
+    let rejectPrompt: (error: Error) => void
+    const prompt = vi.fn().mockImplementation(() => new Promise<void>((_resolve, reject) => { rejectPrompt = reject }))
+    const controller = makeController({ prompt })
+    controller.enable()
+    controller.setFocusSession('s1')
+    const result = await controller.handlePrompt('long running job')
+    expect(result.ok).toBe(true)
+    expect(prompt).toHaveBeenCalledWith('s1', 'long running job')
+    // Accepted while still in flight — a second prompt is refused
+    const second = await controller.handlePrompt('again')
+    expect(second.ok).toBe(false)
+    if (!second.ok) expect(second.code).toBe('in_flight')
+    rejectPrompt!(new Error('CLI died'))
+    await vi.waitFor(() => {
+      expect(controller.getDesktopPairingView().notices.some((n) => n.includes('提示送出失敗'))).toBe(true)
+    })
+    // in-flight flag released after failure
+    const third = await controller.handlePrompt('retry')
+    expect(third.ok).toBe(true)
+  })
+
+  it('phone logout expires desktop banner and revokes sessions', () => {
+    const controller = makeController()
+    controller.enable()
+    const opened = controller.regeneratePairing()!
+    const paired = controller.auth.pair(opened.pairingSecret, opened.pin, 1_000_000)
+    expect(paired.ok).toBe(true)
+    controller.handleLogout()
+    expect(controller.getDesktopPairingView().banner).toBe('expired')
+    expect(controller.auth.hasActiveSession(1_000_001)).toBe(false)
+    expect(controller.getDesktopPairingView().notices.some((n) => n.includes('切斷'))).toBe(true)
+  })
+
+  it('focus change reports focusStatus to onFocusChanged (renderer payload contract)', async () => {
+    const onFocusChanged = vi.fn()
+    let ready = false
+    const controller = makeController({
+      isSessionReady: () => ready,
+      loadSession: async () => { ready = true },
+      onFocusChanged
+    })
+    controller.enable()
+    const result = await controller.handleFocus('s1')
+    expect(result.ok).toBe(true)
+    expect(onFocusChanged).toHaveBeenCalledWith('s1', 'loading')
+    controller.setFocusSession(null)
+    expect(onFocusChanged).toHaveBeenCalledWith(null, 'none')
+  })
+
+  it('cwd union keeps original casing while matching case-insensitively', async () => {
+    const controller = makeController({
+      listSessions: () => [{ id: 's1', cwd: 'C:\\Repo\\MyApp', title: 'Alpha' }]
+    })
+    controller.enable()
+    await controller.refreshSessions()
+    expect(controller.listCwdUnion()).toEqual(['C:\\Repo\\MyApp'])
+    expect(controller.isCwdInUnion('C:\\Repo\\MyApp')).toBe(true)
+    if (process.platform === 'win32') {
+      expect(controller.isCwdInUnion('c:\\repo\\myapp')).toBe(true)
+    }
+  })
+
+  it('snapshot projects models and modes from the capability cache (bounded)', () => {
+    const controller = makeController({
+      getCapabilities: () => ({
+        modelState: {
+          currentModelId: 'grok-4.5',
+          availableModels: [
+            {
+              modelId: 'grok-4.5',
+              name: 'Grok 4.5',
+              currentReasoningEffort: 'high',
+              reasoningEfforts: [
+                { id: 'high', value: 'high', label: 'High' },
+                { id: 'low', value: 'low', label: 'Low' }
+              ]
+            },
+            { modelId: 'grok-composer-2.5-fast', name: 'Composer', reasoningEfforts: [] }
+          ]
+        },
+        modes: [{ id: 'build', name: 'Build' }, { id: 'chat', name: 'Chat' }],
+        currentModeId: 'build'
+      })
+    })
+    controller.enable()
+    const snap = controller.getSnapshot()
+    expect(snap.models?.currentModelId).toBe('grok-4.5')
+    expect(snap.models?.availableModels.map((m) => m.modelId)).toEqual(['grok-4.5', 'grok-composer-2.5-fast'])
+    expect(snap.models?.availableModels[0]?.reasoningEfforts.map((e) => e.value)).toEqual(['high', 'low'])
+    expect(snap.modes?.currentModeId).toBe('build')
+    expect(snap.modes?.availableModes).toHaveLength(2)
+
+    const bare = makeController()
+    bare.enable()
+    expect(bare.getSnapshot().models).toBeNull()
+    expect(bare.getSnapshot().modes).toBeNull()
+  })
+
+  it('session delete clears remote focus, tail, queue and running flags', async () => {
+    const listed: SessionSummary[] = [{ id: 's1', cwd: 'C:\\repo', title: 'Alpha' }]
+    const controller = makeController({ listSessions: () => listed })
+    controller.enable()
+    controller.setFocusSession('s1')
+    controller.pushEvent({ id: 'm1', sessionId: 's1', kind: 'message', role: 'assistant', text: 'hi' })
+    controller.setRunning('s1', true)
+    expect(controller.handleQueue('queued for s1').ok).toBe(true)
+    listed.length = 0 // CLI delete removed it from disk
+    controller.onSessionDeleted('s1')
+    const snap = controller.getSnapshot()
+    expect(snap.focusSessionId).toBeNull()
+    expect(snap.focusStatus).toBe('none')
+    expect(snap.tail).toHaveLength(0)
+    expect(snap.running).toBe(false)
+    expect(controller.getQueue()).toBeNull()
+    expect(snap.sessions.some((s) => s.id === 's1')).toBe(false)
+  })
+
+  it('optimistic session expires after TTL when disk never shows it', async () => {
+    const clock = { t: 1_000_000 }
+    const listed: SessionSummary[] = [{ id: 's1', cwd: 'C:\\repo', title: 'Alpha' }]
+    const controller = makeController({
+      listSessions: () => listed,
+      createSession: async () => ({ sessionId: 's2', cwd: 'C:\\repo' }),
+      isSessionReady: (id) => id === 's2' || id === 's1',
+      loadSession: vi.fn().mockResolvedValue(undefined),
+      now: () => clock.t
+    })
+    controller.enable()
+    await controller.refreshSessions()
+    const created = await controller.handleCreateSession('C:\\repo')
+    expect(created.ok).toBe(true)
+    expect(controller.getSnapshot().sessions.some((s) => s.id === 's2')).toBe(true)
+    clock.t += 11 * 60_000
+    expect(controller.getSnapshot().sessions.some((s) => s.id === 's2')).toBe(false)
+  })
+
+  it('do-now lets the late cancelled turn event land before firing the new prompt', async () => {
+    const prompt = vi.fn().mockImplementation(() => new Promise<void>(() => { /* stays running */ }))
+    const controller = makeController({ prompt, cancel: vi.fn().mockResolvedValue(undefined) })
+    controller.enable()
+    controller.setFocusSession('s1')
+    controller.setRunning('s1', true)
+    const pending = controller.handleDoNow('replacement job')
+    // Simulate the cancelled turn's stop event arriving AFTER cancel resolved
+    setTimeout(() => {
+      controller.pushEvent({ id: 't-cancelled', sessionId: 's1', kind: 'turn', status: 'cancelled' })
+    }, 120)
+    const result = await pending
+    expect(result.ok).toBe(true)
+    expect(prompt).toHaveBeenCalledWith('s1', 'replacement job')
+    expect(prompt).toHaveBeenCalledTimes(1)
+    // The late event must NOT have cleared the new prompt's in-flight flag
+    const second = await controller.handlePrompt('should be blocked')
+    expect(second.ok).toBe(false)
+    if (!second.ok) expect(second.code).toBe('in_flight')
+  })
+
   it('yolo disable switches to ask without revoking remote', async () => {
     const setPermissionMode = vi.fn().mockResolvedValue('ask')
     let mode: 'ask' | 'always-approve' = 'always-approve'

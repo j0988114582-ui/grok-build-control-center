@@ -117,20 +117,24 @@ const remoteController = new RemoteController({
   getPermissionMode: () => agentPermissionMode,
   listSessions: () => listLocalSessions(grokHome()),
   isSessionReady: (sessionId) => sessionReadyGate.isReady(sessionId),
-  prompt: async (sessionId, text) => {
+  // Phone deps share the same lifecycle pool as desktop IPC so an exclusive op
+  // (install / account switch) blocks both surfaces symmetrically.
+  prompt: async (sessionId, text) => lifecycleOperation.runShared('Grok 工作', async () => {
     sessionReadyGate.assertReady(sessionId)
     const blocks: PromptBlock[] = [{ type: 'text', text }]
     await (await connectAcp()).prompt(sessionId, blocks)
-  },
-  cancel: async (sessionId) => {
+  }),
+  cancel: async (sessionId) => lifecycleOperation.runShared('Grok 工作', async () => {
     sessionReadyGate.assertReady(sessionId)
     await (await connectAcp()).cancel(sessionId)
-  },
+  }),
   respondPermission: (requestId, optionId) => {
     acpConnection.current?.respondPermission(requestId, optionId)
+    // Phone answered — close the desktop modal for the same request.
+    send('grok:permission-resolved', { requestId })
   },
   /** E2: main-owned load — markReady + preview cwd (same side effects as desktop IPC). */
-  loadSession: async (sessionId, cwd) => {
+  loadSession: async (sessionId, cwd) => lifecycleOperation.runShared('Grok 對話操作', async () => {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) {
       throw new Error('Invalid session id')
     }
@@ -143,8 +147,8 @@ const remoteController = new RemoteController({
       sessionReadyGate.clear(sessionId)
       throw error
     }
-  },
-  createSession: async (cwd) => {
+  }),
+  createSession: async (cwd) => lifecycleOperation.runShared('Grok 對話操作', async () => {
     const client = await connectAcp()
     const result = await client.createSession(cwd)
     const sessionId = typeof result?.sessionId === 'string' ? result.sessionId : undefined
@@ -152,23 +156,29 @@ const remoteController = new RemoteController({
     sessionReadyGate.markReady(sessionId)
     if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
     return { sessionId, cwd: typeof cwd === 'string' ? cwd : '' }
-  },
-  setModel: async (sessionId, modelId, reasoningEffort) => {
+  }),
+  setModel: async (sessionId, modelId, reasoningEffort) => lifecycleOperation.runShared('Grok 設定', async () => {
     sessionReadyGate.assertReady(sessionId)
     await (await connectAcp()).setModel(sessionId, modelId, reasoningEffort)
-  },
-  setMode: async (sessionId, modeId) => {
+  }),
+  setMode: async (sessionId, modeId) => lifecycleOperation.runShared('Grok 設定', async () => {
     sessionReadyGate.assertReady(sessionId)
     await (await connectAcp()).setMode(sessionId, modeId)
-  },
-  interject: async (sessionId, text) => {
+  }),
+  interject: async (sessionId, text) => lifecycleOperation.runShared('Grok 工作', async () => {
     sessionReadyGate.assertReady(sessionId)
     await (await connectAcp()).interject(sessionId, text)
+  }),
+  setPermissionMode: async (mode) =>
+    lifecycleOperation.runShared('Grok 權限模式', async () => applyAgentPermissionMode(mode)),
+  getCapabilities: () => {
+    const caps = acpConnection.current?.getCachedCapabilities()
+    if (!caps) return null
+    return { modelState: caps.modelState, modes: caps.modes, currentModeId: caps.currentModeId }
   },
-  setPermissionMode: async (mode) => applyAgentPermissionMode(mode),
-  onFocusChanged: (sessionId) => {
+  onFocusChanged: (sessionId, focusStatus) => {
     // Status may still be transitioning; renderer also reads remote:state for ready.
-    send('remote:focus-changed', { sessionId })
+    send('remote:focus-changed', { sessionId, ...(focusStatus ? { focusStatus } : {}) })
   },
   onStateChange: () => {
     send('remote:state', {
@@ -382,6 +392,9 @@ function registerIpc(): void {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) throw new Error('Invalid session id')
     return lifecycleOperation.runShared('Grok 對話操作', async () => {
       await execFileAsync(settings().grokExecutable, ['sessions', 'delete', sessionId], { windowsHide: true, timeout: 30_000 })
+      // Deleted on disk — the ready gate and remote focus/tail must not keep a ghost.
+      sessionReadyGate.clear(sessionId)
+      remoteController.onSessionDeleted(sessionId)
       return true
     })
   })
@@ -435,7 +448,11 @@ function registerIpc(): void {
   ipcMain.handle('grok:mode', async (_event, sessionId: string, modeId: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setMode(sessionId, modeId)))
   ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort)))
   ipcMain.handle('grok:config', async (_event, sessionId: string, configId: string, value: string | boolean) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setConfigOption(sessionId, configId, value)))
-  ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => lifecycleOperation.runShared('Grok 權限回覆', async () => acpConnection.current?.respondPermission(requestId, optionId)))
+  ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => lifecycleOperation.runShared('Grok 權限回覆', async () => {
+    acpConnection.current?.respondPermission(requestId, optionId)
+    // Desktop answered — drop the phone-side pending card immediately (next poll reflects it).
+    remoteController.clearPermission(requestId)
+  }))
   ipcMain.handle('grok:permission-mode:get', () => agentPermissionMode)
   ipcMain.handle('grok:permission-mode:set', async (_event, mode: AgentPermissionMode) =>
     lifecycleOperation.runShared('Grok 權限模式', async () => applyAgentPermissionMode(mode)))
@@ -626,16 +643,40 @@ function registerIpc(): void {
         }
         if (!started.ok) {
           remoteController.setBanner('tunnel_failed')
-          throw new Error(`Quick Tunnel 啟動失敗（實驗性）：${started.reason}`)
+          throw new Error(
+            `Quick Tunnel 啟動失敗（實驗性）：${started.reason}。` +
+              '手機掃 QR 需要公網隧道；請安裝 cloudflared 到 PATH，或放到 %USERPROFILE%\\.cloudflared\\cloudflared.exe / %USERPROFILE%\\.grok\\bin\\cloudflared.exe 後重試。未開隧道時網址是 127.0.0.1，僅本機可開。'
+          )
         }
         try {
           // Allow public Host before health (Cloudflare may forward original Host).
           const publicHost = new URL(started.url).host
           remoteAllowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`, publicHost]
+          // Quick Tunnel banner says URL "may take some time to be reachable" — retry.
           const healthUrl = `${started.url}/api/health?nonce=${encodeURIComponent(healthNonce)}`
-          const res = await fetch(healthUrl, { signal: AbortSignal.timeout(12_000) })
-          const json = await res.json() as { ok?: boolean; nonce?: string }
-          if (!res.ok || json.nonce !== healthNonce) throw new Error('隧道 health 驗證失敗')
+          let healthOk = false
+          let lastHealthError = '隧道 health 驗證失敗'
+          for (let attempt = 1; attempt <= 10; attempt += 1) {
+            if (attempt > 1) {
+              // Enable can sit in this loop for minutes — keep the desktop toast alive.
+              remoteController.setStatusNotice(`隧道啟動驗證中（第 ${attempt}/10 次）…`)
+            }
+            try {
+              const res = await fetch(healthUrl, { signal: AbortSignal.timeout(12_000) })
+              const json = await res.json() as { ok?: boolean; nonce?: string }
+              if (res.ok && json.nonce === healthNonce) {
+                healthOk = true
+                break
+              }
+              lastHealthError = `隧道 health 驗證失敗（HTTP ${res.status}，第 ${attempt} 次）`
+            } catch (error) {
+              lastHealthError = error instanceof Error
+                ? `隧道 health 連線失敗（第 ${attempt} 次）：${error.message}`
+                : `隧道 health 連線失敗（第 ${attempt} 次）`
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1_500))
+          }
+          if (!healthOk) throw new Error(lastHealthError)
           remoteController.setPublicBaseUrl(started.url)
           remoteController.setBanner('url_verified')
         } catch (error) {

@@ -80,6 +80,20 @@ export type RemoteTranscriptItem = {
   status?: string
 }
 
+export type RemoteReasoningEffort = { id: string; value: string; label: string }
+
+export type RemoteModelOption = {
+  modelId: string
+  name: string
+  currentReasoningEffort?: string
+  reasoningEfforts: RemoteReasoningEffort[]
+}
+
+/** Bounded copy of the ACP capability cache so the phone can pick instead of typing. */
+export type RemoteModelState = { currentModelId: string | null; availableModels: RemoteModelOption[] }
+
+export type RemoteModeState = { currentModeId: string | null; availableModes: Array<{ id: string; name: string }> }
+
 export type RemoteSnapshot = {
   banner: RemoteBannerState
   paired: boolean
@@ -92,6 +106,9 @@ export type RemoteSnapshot = {
   sessions: RemoteSessionListItem[]
   permissions: RemotePermissionCard[]
   tail: RemoteTranscriptItem[]
+  /** null when the desktop has no live ACP capability cache (e.g. not connected yet). */
+  models: RemoteModelState | null
+  modes: RemoteModeState | null
   notices: string[]
   /** Absolute session end (ms epoch); null if unpaired */
   sessionExpiresAt: number | null

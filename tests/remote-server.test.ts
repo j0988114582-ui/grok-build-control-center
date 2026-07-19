@@ -419,6 +419,39 @@ describe('remote-server v0.9 routes + integration', () => {
     })
   })
 
+  it('accepts a full 12k-char CJK prompt (UTF-8 body fits the limit)', async () => {
+    await withServer(async (base, { controller, prompt }) => {
+      const cookie = await pairCookie(base, controller)
+      await fetch(`${base}/api/session/focus`, {
+        method: 'POST',
+        headers: jsonHeaders(cookie),
+        body: JSON.stringify({ sessionId: 's1' })
+      })
+      const text = '測'.repeat(12_000) // 36KB UTF-8 — used to 413 under the 32KB body cap
+      const res = await fetch(`${base}/api/prompt`, {
+        method: 'POST',
+        headers: jsonHeaders(cookie),
+        body: JSON.stringify({ text })
+      })
+      expect(res.status).toBe(200)
+      expect(prompt).toHaveBeenCalledWith('s1', text)
+    })
+  })
+
+  it('phone logout flips desktop banner to expired and clears sessions', async () => {
+    await withServer(async (base, { controller }) => {
+      const cookie = await pairCookie(base, controller)
+      const res = await fetch(`${base}/api/logout`, {
+        method: 'POST',
+        headers: jsonHeaders(cookie),
+        body: '{}'
+      })
+      expect(res.status).toBe(200)
+      expect(controller.getDesktopPairingView().banner).toBe('expired')
+      expect((await fetch(`${base}/api/snapshot`, { headers: { cookie } })).status).toBe(401)
+    })
+  })
+
   it('cookie is HttpOnly SameSite=Strict and body never returns sessionToken', async () => {
     await withServer(async (base, { controller }) => {
       const opened = controller.regeneratePairing()!
