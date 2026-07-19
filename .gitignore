@@ -6,6 +6,13 @@ coverage/
 outputs/installer/
 outputs/ui-smoke/
 outputs/release/
+outputs/remote-e2e/
+outputs/wave-b-smoke/
+# Agent-run telemetry never belongs in the public evidence trail (contains local paths)
+docs/plans/*.events.jsonl
+docs/plans/*.stderr.txt
+docs/plans/*.run.lock
+.playwright-cli/
 work/*-result.json
 work/live-session-export-*.md
 *.log
