@@ -7,7 +7,9 @@ updates:
       day: monday
       time: "03:00"
       timezone: Asia/Taipei
-    open-pull-requests-limit: 5
+    # 2026-07-19: auto-PRs disabled (owner decision) — majors need a dedicated,
+    # verified upgrade round; security advisories still surface via GitHub alerts.
+    open-pull-requests-limit: 0
     labels:
       - dependencies
     commit-message:
