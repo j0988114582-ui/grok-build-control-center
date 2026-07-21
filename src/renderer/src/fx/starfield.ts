@@ -1,5 +1,6 @@
 export type StarDensity = 'low' | 'medium' | 'high'
 export type StarfieldActivity = 'launch' | 'idle' | 'running' | 'error' | 'connect'
+export type StarTheme = 'dark' | 'light'
 
 export type MotionProfile = {
   speed: number
@@ -11,12 +12,16 @@ export type MotionProfile = {
 export const densityToStarCount = (density: StarDensity): number =>
   density === 'low' ? 600 : density === 'high' ? 1500 : 1000
 
+/**
+ * Obsidian Voyage motion language: launch is a dark warp reveal (no white wash);
+ * `flash` is reserved for the low, champagne-gold connect ripple only.
+ */
 export function motionProfile(activity: StarfieldActivity): MotionProfile {
   switch (activity) {
-    case 'launch': return { speed: 5.5, stretch: 1, flash: 0.9, redshift: 0 }
-    case 'running': return { speed: 2.3, stretch: 0.72, flash: 0.08, redshift: 0 }
-    case 'error': return { speed: 0.45, stretch: 0.18, flash: 0.22, redshift: 1 }
-    case 'connect': return { speed: 3.7, stretch: 0.82, flash: 1, redshift: 0 }
+    case 'launch': return { speed: 5.5, stretch: 1, flash: 0, redshift: 0 }
+    case 'running': return { speed: 2.3, stretch: 0.72, flash: 0, redshift: 0 }
+    case 'error': return { speed: 0.45, stretch: 0.18, flash: 0.1, redshift: 1 }
+    case 'connect': return { speed: 3.7, stretch: 0.82, flash: 0.32, redshift: 0 }
     default: return { speed: 0.16, stretch: 0.03, flash: 0, redshift: 0 }
   }
 }
@@ -24,16 +29,29 @@ export function motionProfile(activity: StarfieldActivity): MotionProfile {
 export const shouldRenderStatic = (settingReducedMotion: boolean, operatingSystemReducedMotion: boolean): boolean =>
   settingReducedMotion || operatingSystemReducedMotion
 
+export type StarfieldHealth = {
+  renderer: 'webgl' | 'canvas2d' | 'none'
+  frames: number
+  lastFrameAt: number
+  contextLostAt: number | null
+}
+
 export type StarfieldEngine = {
   readonly renderer: 'webgl' | 'canvas2d' | 'none'
   setActivity(activity: Exclude<StarfieldActivity, 'error' | 'connect'>): void
   pulse(activity: 'error' | 'connect'): void
+  /** True while frames are expected to keep flowing (watchdog contract). */
+  shouldBeAnimating(): boolean
+  getHealth(): StarfieldHealth
+  /** Re-arm the frame loop after a stall; returns false when a full rebuild is needed. */
+  revive(): boolean
   destroy(): void
 }
 
 type EngineOptions = {
   density: StarDensity
   static: boolean
+  theme?: StarTheme
 }
 
 type Programs = {
@@ -45,6 +63,38 @@ type Programs = {
 }
 
 type CanvasStar = { x: number; y: number; z: number; layer: number; size: number }
+
+/** Palette per theme — dark is Obsidian Voyage; light lands in Phase 4 (dawn nebula). */
+type Palette = {
+  deep: [number, number, number]
+  ice: [number, number, number]
+  gold: [number, number, number]
+  red: [number, number, number]
+  flash: [number, number, number]
+  starIce: [number, number, number]
+  starGold: [number, number, number]
+}
+
+const PALETTES: Record<StarTheme, Palette> = {
+  dark: {
+    deep: [0.006, 0.013, 0.038],
+    ice: [0.05, 0.19, 0.36],
+    gold: [0.30, 0.20, 0.07],
+    red: [0.30, 0.02, 0.02],
+    flash: [0.20, 0.15, 0.06],
+    starIce: [0.64, 0.83, 1.0],
+    starGold: [1.0, 0.85, 0.55]
+  },
+  light: {
+    deep: [0.93, 0.92, 0.90],
+    ice: [0.10, 0.16, 0.24],
+    gold: [0.32, 0.24, 0.10],
+    red: [0.30, 0.05, 0.04],
+    flash: [0.18, 0.14, 0.06],
+    starIce: [0.22, 0.32, 0.46],
+    starGold: [0.55, 0.42, 0.18]
+  }
+}
 
 const FOG_VERTEX = `
 attribute vec2 a_position;
@@ -60,21 +110,30 @@ varying vec2 v_uv;
 uniform float u_time;
 uniform float u_flash;
 uniform float u_redshift;
+uniform float u_reveal;
+uniform vec3 u_deep;
+uniform vec3 u_ice;
+uniform vec3 u_gold;
+uniform vec3 u_red;
+uniform vec3 u_flashColor;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1.,0.)), f.x), mix(hash(i + vec2(0.,1.)), hash(i + vec2(1.,1.)), f.x), f.y);
 }
+float fbm(vec2 p) {
+  return noise(p) * .62 + noise(p * 2.13 + 11.7) * .38;
+}
 void main() {
   vec2 p = v_uv - .5;
-  float vignette = 1.0 - smoothstep(.12, .84, length(p));
-  float nebula = noise(v_uv * 3.4 + vec2(u_time * .004, -u_time * .002));
-  nebula = pow(max(0.0, nebula - .42), 2.2);
-  vec3 deep = vec3(.012, .022, .055);
-  vec3 ice = vec3(.07, .24, .39) * nebula * vignette;
-  vec3 amber = vec3(.36, .18, .035) * nebula * .22;
-  vec3 red = vec3(.32, .025, .02) * u_redshift * vignette;
-  gl_FragColor = vec4(deep + ice + amber + red + u_flash * vec3(.32,.48,.62), .96);
+  float vignette = 1.0 - smoothstep(.16, .92, length(p));
+  float iceBand = fbm(v_uv * 3.1 + vec2(u_time * .0035, -u_time * .0018));
+  float goldBand = fbm(v_uv * 2.2 + vec2(-u_time * .0021, u_time * .0012) + 7.31);
+  vec3 ice = u_ice * pow(max(0.0, iceBand - .44), 2.1) * vignette;
+  vec3 gold = u_gold * pow(max(0.0, goldBand - .55), 2.4) * vignette * 1.15;
+  vec3 red = u_red * u_redshift * vignette;
+  vec3 color = (u_deep + ice + gold + red + u_flash * u_flashColor) * u_reveal;
+  gl_FragColor = vec4(color, .97);
 }`
 
 const STAR_VERTEX = `
@@ -84,32 +143,44 @@ uniform float u_time;
 uniform float u_speed;
 uniform float u_stretch;
 uniform float u_aspect;
+uniform float u_reveal;
 varying float v_alpha;
 varying float v_stretch;
+varying float v_gold;
 void main() {
-  float rate = .018 + a_layer * .009;
+  float layer = min(a_layer, 4.0);
+  float meteor = step(4.5, a_layer);
+  float rate = .016 + layer * .008;
   float z = fract(a_star.z - u_time * .001 * u_speed * rate);
-  z = max(.035, z);
+  float meteorZ = fract(a_star.z - u_time * .00135);
+  z = max(.035, mix(z, meteorZ, meteor));
   vec2 projected = a_star.xy / z;
   projected.x /= u_aspect;
   gl_Position = vec4(projected, 0., 1.);
-  gl_PointSize = min(17., (1.2 + a_layer * .8) / z + u_stretch * 6.);
-  v_alpha = (1.0 - smoothstep(.08, 1.0, z)) * (.45 + a_layer * .22);
-  v_stretch = u_stretch;
+  float size = (1.1 + layer * .7) / z + u_stretch * 6.;
+  gl_PointSize = min(17., size * mix(1., 1.5, meteor));
+  float gate = mix(1., step(fract(a_star.z * 7.31 + u_time * .000021), .045), meteor);
+  v_alpha = (1.0 - smoothstep(.07, 1.0, z)) * (.4 + layer * .16) * gate * u_reveal;
+  v_stretch = max(u_stretch, meteor * .85);
+  v_gold = step(.93, fract(a_star.x * 137.7)) * (1.0 - meteor);
 }`
 
 const STAR_FRAGMENT = `
 precision mediump float;
 varying float v_alpha;
 varying float v_stretch;
+varying float v_gold;
 uniform float u_redshift;
+uniform vec3 u_starIce;
+uniform vec3 u_starGold;
 void main() {
   vec2 p = gl_PointCoord - .5;
-  p.y *= mix(1., .17, v_stretch);
+  p.y *= mix(1., .16, v_stretch);
   float glow = 1.0 - smoothstep(.02, .5, length(p));
   if (glow <= .02) discard;
-  vec3 ice = mix(vec3(.62,.82,1.), vec3(1.,.28,.18), u_redshift);
-  gl_FragColor = vec4(ice, glow * v_alpha);
+  vec3 color = mix(u_starIce, u_starGold, v_gold);
+  color = mix(color, vec3(1., .3, .2), u_redshift);
+  gl_FragColor = vec4(color, glow * v_alpha);
 }`
 
 const createShader = (gl: WebGLRenderingContext, type: number, source: string): WebGLShader => {
@@ -148,6 +219,9 @@ const seededRandom = (seed: number): (() => number) => () => {
 }
 
 const TIME_WRAP_MS = 36_000_000
+/** Warp arrival: brightness eases 0→1 over this window — worst frozen frame is dark, never a wash. */
+const REVEAL_MS = 1_800
+const METEOR_COUNT = 8
 
 class GalaxyEngine implements StarfieldEngine {
   renderer: 'webgl' | 'canvas2d' | 'none'
@@ -155,7 +229,12 @@ class GalaxyEngine implements StarfieldEngine {
   private readonly context2d: CanvasRenderingContext2D | null
   private programs: Programs | null
   private readonly canvasStars: CanvasStar[]
+  private readonly palette: Palette
   private frame = 0
+  private frames = 0
+  private lastFrameAt = 0
+  private contextLostAt: number | null = null
+  private readonly createdAt: number
   private activity: Exclude<StarfieldActivity, 'error' | 'connect'> = 'idle'
   private pulseActivity: 'error' | 'connect' | null = null
   private pulseUntil = 0
@@ -166,6 +245,8 @@ class GalaxyEngine implements StarfieldEngine {
   private readonly onRoResize = (): void => { this.resize({ kick: true }) }
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly options: EngineOptions) {
+    this.palette = PALETTES[options.theme ?? 'dark']
+    this.createdAt = performance.now()
     let gl: WebGLRenderingContext | null = null
     try {
       gl = canvas.getContext('webgl', { alpha: true, antialias: false, powerPreference: 'low-power' })
@@ -204,6 +285,27 @@ class GalaxyEngine implements StarfieldEngine {
     if (!this.options.static && !this.frame && !document.hidden && this.renderer !== 'none') this.frame = requestAnimationFrame((time) => this.render(time))
   }
 
+  shouldBeAnimating(): boolean {
+    return !this.destroyed && !this.options.static && this.renderer !== 'none' && !document.hidden
+  }
+
+  getHealth(): StarfieldHealth {
+    return { renderer: this.renderer, frames: this.frames, lastFrameAt: this.lastFrameAt, contextLostAt: this.contextLostAt }
+  }
+
+  revive(): boolean {
+    if (this.destroyed) return false
+    // Context lost and never restored → caller must rebuild the whole engine.
+    if (this.contextLostAt !== null && performance.now() - this.contextLostAt > 3_000) return false
+    if (this.renderer === 'none') return false
+    if (this.options.static) {
+      this.render(performance.now())
+      return true
+    }
+    if (!this.frame && !document.hidden) this.frame = requestAnimationFrame((time) => this.render(time))
+    return true
+  }
+
   destroy(): void {
     this.destroyed = true
     if (this.frame) cancelAnimationFrame(this.frame)
@@ -224,11 +326,13 @@ class GalaxyEngine implements StarfieldEngine {
 
   private onContextLost(event: Event): void {
     event.preventDefault()
+    this.contextLostAt = performance.now()
     if (this.frame) { cancelAnimationFrame(this.frame); this.frame = 0 }
   }
 
   private onContextRestored(): void {
     if (this.destroyed || !this.gl) return
+    this.contextLostAt = null
     this.programs = this.initializeWebGl(this.gl)
     if (!this.programs) {
       this.renderer = 'none'
@@ -285,7 +389,8 @@ class GalaxyEngine implements StarfieldEngine {
         positionData[index * 3] = Math.cos(angle) * radius
         positionData[index * 3 + 1] = Math.sin(angle) * radius
         positionData[index * 3 + 2] = random()
-        layerData[index] = index % 3
+        // Layers 0–4 parallax depth; the tail of the buffer becomes rare meteors (layer 5).
+        layerData[index] = index >= count - METEOR_COUNT ? 5 : index % 5
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, positions)
       gl.bufferData(gl.ARRAY_BUFFER, positionData, gl.STATIC_DRAW)
@@ -303,9 +408,15 @@ class GalaxyEngine implements StarfieldEngine {
       x: random() * 2 - 1,
       y: random() * 2 - 1,
       z: Math.max(.02, random()),
-      layer: index % 3,
+      layer: index % 5,
       size: .55 + random() * 1.5
     }))
+  }
+
+  private reveal(time: number): number {
+    if (this.options.static) return 1
+    const t = Math.min(1, Math.max(0, (time - this.createdAt) / REVEAL_MS))
+    return t * t * (3 - 2 * t)
   }
 
   private render(time: number): void {
@@ -322,14 +433,17 @@ class GalaxyEngine implements StarfieldEngine {
       redshift: this.current.redshift + (target.redshift - this.current.redshift) * follow
     }
     const wrapped = time % TIME_WRAP_MS
-    if (this.gl && this.programs) this.renderWebGl(wrapped)
-    else if (this.context2d) this.renderCanvas2d(wrapped)
+    if (this.gl && this.programs) this.renderWebGl(wrapped, this.reveal(time))
+    else if (this.context2d) this.renderCanvas2d(wrapped, this.reveal(time))
+    this.frames += 1
+    this.lastFrameAt = time
     if (!this.options.static) this.frame = requestAnimationFrame((next) => this.render(next))
   }
 
-  private renderWebGl(time: number): void {
+  private renderWebGl(time: number, reveal: number): void {
     const gl = this.gl!
     const programs = this.programs!
+    const palette = this.palette
     gl.viewport(0, 0, this.canvas.width, this.canvas.height)
     gl.disable(gl.DEPTH_TEST)
     gl.useProgram(programs.fog)
@@ -340,6 +454,12 @@ class GalaxyEngine implements StarfieldEngine {
     gl.uniform1f(gl.getUniformLocation(programs.fog, 'u_time'), time * .001)
     gl.uniform1f(gl.getUniformLocation(programs.fog, 'u_flash'), this.current.flash)
     gl.uniform1f(gl.getUniformLocation(programs.fog, 'u_redshift'), this.current.redshift)
+    gl.uniform1f(gl.getUniformLocation(programs.fog, 'u_reveal'), reveal)
+    gl.uniform3fv(gl.getUniformLocation(programs.fog, 'u_deep'), palette.deep)
+    gl.uniform3fv(gl.getUniformLocation(programs.fog, 'u_ice'), palette.ice)
+    gl.uniform3fv(gl.getUniformLocation(programs.fog, 'u_gold'), palette.gold)
+    gl.uniform3fv(gl.getUniformLocation(programs.fog, 'u_red'), palette.red)
+    gl.uniform3fv(gl.getUniformLocation(programs.fog, 'u_flashColor'), palette.flash)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
     gl.enable(gl.BLEND)
@@ -358,30 +478,37 @@ class GalaxyEngine implements StarfieldEngine {
     gl.uniform1f(gl.getUniformLocation(programs.stars, 'u_stretch'), this.current.stretch)
     gl.uniform1f(gl.getUniformLocation(programs.stars, 'u_redshift'), this.current.redshift)
     gl.uniform1f(gl.getUniformLocation(programs.stars, 'u_aspect'), this.canvas.width / this.canvas.height)
+    gl.uniform1f(gl.getUniformLocation(programs.stars, 'u_reveal'), reveal)
+    gl.uniform3fv(gl.getUniformLocation(programs.stars, 'u_starIce'), palette.starIce)
+    gl.uniform3fv(gl.getUniformLocation(programs.stars, 'u_starGold'), palette.starGold)
     gl.drawArrays(gl.POINTS, 0, densityToStarCount(this.options.density))
     gl.disable(gl.BLEND)
   }
 
-  private renderCanvas2d(time: number): void {
+  private renderCanvas2d(time: number, reveal: number): void {
     const context = this.context2d!
     const width = this.canvas.width
     const height = this.canvas.height
     const centerX = width / 2
     const centerY = height / 2
     const fog = context.createRadialGradient(centerX * .58, centerY * .42, 0, centerX, centerY, Math.max(width, height) * .72)
-    fog.addColorStop(0, `rgba(${Math.round(18 + 75 * this.current.redshift)},54,92,.72)`)
-    fog.addColorStop(.48, 'rgba(7,20,48,.96)')
-    fog.addColorStop(1, 'rgba(2,6,18,1)')
+    fog.addColorStop(0, `rgba(${Math.round(14 + 75 * this.current.redshift)},40,78,.72)`)
+    fog.addColorStop(.48, 'rgba(6,16,40,.96)')
+    fog.addColorStop(1, 'rgba(2,5,16,1)')
     context.fillStyle = fog
     context.fillRect(0, 0, width, height)
     context.globalCompositeOperation = 'lighter'
+    context.globalAlpha = reveal
     for (const star of this.canvasStars) {
-      const z = Math.max(.035, ((star.z - time * .00000032 * this.current.speed * (1 + star.layer * .5)) % 1 + 1) % 1)
+      const z = Math.max(.035, ((star.z - time * .00000032 * this.current.speed * (1 + star.layer * .35)) % 1 + 1) % 1)
       const x = centerX + star.x * width * .52 / z
       const y = centerY + star.y * height * .52 / z
       if (x < -30 || x > width + 30 || y < -30 || y > height + 30) continue
-      const alpha = Math.min(.9, (.2 + star.layer * .16) * (1 - z))
-      context.strokeStyle = this.current.redshift > .35 ? `rgba(255,92,72,${alpha})` : `rgba(160,215,255,${alpha})`
+      const alpha = Math.min(.9, (.2 + star.layer * .12) * (1 - z))
+      const gold = (star.x * 137.7) % 1 > .93
+      context.strokeStyle = this.current.redshift > .35
+        ? `rgba(255,92,72,${alpha})`
+        : gold ? `rgba(255,214,150,${alpha})` : `rgba(160,215,255,${alpha})`
       context.lineWidth = Math.min(3, star.size / z)
       context.beginPath()
       context.moveTo(x, y)
@@ -389,9 +516,10 @@ class GalaxyEngine implements StarfieldEngine {
       context.lineTo(x + (x - centerX) * .002 * streak, y + (y - centerY) * .002 * streak)
       context.stroke()
     }
+    context.globalAlpha = 1
     context.globalCompositeOperation = 'source-over'
     if (this.current.flash > .01) {
-      context.fillStyle = `rgba(190,225,255,${Math.min(.45, this.current.flash * .4)})`
+      context.fillStyle = `rgba(233,199,130,${Math.min(.2, this.current.flash * .3)})`
       context.fillRect(0, 0, width, height)
     }
   }

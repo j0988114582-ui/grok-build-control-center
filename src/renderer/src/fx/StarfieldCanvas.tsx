@@ -55,6 +55,8 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
     let launchTimer = 0
     let rafId = 0
     let ro: ResizeObserver | null = null
+    let recreates = 0
+    const mountAt = performance.now()
 
     const tearDownEngine = (): void => {
       window.clearTimeout(launchTimer)
@@ -64,7 +66,7 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
 
     const startEngine = (): void => {
       if (cancelled || engineRef.current || !hasUsableLayout(canvas)) return
-      const engine = createStarfield(canvas, { density, static: staticFrame })
+      const engine = createStarfield(canvas, { density, static: staticFrame, theme })
       engineRef.current = engine
       setRenderer(engine.renderer)
       launchRef.current = !staticFrame
@@ -100,14 +102,39 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
       rafId = window.requestAnimationFrame(tryStart)
     })
 
+    // Self-healing watchdog: a stalled loop must never freeze a frame on screen
+    // (cold-start GPU context loss was frozen mid-launch before v0.10).
+    const watchdog = window.setInterval(() => {
+      if (cancelled) return
+      const engine = engineRef.current
+      if (!engine) {
+        if (hasUsableLayout(canvas)) startEngine()
+        return
+      }
+      const health = engine.getHealth()
+      ;(window as unknown as Record<string, unknown>).__grokStarfieldHealth = { ...health, recreates }
+      const now = performance.now()
+      const stalled =
+        (engine.shouldBeAnimating() && now - health.lastFrameAt > 1_600) ||
+        (health.renderer !== 'none' && health.frames === 0 && now - mountAt > 1_500) ||
+        (health.contextLostAt !== null && now - health.contextLostAt > 3_000)
+      if (!stalled) return
+      if (engine.revive()) return
+      if (recreates >= 5) return
+      recreates += 1
+      tearDownEngine()
+      startEngine()
+    }, 2_000)
+
     return () => {
       cancelled = true
       window.cancelAnimationFrame(rafId)
+      window.clearInterval(watchdog)
       ro?.disconnect()
       tearDownEngine()
       setRenderer('none')
     }
-  }, [visible, density, staticFrame])
+  }, [visible, density, staticFrame, theme])
 
   useEffect(() => {
     if (!launchRef.current) engineRef.current?.setActivity(running ? 'running' : 'idle')

@@ -11,9 +11,12 @@ describe('starfield performance contract', () => {
     expect(densityToStarCount('high')).toBe(1500)
   })
 
-  it('uses a short cinematic launch before settling into readable motion', () => {
-    expect(motionProfile('launch')).toEqual({ speed: 5.5, stretch: 1, flash: 0.9, redshift: 0 })
+  it('uses a dark warp launch (no wash flash) before settling into readable motion', () => {
+    // v0.10 Obsidian Voyage: launch must NOT flash — a frozen launch frame stays dark.
+    expect(motionProfile('launch')).toEqual({ speed: 5.5, stretch: 1, flash: 0, redshift: 0 })
     expect(motionProfile('idle')).toEqual({ speed: 0.16, stretch: 0.03, flash: 0, redshift: 0 })
+    expect(motionProfile('running').flash).toBe(0)
+    expect(motionProfile('connect').flash).toBeLessThanOrEqual(0.35)
     expect(motionProfile('running').speed).toBeGreaterThan(motionProfile('idle').speed)
     expect(motionProfile('error').redshift).toBe(1)
   })
@@ -62,6 +65,7 @@ describe('starfield performance contract', () => {
       vertexAttribPointer: vi.fn(),
       getUniformLocation: vi.fn(() => ({})),
       uniform1f: vi.fn(),
+      uniform3fv: vi.fn(),
       drawArrays: vi.fn(),
       enable: vi.fn(),
       blendFunc: vi.fn(),
