@@ -4,6 +4,7 @@ import {
   REMOTE_PROMPT_MAX_CHARS,
   REMOTE_TAIL_MAX_BYTES,
   REMOTE_TAIL_MAX_ITEMS,
+  REMOTE_TAIL_MESSAGE_MAX_CHARS,
   type RemoteBannerState,
   type RemoteFocusStatus,
   type RemoteModelState,
@@ -296,7 +297,7 @@ export class RemoteController {
     const item = toRemoteTranscriptItem(event)
     if (!item) return
     const list = this.tails.get(event.sessionId) ?? []
-    list.push(item)
+    appendRemoteTailItem(list, item)
     while (list.length > REMOTE_TAIL_MAX_ITEMS) list.shift()
     // T1: bound public wire size via JSON UTF-8 (includes escaping overhead)
     enforceTailPayloadBudget(list)
@@ -1021,6 +1022,26 @@ function toRemoteTranscriptItem(event: UiSessionEvent): RemoteTranscriptItem | n
     }
   }
   return null
+}
+
+/**
+ * Grok streams a reply as many small message deltas. The desktop reducer folds
+ * consecutive same-role messages into one bubble (session-state.ts); the phone
+ * must do the same or a single answer arrives shredded into dozens of bubbles
+ * that also burn through the tail item budget.
+ */
+export function appendRemoteTailItem(list: RemoteTranscriptItem[], item: RemoteTranscriptItem): void {
+  const last = list[list.length - 1]
+  if (
+    item.kind === 'message'
+    && last?.kind === 'message'
+    && last.role === item.role
+    && last.text.length + item.text.length <= REMOTE_TAIL_MESSAGE_MAX_CHARS
+  ) {
+    last.text += item.text
+    return
+  }
+  list.push(item)
 }
 
 /** Public tail wire size (JSON UTF-8, includes escaping). */

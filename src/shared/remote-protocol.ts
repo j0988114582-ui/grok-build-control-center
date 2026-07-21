@@ -12,6 +12,8 @@ export const REMOTE_PROMPT_MAX_CHARS = 12_000
 export const REMOTE_TAIL_MAX_ITEMS = 120
 /** UTF-8 byte budget for public tail payload (not JS string length). */
 export const REMOTE_TAIL_MAX_BYTES = 64_000
+/** Cap for one merged message bubble; longer replies spill into the next bubble. */
+export const REMOTE_TAIL_MESSAGE_MAX_CHARS = 4_000
 /** @deprecated use REMOTE_TAIL_MAX_BYTES — kept for older imports */
 export const REMOTE_TAIL_MAX_CHARS = REMOTE_TAIL_MAX_BYTES
 export const REMOTE_ELEVATE_PIN_FAIL_LIMIT = 5

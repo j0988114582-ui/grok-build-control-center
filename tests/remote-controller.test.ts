@@ -113,6 +113,33 @@ describe('remote-controller (v0.9 coexistence)', () => {
     expect(snap.elevationLocked).toBe(false)
   })
 
+  it('merges streamed message deltas into one bubble like the desktop', () => {
+    const controller = makeController()
+    controller.enable()
+    controller.setFocusSession('s1')
+    controller.pushEvent({ id: 'u1', sessionId: 's1', kind: 'message', role: 'user', text: '請回覆星艦就緒' })
+    // Grok streams one reply as several deltas
+    controller.pushEvent({ id: 'a1', sessionId: 's1', kind: 'message', role: 'assistant', text: '星' })
+    controller.pushEvent({ id: 'a2', sessionId: 's1', kind: 'message', role: 'assistant', text: '艦' })
+    controller.pushEvent({ id: 'a3', sessionId: 's1', kind: 'message', role: 'assistant', text: '就緒' })
+    const tail = controller.getSnapshot().tail
+    expect(tail).toHaveLength(2)
+    expect(tail[0]).toEqual(expect.objectContaining({ role: 'user', text: '請回覆星艦就緒' }))
+    expect(tail[1]).toEqual(expect.objectContaining({ role: 'assistant', text: '星艦就緒' }))
+  })
+
+  it('does not merge across roles or across a non-message event', () => {
+    const controller = makeController()
+    controller.enable()
+    controller.setFocusSession('s1')
+    controller.pushEvent({ id: 'a1', sessionId: 's1', kind: 'message', role: 'assistant', text: '前' })
+    controller.pushEvent({ id: 't1', sessionId: 's1', kind: 'tool', title: '讀檔', status: 'completed' } as never)
+    controller.pushEvent({ id: 'a2', sessionId: 's1', kind: 'message', role: 'assistant', text: '後' })
+    controller.pushEvent({ id: 'u1', sessionId: 's1', kind: 'message', role: 'user', text: '我' })
+    const tail = controller.getSnapshot().tail
+    expect(tail.map((item) => item.text)).toEqual(['前', '讀檔', '後', '我'])
+  })
+
   it('does not put thoughts in tail', () => {
     const controller = makeController()
     controller.enable()

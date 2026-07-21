@@ -6,7 +6,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import {
   Activity, Archive, Bot, Check, ChevronDown, ChevronRight, CircleAlert, Command, Cpu, FilePlus2,
   FolderOpen, Gauge, Keyboard, ListTodo, LoaderCircle, MessageSquare, Moon, Paperclip, PanelLeft, PanelLeftClose, Pencil, Pin, Play, Search, Send,
-  Settings, Square, Sun, TerminalSquare, Trash2, UserRound, Users, Wrench, X, Zap
+  Settings, Smartphone, Square, Sun, TerminalSquare, Trash2, UserRound, Users, Wrench, X, Zap
 } from 'lucide-react'
 import type { SelectedFile } from '../../shared/bridge'
 import { createDefaultSettings } from '../../shared/settings'
@@ -277,7 +277,8 @@ function SettingsPanel({
   onSave,
   onLiveChange,
   onClose,
-  cliVersion
+  cliVersion,
+  onOpenRemote
 }: {
   settings: AppSettings
   onSave: (settings: AppSettings) => void
@@ -285,6 +286,8 @@ function SettingsPanel({
   onLiveChange?: (settings: AppSettings) => void
   onClose: () => void
   cliVersion?: string
+  /** Remote lives in the capability panel; settings is where users look for it. */
+  onOpenRemote?: () => void
 }): React.JSX.Element {
   const [draft, setDraft] = useState(settings)
   const conflicts = findShortcutConflicts(draft.shortcuts)
@@ -303,7 +306,10 @@ function SettingsPanel({
       <label>內容寬度 <output>{draft.contentWidth}px</output><input type="range" min="640" max="1400" step="20" value={draft.contentWidth} onChange={(event) => update({ ...draft, contentWidth: Number(event.target.value) })} /></label>
     </div>
     <div className="theme-choice"><button type="button" className={draft.theme === 'dark' ? 'active' : ''} onClick={() => update({ ...draft, theme: 'dark' })}><Moon />深色</button><button type="button" className={draft.theme === 'light' ? 'active' : ''} onClick={() => update({ ...draft, theme: 'light' })}><Sun />亮色</button></div>
-    <div className="settings-section cockpit-settings"><div className="section-title"><h3>銀河座艙</h3><small>亮色主題自動停用星空</small></div>
+    {onOpenRemote && <div className="settings-section"><div className="section-title"><h3>手機 QR 遙控</h3><small>設定放在「功能矩陣」面板</small></div>
+      <button type="button" className="secondary wide" data-testid="settings-open-remote" onClick={onOpenRemote}><Smartphone />前往手機遙控設定</button>
+    </div>}
+    <div className="settings-section cockpit-settings"><div className="section-title"><h3>銀河座艙</h3><small>深色與亮色各有專屬星空</small></div>
       <div className="immersion-choice"><button type="button" className={draft.immersion === 'focus' ? 'active' : ''} onClick={() => update({ ...draft, immersion: 'focus' })}><strong>閱讀優先</strong><small>紙感對話區</small></button><button type="button" className={draft.immersion === 'deep' ? 'active' : ''} onClick={() => update({ ...draft, immersion: 'deep' })}><strong>全沉浸</strong><small>深色玻璃對話區</small></button></div>
       <label className="toggle-row"><span><strong>曲速星空</strong><small>執行狀態聯動與 Canvas 降級</small></span><input type="checkbox" checked={draft.effects.galaxy} onChange={(event) => update({ ...draft, effects: { ...draft.effects, galaxy: event.target.checked } })} /></label>
       <label className="toggle-row"><span><strong>星航游標</strong><small>拖尾、nova 與磁吸</small></span><input type="checkbox" checked={draft.effects.cursor} onChange={(event) => update({ ...draft, effects: { ...draft.effects, cursor: event.target.checked } })} /></label>
@@ -420,6 +426,13 @@ export function App(): React.JSX.Element {
   const previewDiscoverTimer = useRef<number | null>(null)
   const scanPreviewForSessionRef = useRef<((sessionId: string) => void) | null>(null)
   const [notice, setNotice] = useState('')
+  // Toasts used to sit there forever until dismissed by hand; long enough to read,
+  // then out of the way (the ✕ still works for an early dismiss).
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(''), 12_000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
   const [setupDialog, setSetupDialog] = useState<SetupDialog>(null)
   const [lifecycleBusy, setLifecycleBusy] = useState(false)
   const virtuoso = useRef<VirtuosoHandle>(null)
@@ -2390,6 +2403,7 @@ export function App(): React.JSX.Element {
         settings={settings}
         cliVersion={status.version}
         onClose={() => setPanel('none')}
+        onOpenRemote={() => setPanel('features')}
         onLiveChange={(next) => setSettings((current) => ({
           ...current,
           theme: next.theme,

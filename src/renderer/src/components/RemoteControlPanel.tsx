@@ -45,6 +45,26 @@ function bannerLabel(banner: string | undefined): string {
   return BANNER_ZH[banner] ?? banner
 }
 
+/** Electron wraps IPC rejections; users should never read that plumbing. */
+export function cleanIpcMessage(message: string): string {
+  return message.replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, '').trim()
+}
+
+/**
+ * Enable can fail two very different ways and the recovery differs:
+ * cloudflared missing (install it) vs tunnel up but the public URL not routing
+ * yet (wait and retry — Quick Tunnel has no SLA and rate-limits repeat setups).
+ */
+export function remoteEnableHint(message: string): string {
+  if (/找不到 cloudflared|未找到 cloudflared|ENOENT/i.test(message)) {
+    return '。請安裝 cloudflared 至 PATH，或放到 %USERPROFILE%\\.cloudflared\\cloudflared.exe 後重試。'
+  }
+  if (/health|fetch failed|逾時|timeout/i.test(message)) {
+    return '。cloudflared 已啟動，但公網網址還連不上（Quick Tunnel 無 SLA，短時間重複建立可能被限流）。請等幾分鐘再試，或先用本機 loopback 測試。'
+  }
+  return ''
+}
+
 export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement {
   const {
     active,
@@ -187,11 +207,8 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
                   )
                 })
                 .catch((error) => {
-                  const msg = error instanceof Error ? error.message : String(error)
-                  const hint = /cloudflared|隧道|tunnel/i.test(msg)
-                    ? '。請安裝 cloudflared 至 PATH，或放到 %USERPROFILE%\\.cloudflared\\cloudflared.exe 後重試。'
-                    : ''
-                  onNotice(msg + hint)
+                  const msg = cleanIpcMessage(error instanceof Error ? error.message : String(error))
+                  onNotice(msg + remoteEnableHint(msg))
                 })
                 .finally(() => onBusy(false))
             }}

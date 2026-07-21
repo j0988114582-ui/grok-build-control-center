@@ -72,10 +72,14 @@ try {
 
   const starfield = page.locator('.starfield-canvas')
   result.renderer = await starfield.getAttribute('data-renderer') ?? 'none'
+  // The toast is pointer-events:none (it must never block controls beneath it),
+  // so dismiss it through its close button — or just let it auto-expire.
   const clearNotice = async () => {
     await page.waitForTimeout(350)
     const notice = page.locator('.notice')
-    if (await notice.isVisible().catch(() => false)) await notice.click()
+    if (!(await notice.isVisible().catch(() => false))) return
+    await page.getByRole('button', { name: '關閉通知' }).first().click({ timeout: 5_000 }).catch(() => null)
+    await notice.waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => null)
   }
   await clearNotice()
   const canvasPath = path.join(output, 'canvas-webgl.png')

@@ -83,6 +83,13 @@ describe('remote-web SPA (wave4)', () => {
     expect(css).toMatch(/turn-mark/)
   })
 
+  it('says so instead of asking for a typed id when the desktop offers no list', () => {
+    expect(html).toMatch(/id="model-unavailable"/)
+    expect(html).toMatch(/id="mode-unavailable"/)
+    expect(js).toMatch(/modelUnavailable\.classList\.toggle\('hidden', hasModels\)/)
+    expect(js).toMatch(/modeUnavailable\.classList\.toggle\('hidden', hasModes\)/)
+  })
+
   it('offers model/mode pickers from snapshot with manual fallback', () => {
     expect(html).toMatch(/id="model-select"/)
     expect(html).toMatch(/id="effort-select"/)

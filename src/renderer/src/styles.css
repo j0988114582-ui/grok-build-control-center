@@ -774,7 +774,10 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .rename-modal > label input { width: 100%; padding: 10px; color: inherit; background: var(--bg); border: 1px solid var(--line); outline: none; }
 .rename-modal > label input { transition: border-color .16s ease, box-shadow .16s ease; }
 .rename-modal > label input:focus { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(233,173,71,.14), var(--glow-gold); }
-.notice { position: absolute; z-index: 60; right: 22px; bottom: 22px; max-width: 480px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: rgba(9,15,27,.92); color: #e7edf4; border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 18px 48px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04); font-size: 11px; text-align: left; }
+/* pointer-events: none so a toast parked over the drawer never eats clicks meant
+   for the controls beneath it; its own buttons opt back in. */
+.notice { position: absolute; z-index: 60; right: 22px; bottom: 22px; max-width: 480px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: rgba(9,15,27,.92); color: #e7edf4; border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 18px 48px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04); font-size: 11px; text-align: left; pointer-events: none; }
+.notice button, .notice a { pointer-events: auto; }
 .notice svg { width: 14px; color: var(--accent); }
 .notice svg:last-child { color: var(--muted); margin-left: auto; }
 /* Deep immersion: dark-panel surface tokens (same card styles as Team) */

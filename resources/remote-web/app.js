@@ -39,6 +39,8 @@
   const modeSelectWrap = $('mode-select-wrap')
   const modeSelect = $('mode-select')
   const modeIdWrap = $('mode-id-wrap')
+  const modelUnavailable = $('model-unavailable')
+  const modeUnavailable = $('mode-unavailable')
 
   let pairingSecret = null
   let pinDigits = ''
@@ -392,8 +394,11 @@
       const hasModels = !!(models && models.availableModels && models.availableModels.length)
       modelSelectWrap.classList.toggle('hidden', !hasModels)
       effortSelectWrap.classList.toggle('hidden', !hasModels)
-      modelIdWrap.classList.toggle('hidden', hasModels)
-      modelEffortWrap.classList.toggle('hidden', hasModels)
+      // No list means the desktop has nothing to offer — asking for a typed id
+      // would only invite errors (desktop hides the control in that case too).
+      modelIdWrap.classList.add('hidden')
+      modelEffortWrap.classList.add('hidden')
+      modelUnavailable.classList.toggle('hidden', hasModels)
       if (hasModels) {
         modelSelect.innerHTML = ''
         models.availableModels.forEach(function (model) {
@@ -413,7 +418,8 @@
       const modes = snap.modes
       const hasModes = !!(modes && modes.availableModes && modes.availableModes.length)
       modeSelectWrap.classList.toggle('hidden', !hasModes)
-      modeIdWrap.classList.toggle('hidden', hasModes)
+      modeIdWrap.classList.add('hidden')
+      modeUnavailable.classList.toggle('hidden', hasModes)
       if (hasModes) {
         modeSelect.innerHTML = ''
         modes.availableModes.forEach(function (mode) {
@@ -632,6 +638,7 @@
 
   $('set-model-btn').addEventListener('click', function () {
     const usingPicker = !modelSelectWrap.classList.contains('hidden')
+    if (!usingPicker) { mainError.textContent = '桌面尚未提供可切換的模型清單'; return }
     const modelId = usingPicker ? modelSelect.value : ($('model-id').value || '').trim()
     if (!modelId) { mainError.textContent = usingPicker ? '請先選擇模型' : '請輸入 modelId'; return }
     const effort = usingPicker ? effortSelect.value : ($('model-effort').value || '').trim()
@@ -642,6 +649,7 @@
   })
   $('set-mode-btn').addEventListener('click', function () {
     const usingPicker = !modeSelectWrap.classList.contains('hidden')
+    if (!usingPicker) { mainError.textContent = '這個 Grok CLI 沒有提供工作模式'; return }
     const modeId = usingPicker ? modeSelect.value : ($('mode-id').value || '').trim()
     if (!modeId) { mainError.textContent = usingPicker ? '請先選擇工作模式' : '請輸入 modeId'; return }
     void postAction('/api/mode', { modeId: modeId }, '已切換工作模式')
