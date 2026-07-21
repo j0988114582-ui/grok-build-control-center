@@ -66,15 +66,49 @@ type Programs = {
 
 type CanvasStar = { x: number; y: number; z: number; layer: number; size: number }
 
-/** Palette per theme — dark is Obsidian Voyage; light lands in Phase 4 (dawn nebula). */
+type Rgb = [number, number, number]
+
+/**
+ * Palette per theme — dark is "Obsidian Voyage", light is "Dawn Nebula" (phase 4).
+ *
+ * Dawn is not an inversion of obsidian. The fog shader is purely additive, so the
+ * light palette starts from a warm-white mist floor and *adds* a champagne bloom
+ * and a cool sky patch — it can never reach pure white, which is what keeps the
+ * bright theme from glaring. Stars flip to alpha-over blending so pale dust can
+ * darken the cream instead of burning it out.
+ */
 type Palette = {
-  deep: [number, number, number]
-  ice: [number, number, number]
-  gold: [number, number, number]
-  red: [number, number, number]
-  flash: [number, number, number]
-  starIce: [number, number, number]
-  starGold: [number, number, number]
+  deep: Rgb
+  ice: Rgb
+  gold: Rgb
+  red: Rgb
+  flash: Rgb
+  starIce: Rgb
+  starGold: Rgb
+  /** Star tint at full redshift (error pulse). */
+  starRed: Rgb
+  /** Colour the warp reveal eases *out of*: black on obsidian, dawn mist on light. */
+  revealBase: Rgb
+  /** Obsidian burns stars additively; dawn alpha-blends so dark dust reads on cream. */
+  starBlend: 'add' | 'over'
+  /** Global star opacity multiplier (1 keeps the obsidian look byte-identical). */
+  starAlpha: number
+  /** canvas2d fallback colours in 0–255 space (context-loss demotion path). */
+  fallback: {
+    composite: 'lighter' | 'source-over'
+    fogInner: Rgb
+    /** Added to fogInner at redshift 1. */
+    fogInnerShift: Rgb
+    fogInnerAlpha: number
+    fogMid: string
+    fogOuter: string
+    starIce: Rgb
+    starGold: Rgb
+    starRed: Rgb
+    starAlphaCap: number
+    flash: Rgb
+    flashAlphaCap: number
+  }
 }
 
 const PALETTES: Record<StarTheme, Palette> = {
@@ -85,16 +119,54 @@ const PALETTES: Record<StarTheme, Palette> = {
     red: [0.30, 0.02, 0.02],
     flash: [0.20, 0.15, 0.06],
     starIce: [0.64, 0.83, 1.0],
-    starGold: [1.0, 0.85, 0.55]
+    starGold: [1.0, 0.85, 0.55],
+    starRed: [1.0, 0.30, 0.20],
+    revealBase: [0, 0, 0],
+    starBlend: 'add',
+    starAlpha: 1,
+    fallback: {
+      composite: 'lighter',
+      fogInner: [14, 40, 78],
+      fogInnerShift: [75, 0, 0],
+      fogInnerAlpha: 0.72,
+      fogMid: 'rgba(6,16,40,.96)',
+      fogOuter: 'rgba(2,5,16,1)',
+      starIce: [160, 215, 255],
+      starGold: [255, 214, 150],
+      starRed: [255, 92, 72],
+      starAlphaCap: 0.9,
+      flash: [233, 199, 130],
+      flashAlphaCap: 0.2
+    }
   },
   light: {
-    deep: [0.93, 0.92, 0.90],
-    ice: [0.10, 0.16, 0.24],
-    gold: [0.32, 0.24, 0.10],
-    red: [0.30, 0.05, 0.04],
-    flash: [0.18, 0.14, 0.06],
-    starIce: [0.22, 0.32, 0.46],
-    starGold: [0.55, 0.42, 0.18]
+    // #e5e2db mist floor: the darkest pixel on screen, so panels always read as lifted.
+    deep: [0.898, 0.886, 0.859],
+    // Additive bands top out around #f1ede5 at the vignette centre — never white.
+    ice: [0.03, 0.055, 0.10],
+    gold: [0.24, 0.17, 0.06],
+    red: [0.075, 0.005, 0.012],
+    flash: [0.09, 0.07, 0.03],
+    starIce: [0.17, 0.24, 0.35],
+    starGold: [0.42, 0.30, 0.11],
+    starRed: [0.62, 0.16, 0.13],
+    revealBase: [0.878, 0.867, 0.843],
+    starBlend: 'over',
+    starAlpha: 0.42,
+    fallback: {
+      composite: 'source-over',
+      fogInner: [246, 240, 230],
+      fogInnerShift: [6, -18, -26],
+      fogInnerAlpha: 0.96,
+      fogMid: 'rgba(238,234,225,.98)',
+      fogOuter: 'rgba(226,223,214,1)',
+      starIce: [58, 80, 112],
+      starGold: [122, 88, 32],
+      starRed: [176, 60, 48],
+      starAlphaCap: 0.34,
+      flash: [233, 205, 150],
+      flashAlphaCap: 0.12
+    }
   }
 }
 
@@ -118,6 +190,7 @@ uniform vec3 u_ice;
 uniform vec3 u_gold;
 uniform vec3 u_red;
 uniform vec3 u_flashColor;
+uniform vec3 u_revealBase;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -134,8 +207,10 @@ void main() {
   vec3 ice = u_ice * pow(max(0.0, iceBand - .44), 2.1) * vignette;
   vec3 gold = u_gold * pow(max(0.0, goldBand - .55), 2.4) * vignette * 1.15;
   vec3 red = u_red * u_redshift * vignette;
-  vec3 color = (u_deep + ice + gold + red + u_flash * u_flashColor) * u_reveal;
-  gl_FragColor = vec4(color, .97);
+  vec3 color = u_deep + ice + gold + red + u_flash * u_flashColor;
+  // Obsidian reveals out of black (u_revealBase 0 → identical to color * u_reveal);
+  // dawn reveals out of its own mist so a frozen launch frame is never a dark flash.
+  gl_FragColor = vec4(mix(u_revealBase, color, u_reveal), .97);
 }`
 
 const STAR_VERTEX = `
@@ -173,16 +248,18 @@ varying float v_alpha;
 varying float v_stretch;
 varying float v_gold;
 uniform float u_redshift;
+uniform float u_starAlpha;
 uniform vec3 u_starIce;
 uniform vec3 u_starGold;
+uniform vec3 u_starRed;
 void main() {
   vec2 p = gl_PointCoord - .5;
   p.y *= mix(1., .16, v_stretch);
   float glow = 1.0 - smoothstep(.02, .5, length(p));
   if (glow <= .02) discard;
   vec3 color = mix(u_starIce, u_starGold, v_gold);
-  color = mix(color, vec3(1., .3, .2), u_redshift);
-  gl_FragColor = vec4(color, glow * v_alpha);
+  color = mix(color, u_starRed, u_redshift);
+  gl_FragColor = vec4(color, glow * v_alpha * u_starAlpha);
 }`
 
 const createShader = (gl: WebGLRenderingContext, type: number, source: string): WebGLShader => {
@@ -474,10 +551,14 @@ class GalaxyEngine implements StarfieldEngine {
     gl.uniform3fv(gl.getUniformLocation(programs.fog, 'u_gold'), palette.gold)
     gl.uniform3fv(gl.getUniformLocation(programs.fog, 'u_red'), palette.red)
     gl.uniform3fv(gl.getUniformLocation(programs.fog, 'u_flashColor'), palette.flash)
+    gl.uniform3fv(gl.getUniformLocation(programs.fog, 'u_revealBase'), palette.revealBase)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
     gl.enable(gl.BLEND)
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE)
+    // Additive burns bright dust into obsidian; dawn needs alpha-over so slate/gold
+    // dust can sit *on top of* the cream mist instead of being clipped to white.
+    const destinationFactor = palette.starBlend === 'over' ? gl.ONE_MINUS_SRC_ALPHA : gl.ONE
+    gl.blendFunc(gl.SRC_ALPHA, destinationFactor)
     gl.useProgram(programs.stars)
     gl.bindBuffer(gl.ARRAY_BUFFER, programs.positions)
     const starPosition = gl.getAttribLocation(programs.stars, 'a_star')
@@ -493,36 +574,40 @@ class GalaxyEngine implements StarfieldEngine {
     gl.uniform1f(gl.getUniformLocation(programs.stars, 'u_redshift'), this.current.redshift)
     gl.uniform1f(gl.getUniformLocation(programs.stars, 'u_aspect'), this.canvas.width / this.canvas.height)
     gl.uniform1f(gl.getUniformLocation(programs.stars, 'u_reveal'), reveal)
+    gl.uniform1f(gl.getUniformLocation(programs.stars, 'u_starAlpha'), palette.starAlpha)
     gl.uniform3fv(gl.getUniformLocation(programs.stars, 'u_starIce'), palette.starIce)
     gl.uniform3fv(gl.getUniformLocation(programs.stars, 'u_starGold'), palette.starGold)
+    gl.uniform3fv(gl.getUniformLocation(programs.stars, 'u_starRed'), palette.starRed)
     gl.drawArrays(gl.POINTS, 0, densityToStarCount(this.options.density))
     gl.disable(gl.BLEND)
   }
 
   private renderCanvas2d(time: number, reveal: number): void {
     const context = this.context2d!
+    const fallback = this.palette.fallback
     const width = this.canvas.width
     const height = this.canvas.height
     const centerX = width / 2
     const centerY = height / 2
+    const shift = (index: 0 | 1 | 2): number =>
+      Math.max(0, Math.min(255, Math.round(fallback.fogInner[index] + fallback.fogInnerShift[index] * this.current.redshift)))
     const fog = context.createRadialGradient(centerX * .58, centerY * .42, 0, centerX, centerY, Math.max(width, height) * .72)
-    fog.addColorStop(0, `rgba(${Math.round(14 + 75 * this.current.redshift)},40,78,.72)`)
-    fog.addColorStop(.48, 'rgba(6,16,40,.96)')
-    fog.addColorStop(1, 'rgba(2,5,16,1)')
+    fog.addColorStop(0, `rgba(${shift(0)},${shift(1)},${shift(2)},${fallback.fogInnerAlpha})`)
+    fog.addColorStop(.48, fallback.fogMid)
+    fog.addColorStop(1, fallback.fogOuter)
     context.fillStyle = fog
     context.fillRect(0, 0, width, height)
-    context.globalCompositeOperation = 'lighter'
+    context.globalCompositeOperation = fallback.composite
     context.globalAlpha = reveal
     for (const star of this.canvasStars) {
       const z = Math.max(.035, ((star.z - time * .00000032 * this.current.speed * (1 + star.layer * .35)) % 1 + 1) % 1)
       const x = centerX + star.x * width * .52 / z
       const y = centerY + star.y * height * .52 / z
       if (x < -30 || x > width + 30 || y < -30 || y > height + 30) continue
-      const alpha = Math.min(.9, (.2 + star.layer * .12) * (1 - z))
+      const alpha = Math.min(fallback.starAlphaCap, (.2 + star.layer * .12) * (1 - z))
       const gold = (star.x * 137.7) % 1 > .93
-      context.strokeStyle = this.current.redshift > .35
-        ? `rgba(255,92,72,${alpha})`
-        : gold ? `rgba(255,214,150,${alpha})` : `rgba(160,215,255,${alpha})`
+      const tint = this.current.redshift > .35 ? fallback.starRed : gold ? fallback.starGold : fallback.starIce
+      context.strokeStyle = `rgba(${tint[0]},${tint[1]},${tint[2]},${alpha})`
       context.lineWidth = Math.min(3, star.size / z)
       context.beginPath()
       context.moveTo(x, y)
@@ -533,7 +618,8 @@ class GalaxyEngine implements StarfieldEngine {
     context.globalAlpha = 1
     context.globalCompositeOperation = 'source-over'
     if (this.current.flash > .01) {
-      context.fillStyle = `rgba(233,199,130,${Math.min(.2, this.current.flash * .3)})`
+      const veil = Math.min(fallback.flashAlphaCap, this.current.flash * .3)
+      context.fillStyle = `rgba(${fallback.flash[0]},${fallback.flash[1]},${fallback.flash[2]},${veil})`
       context.fillRect(0, 0, width, height)
     }
   }

@@ -25,10 +25,22 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
   const runningRef = useRef(running)
   const connectedRef = useRef(connected)
   const errorRef = useRef(errorPulse)
+  /** Survive engine rebuilds: counters must not reset with the effect closure. */
+  const recreatesRef = useRef(0)
+  const webglFailuresRef = useRef(0)
   const [osReducedMotion, setOsReducedMotion] = useState(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)
   const [renderer, setRenderer] = useState<'webgl' | 'canvas2d' | 'none'>('none')
+  /**
+   * Bumped whenever an engine must be rebuilt. It keys the <canvas>, so React
+   * hands us a *fresh* element: destroy() calls loseContext(), which poisons a
+   * canvas permanently — reusing it would hand the next engine a dead context
+   * (and block the canvas2d demotion, since the element is already WebGL-typed).
+   */
+  const [engineGeneration, setEngineGeneration] = useState(0)
   const staticFrame = shouldRenderStatic(reducedMotion, osReducedMotion)
-  const visible = enabled && theme === 'dark'
+  // v0.10 phase 4: both themes render. Light gets the Dawn Nebula palette; the
+  // engine is rebuilt on theme change because `theme` is in the effect deps.
+  const visible = enabled
   runningRef.current = running
 
   useEffect(() => {
@@ -55,10 +67,10 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
     let launchTimer = 0
     let rafId = 0
     let ro: ResizeObserver | null = null
-    let recreates = 0
-    let webglFailures = 0
     let lastRecreateAt = 0
     const mountAt = performance.now()
+    // Demote to canvas2d once WebGL has died repeatedly on this machine.
+    const webglFailures = webglFailuresRef.current
 
     const tearDownEngine = (): void => {
       window.clearTimeout(launchTimer)
@@ -66,10 +78,10 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
       engineRef.current = null
     }
 
-    const startEngine = (forceCanvas2d = false): void => {
+    const startEngine = (): void => {
       if (cancelled || engineRef.current || !hasUsableLayout(canvas)) return
       canvas.style.opacity = '1'
-      const engine = createStarfield(canvas, { density, static: staticFrame, theme, forceCanvas2d })
+      const engine = createStarfield(canvas, { density, static: staticFrame, theme, forceCanvas2d: webglFailures >= 3 })
       engineRef.current = engine
       setRenderer(engine.renderer)
       launchRef.current = !staticFrame
@@ -115,22 +127,27 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
         return
       }
       const health = engine.getHealth()
-      ;(window as unknown as Record<string, unknown>).__grokStarfieldHealth = { ...health, recreates, webglFailures }
+      ;(window as unknown as Record<string, unknown>).__grokStarfieldHealth = {
+        ...health,
+        recreates: recreatesRef.current,
+        webglFailures: webglFailuresRef.current
+      }
       const now = performance.now()
       const stalled =
         (engine.shouldBeAnimating() && now - health.lastFrameAt > 1_600) ||
+        (health.renderer === 'none' && now - mountAt > 1_200) ||
         (health.renderer !== 'none' && health.frames === 0 && now - mountAt > 1_500) ||
         (health.contextLostAt !== null && now - health.contextLostAt > 3_000)
       if (!stalled) return
       if (engine.revive()) return
-      // Cooldown-gated rebuilds, forever — a GPU that keeps killing WebGL on
-      // resize gets demoted to the canvas2d engine (cannot context-lose).
+      // Cooldown-gated rebuilds, forever. The rebuild goes through a generation
+      // bump so the next engine lands on a brand-new <canvas>; a GPU that keeps
+      // killing WebGL is demoted to canvas2d (which cannot context-lose).
       if (now - lastRecreateAt < 4_000) return
       lastRecreateAt = now
-      if (health.renderer === 'webgl') webglFailures += 1
-      recreates += 1
-      tearDownEngine()
-      startEngine(webglFailures >= 3)
+      if (health.renderer === 'webgl' || health.contextLostAt !== null) webglFailuresRef.current += 1
+      recreatesRef.current += 1
+      setEngineGeneration((generation) => generation + 1)
     }, 2_000)
 
     return () => {
@@ -141,7 +158,7 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
       tearDownEngine()
       setRenderer('none')
     }
-  }, [visible, density, staticFrame, theme])
+  }, [visible, density, staticFrame, theme, engineGeneration])
 
   useEffect(() => {
     if (!launchRef.current) engineRef.current?.setActivity(running ? 'running' : 'idle')
@@ -159,6 +176,8 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
 
   if (!visible) return null
   return <canvas
+    // Fresh element per engine lifetime — see engineGeneration.
+    key={`${theme}-${density}-${String(staticFrame)}-${engineGeneration}`}
     ref={canvasRef}
     className="starfield-canvas"
     data-testid="starfield-canvas"
