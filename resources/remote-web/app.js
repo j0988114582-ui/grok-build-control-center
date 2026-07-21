@@ -367,6 +367,7 @@
         art.appendChild(body)
       } else {
         if (item.role) {
+          art.classList.add('msg-' + item.role)
           const role = document.createElement('div')
           role.className = 'role'
           role.textContent = item.role === 'user' ? '你' : 'Grok'

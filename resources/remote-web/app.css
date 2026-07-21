@@ -1,82 +1,208 @@
 :root {
   color-scheme: dark;
   font-family: system-ui, "Segoe UI", sans-serif;
-  background: #0b1220;
-  color: #e7edf4;
-  --touch: 44px;
-  --accent: #e9ad47;
+
+  /* ── Obsidian Voyage tokens (shared language with desktop styles.css) ── */
+  --bg-0: #02040a;
+  --bg-1: #030711;
+  --bg-2: #071022;
+  --panel: rgba(8, 14, 26, 0.72);
+  --panel-solid: #0a111f;
+  --line: rgba(148, 170, 199, 0.16);
+  --line-strong: rgba(148, 170, 199, 0.28);
+  --line-gold: rgba(233, 173, 71, 0.32);
+  --gold: #e9ad47;
+  --gold-hi: #f5d9a0;
+  --gold-deep: #b97f22;
+  --metal-gold: linear-gradient(180deg, #f5d9a0, #e9ad47 45%, #b97f22);
+  --ice: #7fb4e8;
+  --ice-hi: #a9d4ff;
   --danger: #e2655b;
-  --line: rgba(137, 170, 199, 0.28);
-  --card: rgba(12, 20, 36, 0.92);
+  --ok: #86b987;
+  --glow-gold: 0 0 18px rgba(233, 173, 71, 0.18);
+  --glow-ice: 0 0 18px rgba(127, 180, 232, 0.15);
+
+  /* ── Local helpers (additive; do not collide with shared tokens) ── */
+  --field: #060d1a;
+  --ink: #e7edf4;
+  --ink-dim: #a8b4c0;
+  --ink-faint: #8592a1;
+  --radius: 12px;
+  --radius-sm: 10px;
+  --dur: 140ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --touch: 44px;
+
+  /* ── Back-compat aliases: legacy selectors + JS still reference these ── */
+  --accent: var(--gold);
+  --card: var(--panel);
+
+  background: var(--bg-1);
+  color: var(--ink);
 }
+
 * { box-sizing: border-box; }
+
 body {
   margin: 0;
   min-height: 100vh;
   min-height: 100dvh;
-  background: #0b1220;
+  color: var(--ink);
+  /* Solid base = the opaque colour the composer dock fades to (bleed-fix anchor). */
+  background-color: var(--bg-1);
+  /* Fixed deep-space vignette: champagne + ice arrival glow near the top only,
+     so the lower viewport (behind the sticky dock) stays pure --bg-1. */
+  background-image:
+    radial-gradient(150% 62% at 50% -28%, rgba(127, 180, 232, 0.07), transparent 55%),
+    radial-gradient(130% 46% at 50% -10%, rgba(233, 173, 71, 0.06), transparent 52%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  -webkit-text-size-adjust: 100%;
 }
-.app { max-width: 520px; margin: 0 auto; padding: 12px 14px 36px; }
-.topbar { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
-.topbar h1 { font-size: 1.2rem; margin: 0 0 4px; }
+
+.app { max-width: 520px; margin: 0 auto; padding: 14px 14px 40px; }
+
+/* ── Topbar ─────────────────────────────────────────────────────────── */
+.topbar { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 2px; }
+.topbar h1 {
+  margin: 0 0 4px;
+  font-size: 1.28rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.12;
+  background: linear-gradient(180deg, var(--gold-hi), var(--gold) 58%, var(--gold-deep));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .topbar h1 { color: var(--gold-hi); background: none; }
+}
 .topbar-meta { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
-.banner { margin: 0; color: #a8b4c0; font-size: 0.88rem; }
+.banner { margin: 0; color: var(--ink-dim); font-size: 0.88rem; letter-spacing: 0.01em; }
+
+/* ── Pills (glass) ──────────────────────────────────────────────────── */
 .pill {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
-  padding: 2px 10px;
+  padding: 3px 11px;
   border-radius: 999px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   font-size: 0.75rem;
-  color: #c5d0db;
+  letter-spacing: 0.02em;
+  color: #cdd8e3;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
-.pill.yolo { border-color: rgba(226,101,91,.5); color: #ffb4ab; background: rgba(226,101,91,.12); }
+.pill.yolo { border-color: rgba(226, 101, 91, 0.5); color: #ffb4ab; background: rgba(226, 101, 91, 0.14); }
+
+/* ── Panels: card / main shell / drawer (deep glass + hairline, r=12) ── */
 .card, .main-shell, .drawer {
   margin-top: 12px;
   padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  -webkit-backdrop-filter: blur(11px) saturate(1.05);
+  backdrop-filter: blur(11px) saturate(1.05);
+  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
-.hint { font-size: 0.88rem; line-height: 1.45; color: #c5d0db; }
+/* Drawers read as a raised sub-panel: gold hairline + soft gold glow. */
+.drawer {
+  border-color: var(--line-gold);
+  background: linear-gradient(180deg, rgba(12, 19, 34, 0.86), rgba(8, 13, 24, 0.86));
+  box-shadow: 0 16px 40px -20px rgba(0, 0, 0, 0.9), var(--glow-gold), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.card h2, .drawer h2 { margin: 0 0 8px; font-size: 1.02rem; letter-spacing: 0.01em; }
+
+.hint { font-size: 0.88rem; line-height: 1.5; color: #c5d0db; }
 .hidden { display: none !important; }
-.muted { color: #a8b4c0; font-size: 0.88rem; }
-label { display: grid; gap: 6px; font-size: 0.85rem; color: #a8b4c0; margin: 10px 0; }
+.muted { color: var(--ink-dim); font-size: 0.88rem; }
+
+/* ── Fields ─────────────────────────────────────────────────────────── */
+label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--ink-dim); margin: 10px 0; }
 input, textarea, select {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #07101d;
-  color: #e7edf4;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--ink);
   padding: 12px;
   font: inherit;
   min-height: var(--touch);
+  caret-color: var(--gold);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
+input::placeholder, textarea::placeholder { color: #6f7c8f; }
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(233, 173, 71, 0.22), var(--glow-gold);
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+/* Primary = brushed champagne metal (gold gradient + deep gold edge). */
 button, .secondary {
   min-height: var(--touch);
   min-width: var(--touch);
-  padding: 10px 14px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #1c160a;
-  font-weight: 700;
+  padding: 11px 16px;
+  border: 1px solid var(--gold-deep);
+  border-radius: var(--radius-sm);
+  background: var(--metal-gold);
+  color: #241701;
   font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 6px 16px -10px rgba(233, 173, 71, 0.5);
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+    filter var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-button.secondary, .secondary { background: #2a3a52; color: #e7edf4; }
-button.danger { background: var(--danger); color: #1a0b0a; }
+button:hover { filter: brightness(1.03); }
+button:active { transform: scale(0.98); }
+
+/* Secondary = quiet glass hairline. */
+button.secondary, .secondary {
+  background: linear-gradient(180deg, rgba(22, 32, 50, 0.92), rgba(12, 20, 36, 0.92));
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 6px 16px -12px rgba(0, 0, 0, 0.8);
+}
+button.secondary:hover { border-color: rgba(127, 180, 232, 0.4); }
+
+/* Danger = red-shift semantic only. */
+button.danger {
+  background: linear-gradient(180deg, #ea7a70, #e2655b 55%, #b8443c);
+  color: #2a0c09;
+  border: 1px solid #8f322c;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 6px 16px -11px rgba(226, 101, 91, 0.55);
+}
+
+/* Ghost = outline only. */
 button.ghost {
   background: transparent;
-  color: #a8b4c0;
-  border: 1px solid var(--line);
+  color: #cdd8e3;
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
 }
+button.ghost:hover { border-color: var(--line-gold); color: var(--gold-hi); }
+
 button:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: default;
+  filter: saturate(0.55);
+  box-shadow: none;
+  transform: none;
 }
+
+/* ── Action rows ────────────────────────────────────────────────────── */
 .actions, .toolbar, .composer-actions, .running-tools, .yolo-actions {
   display: flex;
   flex-wrap: wrap;
@@ -84,17 +210,26 @@ button:disabled {
 }
 .toolbar { margin-bottom: 8px; }
 .error { color: #ffb4ab; min-height: 1.2em; font-size: 0.9rem; }
-.notices { color: var(--accent); font-size: 0.85rem; }
+.notices { color: var(--gold-hi); font-size: 0.85rem; letter-spacing: 0.01em; }
+
+/* ── PIN display + keypad (jewel-case) ──────────────────────────────── */
 .pin-display {
-  font-size: 1.6rem;
-  letter-spacing: 0.35em;
+  font-size: 1.7rem;
+  letter-spacing: 0.38em;
+  text-indent: 0.38em; /* offset trailing letter-spacing so glyphs read centred */
   text-align: center;
-  padding: 12px;
-  border-radius: 10px;
-  background: #07101d;
-  border: 1px solid var(--line);
-  margin: 10px 0;
+  padding: 14px 12px;
+  border-radius: var(--radius);
+  background:
+    radial-gradient(120% 140% at 50% -30%, rgba(233, 173, 71, 0.12), transparent 60%),
+    var(--field);
+  border: 1px solid var(--line-gold);
+  margin: 12px 0;
+  color: var(--gold-hi);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 12px rgba(233, 173, 71, 0.35);
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.55), var(--glow-gold);
 }
 .pin-pad {
   display: grid;
@@ -102,33 +237,78 @@ button:disabled {
   gap: 8px;
   margin-bottom: 12px;
 }
-.pin-pad button { font-size: 1.15rem; }
+/* Override the gold-metal default: keypad keys are deep obsidian with a
+   gold hairline that ignites on press. */
+.pin-pad button {
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ink);
+  background: linear-gradient(180deg, rgba(16, 25, 42, 0.95), rgba(9, 15, 28, 0.95));
+  border: 1px solid var(--line-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 6px 16px -12px rgba(0, 0, 0, 0.85);
+}
+.pin-pad button:hover { border-color: var(--line-gold); }
+.pin-pad button:active {
+  transform: scale(0.97);
+  border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(233, 173, 71, 0.22), rgba(233, 173, 71, 0.1));
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5), var(--glow-gold);
+}
+
+/* ── Session list ───────────────────────────────────────────────────── */
 .session-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .session-list li button {
   width: 100%;
   text-align: left;
-  background: #07101d;
-  color: #e7edf4;
-  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(12, 19, 33, 0.9), rgba(8, 13, 24, 0.9));
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
   display: grid;
   gap: 2px;
   min-width: 0;
+  padding: 12px 14px;
+  font-weight: 600;
+  box-shadow: none;
 }
-.session-list li button.active { border-color: var(--accent); }
+.session-list li button:hover { border-color: var(--line-gold); }
+.session-list li button.active {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(233, 173, 71, 0.12), rgba(10, 16, 30, 0.92));
+  box-shadow: var(--glow-gold), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
 .session-list li button > div:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  font-weight: 600;
 }
 .session-list .cwd {
   font-size: 0.75rem;
-  color: #a8b4c0;
+  color: var(--ink-dim);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Running = live emerald pulse (kept; disabled under reduced-motion). */
+.session-list .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #57e0a0;
+  margin-right: 7px;
+  box-shadow: 0 0 8px rgba(87, 224, 160, 0.8);
+  animation: dot-breathe 2.4s var(--ease) infinite;
+}
+@keyframes dot-breathe {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(87, 224, 160, 0.8); }
+  50% { opacity: 0.55; box-shadow: 0 0 3px rgba(87, 224, 160, 0.4); }
+}
+
 /* Sticky composer: keep send reachable on short mobile viewports.
    Opaque page-bg fill — translucent card bg made scrolled drawer content bleed through. */
 .composer-dock {
@@ -136,18 +316,12 @@ button:disabled {
   bottom: 0;
   margin-top: 8px;
   padding: 10px 0 4px;
-  background: linear-gradient(180deg, rgba(11, 18, 32, 0) 0, #0b1220 14px);
+  background: linear-gradient(180deg, rgba(3, 7, 17, 0) 0, var(--bg-1) 14px);
   z-index: 3;
 }
-.prompt-label { display: grid; gap: 6px; font-size: 0.85rem; color: #a8b4c0; margin: 0 0 8px; }
-.session-list .dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #4ade80;
-  margin-right: 6px;
-}
+.prompt-label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--ink-dim); margin: 0 0 8px; }
+
+/* ── Tail (transcript) ──────────────────────────────────────────────── */
 .tail {
   max-height: 38vh;
   overflow: auto;
@@ -155,29 +329,68 @@ button:disabled {
   gap: 8px;
   margin: 10px 0;
   font-size: 0.9rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(233, 173, 71, 0.35) transparent;
 }
+.tail::-webkit-scrollbar { width: 8px; }
+.tail::-webkit-scrollbar-thumb { background: rgba(233, 173, 71, 0.3); border-radius: 999px; }
+.tail::-webkit-scrollbar-track { background: transparent; }
 .tail article {
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(137,170,199,.12);
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line-gold);
   white-space: pre-wrap;
   word-break: break-word;
+  line-height: 1.5;
 }
-.tail .role { color: var(--accent); font-size: 0.75rem; font-weight: 700; }
-.tail .tool { color: #8ec5ff; font-size: 0.8rem; }
+.tail .role { color: var(--gold); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-bottom: 2px; }
+.tail .tool { color: var(--ice-hi); font-size: 0.8rem; }
 .tail article.turn-item { background: transparent; border: 0; padding: 2px 0; }
-.tail .turn-mark { color: #8592a1; font-size: 0.72rem; text-align: center; }
-.tail article.error-item { border-color: rgba(226, 101, 91, 0.4); }
+.tail .turn-mark { color: var(--ink-faint); font-size: 0.72rem; text-align: center; letter-spacing: 0.08em; }
+.tail article.error-item {
+  border-color: rgba(226, 101, 91, 0.45);
+  border-left-color: var(--danger);
+  background: linear-gradient(180deg, rgba(226, 101, 91, 0.1), rgba(226, 101, 91, 0.04));
+}
 .tail .error-text { color: #ffb4ab; }
+
+/* ── Permission cards (gold hairline alert) ─────────────────────────── */
 .permissions { display: grid; gap: 10px; }
 .perm-card {
-  border: 1px solid rgba(233,173,71,.35);
-  border-radius: 10px;
-  padding: 10px;
-  background: rgba(233,173,71,.08);
+  border: 1px solid var(--line-gold);
+  border-radius: var(--radius);
+  padding: 12px;
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(233, 173, 71, 0.1), transparent 55%),
+    var(--panel);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--glow-gold), inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
-.perm-card h3 { margin: 0 0 6px; font-size: 0.95rem; }
+.perm-card h3 { margin: 0 0 6px; font-size: 0.96rem; color: var(--gold-hi); letter-spacing: 0.01em; }
+.perm-card p { margin: 0 0 8px; color: #d3dce6; font-size: 0.88rem; line-height: 1.45; }
 .perm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
 .running-tools { margin: 8px 0; }
-.privacy { margin-top: 18px; color: #8592a1; font-size: 0.75rem; line-height: 1.45; }
+.privacy { margin-top: 18px; color: var(--ink-faint); font-size: 0.75rem; line-height: 1.5; }
+
+/* ── Motion discipline: honour reduced-motion (all effects → static) ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  button:active,
+  .pin-pad button:active,
+  .session-list li button:active { transform: none !important; }
+  .session-list .dot { animation: none !important; opacity: 1 !important; }
+}
+
+/* Mainline follow-up to Task B: real per-role bubbles (app.js adds msg-<role>). */
+.tail article.msg-user { border-left: 2px solid rgba(127, 180, 232, 0.55); }
+.tail article.msg-user .role { color: var(--ice-hi); }
+.tail article.msg-assistant { border-left: 2px solid rgba(233, 173, 71, 0.55); }
