@@ -52,6 +52,8 @@ type EngineOptions = {
   density: StarDensity
   static: boolean
   theme?: StarTheme
+  /** Escape hatch for GPUs that keep losing WebGL on resize — 2d canvas cannot context-lose. */
+  forceCanvas2d?: boolean
 }
 
 type Programs = {
@@ -248,9 +250,11 @@ class GalaxyEngine implements StarfieldEngine {
     this.palette = PALETTES[options.theme ?? 'dark']
     this.createdAt = performance.now()
     let gl: WebGLRenderingContext | null = null
-    try {
-      gl = canvas.getContext('webgl', { alpha: true, antialias: false, powerPreference: 'low-power' })
-    } catch { gl = null }
+    if (!options.forceCanvas2d) {
+      try {
+        gl = canvas.getContext('webgl', { alpha: true, antialias: false, powerPreference: 'low-power' })
+      } catch { gl = null }
+    }
     this.gl = gl
     let context2d: CanvasRenderingContext2D | null = null
     if (!gl) {
@@ -327,6 +331,9 @@ class GalaxyEngine implements StarfieldEngine {
   private onContextLost(event: Event): void {
     event.preventDefault()
     this.contextLostAt = performance.now()
+    // A lost-context canvas can composite as garbage (white) on some Windows
+    // drivers — hide it so the CSS fallback starfield shows instead.
+    this.canvas.style.opacity = '0'
     if (this.frame) { cancelAnimationFrame(this.frame); this.frame = 0 }
   }
 
@@ -422,6 +429,13 @@ class GalaxyEngine implements StarfieldEngine {
   private render(time: number): void {
     this.frame = 0
     if (this.destroyed || document.hidden || this.renderer === 'none') return
+    // Some drivers lose the context on resize without firing the event — probe it.
+    if (this.gl && this.gl.isContextLost()) {
+      if (this.contextLostAt === null) this.contextLostAt = performance.now()
+      this.canvas.style.opacity = '0'
+      return
+    }
+    if (this.contextLostAt === null && this.canvas.style.opacity === '0') this.canvas.style.opacity = '1'
     const pulse = this.pulseActivity && time < this.pulseUntil ? this.pulseActivity : null
     if (!pulse) this.pulseActivity = null
     const target = motionProfile(pulse ?? this.activity)

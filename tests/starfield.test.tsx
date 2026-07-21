@@ -27,6 +27,27 @@ describe('starfield performance contract', () => {
     expect(shouldRenderStatic(false, false)).toBe(false)
   })
 
+  it('forceCanvas2d skips WebGL entirely (context-loss demotion path)', () => {
+    const context2d = {
+      createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+      fillRect: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
+      setTransform: vi.fn()
+    } as unknown as CanvasRenderingContext2D
+    const canvas = document.createElement('canvas')
+    const getContext = vi.fn((type: string) => (type === '2d' ? context2d : null))
+    canvas.getContext = getContext as typeof canvas.getContext
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const engine = createStarfield(canvas, { density: 'low', static: true, forceCanvas2d: true })
+    expect(engine.renderer).toBe('canvas2d')
+    expect(getContext).not.toHaveBeenCalledWith('webgl', expect.anything())
+    engine.destroy()
+  })
+
   it('stops animation when WebGL initialization fails after context restore', () => {
     let programCount = 0
     const gl = {
@@ -63,6 +84,7 @@ describe('starfield performance contract', () => {
       getAttribLocation: vi.fn(() => 0),
       enableVertexAttribArray: vi.fn(),
       vertexAttribPointer: vi.fn(),
+      isContextLost: vi.fn(() => false),
       getUniformLocation: vi.fn(() => ({})),
       uniform1f: vi.fn(),
       uniform3fv: vi.fn(),

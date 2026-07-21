@@ -56,6 +56,8 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
     let rafId = 0
     let ro: ResizeObserver | null = null
     let recreates = 0
+    let webglFailures = 0
+    let lastRecreateAt = 0
     const mountAt = performance.now()
 
     const tearDownEngine = (): void => {
@@ -64,9 +66,10 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
       engineRef.current = null
     }
 
-    const startEngine = (): void => {
+    const startEngine = (forceCanvas2d = false): void => {
       if (cancelled || engineRef.current || !hasUsableLayout(canvas)) return
-      const engine = createStarfield(canvas, { density, static: staticFrame, theme })
+      canvas.style.opacity = '1'
+      const engine = createStarfield(canvas, { density, static: staticFrame, theme, forceCanvas2d })
       engineRef.current = engine
       setRenderer(engine.renderer)
       launchRef.current = !staticFrame
@@ -112,7 +115,7 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
         return
       }
       const health = engine.getHealth()
-      ;(window as unknown as Record<string, unknown>).__grokStarfieldHealth = { ...health, recreates }
+      ;(window as unknown as Record<string, unknown>).__grokStarfieldHealth = { ...health, recreates, webglFailures }
       const now = performance.now()
       const stalled =
         (engine.shouldBeAnimating() && now - health.lastFrameAt > 1_600) ||
@@ -120,10 +123,14 @@ export function StarfieldCanvas({ enabled, theme, density, reducedMotion, runnin
         (health.contextLostAt !== null && now - health.contextLostAt > 3_000)
       if (!stalled) return
       if (engine.revive()) return
-      if (recreates >= 5) return
+      // Cooldown-gated rebuilds, forever — a GPU that keeps killing WebGL on
+      // resize gets demoted to the canvas2d engine (cannot context-lose).
+      if (now - lastRecreateAt < 4_000) return
+      lastRecreateAt = now
+      if (health.renderer === 'webgl') webglFailures += 1
       recreates += 1
       tearDownEngine()
-      startEngine()
+      startEngine(webglFailures >= 3)
     }, 2_000)
 
     return () => {
