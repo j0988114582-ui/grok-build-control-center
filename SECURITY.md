@@ -21,4 +21,8 @@ Include the affected version, Windows version, reproduction steps, impact, and t
 
 ## Release status
 
-The v0.3.0 local installer is unsigned because no Windows code-signing certificate is configured. A checksum, SBOM, source build instructions, and GitHub Actions build are provided, but they are not substitutes for Authenticode signing.
+Released installers are currently **unsigned**: no Windows code-signing certificate is configured yet. A SignPath Foundation OSS certificate has been selected and the release automation is already in place (`.github/workflows/release-signed.yml`), pending approval.
+
+A checksum (`SHA256SUMS.txt`), an SBOM (`sbom.cdx.json`), source build instructions, and a clean-environment GitHub Actions build are provided with every release, but none of them substitute for Authenticode signing.
+
+Signing will not, on its own, remove SmartScreen warnings: an OV certificate replaces "unknown publisher" with a verified identity, while reputation still accumulates over time. See [docs/signing-trust-chain.md](docs/signing-trust-chain.md) for the full trust chain, verification commands, and the fail-safe behaviour when signing is unavailable.

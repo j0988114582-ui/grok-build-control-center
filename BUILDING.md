@@ -57,3 +57,17 @@ $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
 ## Signing
 
 Do not set `CSC_IDENTITY_AUTO_DISCOVERY=false` and then describe the output as signed. A signed release requires an Authenticode certificate configured through electron-builder's documented certificate variables, followed by `Get-AuthenticodeSignature` verification on the final installer.
+
+`npm run package` produces an **unsigned** installer. Check what you actually built before describing it:
+
+```bash
+node scripts/verify-signature.mjs outputs/installer/Grok-Build-Control-Center-Setup-<version>.exe
+# add --required to make a non-Valid signature exit non-zero (used by release CI)
+```
+
+Signed releases run through `.github/workflows/release-signed.yml`, which submits the
+installer to SignPath, waits for manual approval, and refuses to publish unless
+`verify-signature.mjs --required` reports a `Valid`, timestamped signature. If the
+signing secrets are absent the workflow fails immediately rather than emitting an
+unsigned artifact under a signed release. Full details, including certificate
+rotation and revocation handling, are in [docs/signing-trust-chain.md](docs/signing-trust-chain.md).
