@@ -991,7 +991,15 @@ export function App(): React.JSX.Element {
     }
   }
   const requestPermissionMode = (mode: AgentPermissionMode): void => {
-    if (permissionControlsLocked) return
+    // Stays enabled while busy: a disabled <select> swallows its own tooltip in
+    // Chromium, so users got a dead control with no reason. Explain instead —
+    // the controlled value snaps back on re-render.
+    if (permissionControlsLocked) {
+      setNotice(running || anyRunning
+        ? '回合執行中無法切換工具權限：請先按「停止」或等這一輪完成。'
+        : '系統忙碌中（安裝／連線／載入對話），請稍候再切換工具權限。')
+      return
+    }
     // P-PERM-1: already on 每次詢問 and re-selected → notice + purpose
     if (mode === permissionMode) {
       if (mode === 'ask') setNotice(PERMISSION_ASK_ALREADY_NOTICE)
@@ -2144,7 +2152,7 @@ export function App(): React.JSX.Element {
       <StatusOrb mode={orbMode} reducedMotion={settings.effects.reducedMotion || !settings.effects.galaxy} />
       <QuotaRings billing={billing} unavailable={billingUnavailable} />
       {active && <div className="usage-pill" data-context-zone="session" aria-label="Context 視窗用量" title={`Context 視窗（本 session，非訂閱週額度）${usage?.turnCount !== undefined ? ` · ${usage.turnCount} 回合` : ''}${usage?.toolCallCount !== undefined ? ` · ${usage.toolCallCount} 次工具` : ''}`}><Gauge /><b className="usage-pill-label">Context</b><span>{usagePercent !== undefined ? `${usagePercent}%` : '—'}</span><div className="usage-bar"><i className={usageLevel} style={{ width: `${Math.min(100, usagePercent ?? 0)}%` }} /></div><em>{formatTokens(usage?.contextTokensUsed)} / {formatTokens(usageTotal)}</em></div>}
-      <label title={permissionModeTitle}><select aria-label="權限模式" value={permissionMode} disabled={permissionControlsLocked} onChange={(event) => requestPermissionMode(event.target.value as AgentPermissionMode)}><option value="ask">每次詢問</option><option value="always-approve">一律核准（YOLO）</option></select></label>
+      <label className="permission-mode-label" title={permissionModeTitle}><span className="session-mode-caption">工具權限</span><select aria-label="權限模式" data-locked={permissionControlsLocked ? 'true' : undefined} value={permissionMode} onChange={(event) => requestPermissionMode(event.target.value as AgentPermissionMode)}><option value="ask">每次詢問</option><option value="always-approve">一律核准（YOLO）</option></select></label>
       {status.found && <button className="account-pill" aria-label="切換 Grok 帳號" title={running || anyRunning ? '請先停止所有執行中的回合' : '切換 Grok 帳號'} disabled={lifecycleBusy || running || anyRunning} onClick={() => openSetupDialog('account')}><UserRound />切換帳號</button>}
       <button className={`status-pill ${status.connected ? 'online' : ''}`} disabled={lifecycleBusy || anyRunning} onClick={() => { if (status.found) void connect(); else openSetupDialog('install') }}><span />{status.found ? `Grok ${status.version ?? ''}` : 'CLI not found'} · {status.connected ? 'Connected' : status.found ? 'Connect' : 'Setup'}</button></header>
     <div className={`workspace ${sidebarOpen ? '' : 'sidebar-collapsed'} ${previewOpen ? 'preview-open' : 'preview-rail'}`}>

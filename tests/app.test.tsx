@@ -633,7 +633,7 @@ describe('App', () => {
 
   // --- v0.4.1 regression locks (T1–T8) ---
 
-  it('T1 disables the permission-mode select while a turn is running or a session is loading', async () => {
+  it('T1 keeps the permission-mode select usable while busy and explains the refusal', async () => {
     const api = createApiMock()
     let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
     let resolveLoad: ((value: { sessionId: string }) => void) | undefined
@@ -644,17 +644,26 @@ describe('App', () => {
     render(<App />)
 
     const select = await screen.findByRole('combobox', { name: '權限模式' })
+    // Never disabled: Chromium hides tooltips on disabled controls, so a locked
+    // select used to be a dead end. It stays clickable and says why instead.
     expect(select).not.toBeDisabled()
+    expect(select).not.toHaveAttribute('data-locked')
+    expect(screen.getByText('工具權限')).toBeInTheDocument()
 
     await user.click(await screen.findByText('Fix tests'))
-    expect(select).toBeDisabled()
+    expect(select).toHaveAttribute('data-locked', 'true')
     act(() => { resolveLoad?.({ sessionId: 's1' }) })
-    await waitFor(() => expect(select).not.toBeDisabled())
+    await waitFor(() => expect(select).not.toHaveAttribute('data-locked'))
 
     act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
-    expect(select).toBeDisabled()
+    expect(select).toHaveAttribute('data-locked', 'true')
+    await user.selectOptions(select, 'always-approve')
+    expect(await screen.findByText(/回合執行中無法切換工具權限/)).toBeInTheDocument()
+    expect(api.setPermissionMode).not.toHaveBeenCalled()
+    expect(select).toHaveValue('ask')
+
     act(() => { onEvent?.({ id: 'turn-done', sessionId: 's1', kind: 'turn', status: 'completed' }) })
-    await waitFor(() => expect(select).not.toBeDisabled())
+    await waitFor(() => expect(select).not.toHaveAttribute('data-locked'))
   })
 
   it('T2 guards YOLO confirm against double-click and shows the YOLO banner after success', async () => {
