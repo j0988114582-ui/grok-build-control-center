@@ -1,7 +1,12 @@
 /** P-COMP: auto-grow caps for main and Team composers. */
 
 export const MAIN_COMPOSER_MIN_PX = 88
-export const MAIN_COMPOSER_MAX_VH = 0.5
+/**
+ * Fallback ceiling used only when the live transcript height is unknown. The real cap is
+ * `availableComposerMaxPx`, which lets the composer grow until the transcript hits its
+ * floor — i.e. a long draft may cover the whole conversation, by design.
+ */
+export const MAIN_COMPOSER_MAX_VH = 0.9
 export const TEAM_COMPOSER_MIN_PX = 52
 export const TEAM_COMPOSER_MAX_PX = 120
 export const TEAM_COMPOSER_MAX_PANE_RATIO = 0.28
@@ -10,6 +15,17 @@ export const TRANSCRIPT_MIN_PX = 120
 
 export function mainComposerMaxPx(viewportHeight: number): number {
   return Math.max(MAIN_COMPOSER_MIN_PX, Math.floor(viewportHeight * MAIN_COMPOSER_MAX_VH))
+}
+
+/**
+ * The composer may grow into the transcript's space until the transcript hits
+ * `TRANSCRIPT_MIN_PX`. Derived from live geometry rather than a viewport ratio because the
+ * chrome above the transcript (session header, status row, template chips, path chips)
+ * changes height as those elements come and go.
+ */
+export function availableComposerMaxPx(composerHeight: number, transcriptHeight: number): number {
+  if (!Number.isFinite(composerHeight) || !Number.isFinite(transcriptHeight)) return MAIN_COMPOSER_MIN_PX
+  return Math.max(MAIN_COMPOSER_MIN_PX, Math.floor(composerHeight + transcriptHeight - TRANSCRIPT_MIN_PX))
 }
 
 export function teamComposerMaxPx(paneHeight: number): number {
@@ -41,9 +57,13 @@ export function fitTextareaHeight(
 export function fitMainComposer(
   composer: HTMLElement,
   textarea: HTMLTextAreaElement,
-  viewportHeight: number
+  viewportHeight: number,
+  /** Live cap from `availableComposerMaxPx`; falls back to the viewport ratio when absent. */
+  maxPxOverride?: number
 ): number {
-  const maxPx = mainComposerMaxPx(viewportHeight)
+  const maxPx = maxPxOverride !== undefined && Number.isFinite(maxPxOverride)
+    ? Math.max(MAIN_COMPOSER_MIN_PX, Math.floor(maxPxOverride))
+    : mainComposerMaxPx(viewportHeight)
   const minPx = MAIN_COMPOSER_MIN_PX
   textarea.style.height = '0px'
   const textContent = textarea.scrollHeight

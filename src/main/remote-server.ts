@@ -72,6 +72,37 @@ async function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
+/**
+ * Resolve a request path inside `webRoot`, or null if it would escape.
+ *
+ * The previous guard was a bare `rel.includes('..')` and then `path.join(webRoot, rel)`.
+ * That is in fact safe today — `path.join` (unlike `path.resolve`) never lets an absolute
+ * second segment discard the first, and WHATWG URL parsing normalises `%2e%2e` away
+ * before the handler ever sees it — but the safety was incidental, resting on two
+ * behaviours nobody had written down. This makes the containment explicit so a future
+ * refactor to `path.resolve`, or a different URL parser, cannot silently open it up.
+ */
+export function resolveWebRootPath(webRoot: string, requestPath: string): string | null {
+  const decoded = ((): string | null => {
+    try {
+      return decodeURIComponent(requestPath)
+    } catch {
+      return null
+    }
+  })()
+  if (decoded === null) return null
+  // Windows: reject drive letters, UNC and device paths, and NTFS alternate data streams
+  // before they can reach the filesystem at all.
+  if (decoded.includes('\0') || decoded.includes(':') || decoded.includes('\\')) return null
+  const relative = decoded.replace(/^\/+/, '')
+  if (!relative) return null
+  const root = path.resolve(webRoot)
+  const resolved = path.resolve(root, relative)
+  const inside = path.relative(root, resolved)
+  if (inside === '' || inside.startsWith('..') || path.isAbsolute(inside)) return null
+  return resolved
+}
+
 function hostAllowed(hostHeader: string | undefined, allowed: string[]): boolean {
   if (!hostHeader) return false
   const host = hostHeader.trim().toLowerCase()
@@ -210,12 +241,18 @@ export class RemoteServer {
     }
 
     if (pathname === '/api/status' && req.method === 'GET') {
+      // Unauthenticated route: cap it, and read the cheap fields rather than running a
+      // full snapshot (which hits listSessions() on disk) for every anonymous caller.
+      if (!controller.auth.rateLimit('status', 120, 60_000, now)) {
+        sendJson(res, 429, remoteError('rate_limited', '請求過於頻繁'))
+        return
+      }
       const pairing = controller.auth.getPairingPublic(now)
-      const snap = controller.getSnapshot()
+      const status = controller.getPublicStatus()
       sendJson(res, 200, {
-        banner: snap.banner,
+        banner: status.banner,
         pairable: pairing.pairable,
-        paired: snap.paired,
+        paired: status.paired,
         experimentalTunnel: controller.getDesktopPairingView().experimentalTunnel
       })
       return
@@ -295,6 +332,10 @@ export class RemoteServer {
 
     if (pathname === '/api/cancel' && req.method === 'POST') {
       if (!requireJsonMutation(req, res)) return
+      if (!controller.auth.rateLimit(`cancel:${session.value.tokenHash}`, 20, 60_000, now)) {
+        sendJson(res, 429, remoteError('rate_limited', '請求過於頻繁'))
+        return
+      }
       const result = await controller.handleCancel()
       sendHandlerResult(res, result, { provenance: 'mobile-remote' })
       return
@@ -328,6 +369,10 @@ export class RemoteServer {
 
     if (pathname === '/api/queue' && req.method === 'POST') {
       if (!requireJsonMutation(req, res)) return
+      if (!controller.auth.rateLimit(`queue:${session.value.tokenHash}`, 20, 60_000, now)) {
+        sendJson(res, 429, remoteError('rate_limited', '請求過於頻繁'))
+        return
+      }
       const body = await parseJsonBody<{ text?: string }>(req, res)
       if (!body) return
       const result = controller.handleQueue(typeof body.text === 'string' ? body.text : '', 'mobile-remote')
@@ -458,12 +503,12 @@ export class RemoteServer {
 
   private async handleStatic(res: ServerResponse, pathname: string): Promise<void> {
     const rel = pathname === '/' ? '/index.html' : pathname
-    if (rel.includes('..')) {
+    const filePath = resolveWebRootPath(this.options.webRoot, rel)
+    if (!filePath) {
       res.writeHead(400)
       res.end('Bad path')
       return
     }
-    const filePath = path.join(this.options.webRoot, rel.replace(/^\//, ''))
     try {
       const data = await readFile(filePath)
       const ext = path.extname(filePath).toLowerCase()

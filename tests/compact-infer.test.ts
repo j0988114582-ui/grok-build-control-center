@@ -67,6 +67,18 @@ describe('Fallback C compact inference', () => {
     expect(text).toContain('非官方事件')
     expect(text).toContain('45%→10%')
     expect(formatOfficialCompactTitle(100, 100)).toContain('用量未變')
-    expect(formatOfficialCompactTitle(900, 300)).toBe('已自動壓縮上下文')
+  })
+
+  // v0.11: the title carries the numbers. Before the card defaulted to open, the title was
+  // the only visible part — and it said nothing about how much context was reclaimed.
+  it('official title reports before→after tokens', () => {
+    expect(formatOfficialCompactTitle(900, 300)).toBe('已自動壓縮上下文（900 → 300 tokens）')
+    expect(formatOfficialCompactTitle(191_000, 96_000)).toBe('已自動壓縮上下文（191k → 96k tokens）')
+    expect(formatOfficialCompactTitle(9_500, 1_200)).toBe('已自動壓縮上下文（9.5k → 1.2k tokens）')
+  })
+
+  it('official title stays generic when the CLI gave no numbers', () => {
+    expect(formatOfficialCompactTitle()).toBe('已自動壓縮上下文')
+    expect(formatOfficialCompactTitle(900, undefined)).toBe('已自動壓縮上下文')
   })
 })

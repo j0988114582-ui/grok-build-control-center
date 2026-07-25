@@ -7,8 +7,7 @@ import type {
   NewSessionResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
-  SessionModeState,
-  SetSessionConfigOptionResponse
+  SessionModeState
 } from '@agentclientprotocol/sdk'
 import type { AgentCapabilities, ModelState, PermissionOption, PermissionRequest, PromptBlock, UiSessionEvent } from '../shared/types'
 import { normalizeAcpUpdate } from '../shared/event-adapter'
@@ -227,10 +226,9 @@ export class GrokAcpClient {
     }
   }
 
-  async setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<SetSessionConfigOptionResponse> {
-    const request = typeof value === 'boolean' ? { sessionId, configId, value, type: 'boolean' as const } : { sessionId, configId, value }
-    return this.requireContext().request(acp.methods.agent.session.setConfigOption, request)
-  }
+  // No setConfigOption: the standard `session/set_config_option` returns Method not found
+  // on this CLI (model changes go through the `session/set_model` extension instead), and
+  // nothing in the renderer ever called it. See AGENTS.md for the probe result.
 
   async getBilling(): Promise<unknown> {
     return this.requireContext().request('_x.ai/billing', {})

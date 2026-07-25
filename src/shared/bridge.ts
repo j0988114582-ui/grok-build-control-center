@@ -1,7 +1,7 @@
 import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock, SessionSummary, SessionUsage, UiSessionEvent
 } from './types'
-import type { PreviewReadTextResult, PreviewRegisterResult, PreviewStatResult } from './preview-types'
+import type { PreviewReadTextResult, PreviewRegisterResult } from './preview-types'
 
 export type CliStatusUpdate = Partial<CliStatus> & { message?: string; stderr?: string }
 
@@ -34,7 +34,6 @@ export interface GrokBridgeApi {
   cancel(sessionId: string): Promise<void>
   setMode(sessionId: string, modeId: string): Promise<void>
   setModel(sessionId: string, modelId: string, reasoningEffort?: string): Promise<void>
-  setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<unknown>
   respondPermission(requestId: string, optionId: string): Promise<void>
   getPermissionMode(): Promise<AgentPermissionMode>
   setPermissionMode(mode: AgentPermissionMode): Promise<AgentPermissionMode>
@@ -59,8 +58,6 @@ export interface GrokBridgeApi {
   openExternal(url: string): Promise<void>
   /** OS notification (suppressed when the main window is focused). */
   notify(payload: { title: string; body?: string }): Promise<boolean>
-  /** Preview Dock: stat a local file under allowlisted roots. */
-  previewStat(filePath: string): Promise<PreviewStatResult>
   /** Preview Dock: register for protocol/base64 load. */
   previewRegister(filePath: string): Promise<PreviewRegisterResult>
   /** Preview Dock: read code/HTML text (utf-8, size-capped). */

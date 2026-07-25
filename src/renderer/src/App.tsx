@@ -4,9 +4,9 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import {
-  Activity, Archive, Bot, Check, ChevronDown, ChevronRight, CircleAlert, Command, Cpu, FilePlus2,
-  FolderOpen, Gauge, Keyboard, ListTodo, LoaderCircle, MessageSquare, Moon, Paperclip, PanelLeft, PanelLeftClose, Pencil, Pin, Play, Search, Send,
-  Settings, Smartphone, Square, Sun, TerminalSquare, Trash2, UserRound, Users, Wrench, X, Zap
+  Activity, Archive, Bot, Check, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Command, Cpu, FilePlus2,
+  FolderOpen, Gauge, Keyboard, ListTodo, LoaderCircle, MessageSquare, Minimize2, Moon, Paperclip, PanelLeft, PanelLeftClose, Pencil, Play, Search, Send,
+  Settings, Smartphone, Square, Sun, TerminalSquare, Trash2, UserRound, Wrench, X, Zap
 } from 'lucide-react'
 import type { SelectedFile } from '../../shared/bridge'
 import { createDefaultSettings } from '../../shared/settings'
@@ -37,6 +37,8 @@ import { QuotaRings } from './components/QuotaRings'
 import { ModelPicker } from './components/ModelPicker'
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette'
 import { CodeBlock } from './components/CodeBlock'
+import { PromptBookmarks } from './components/PromptBookmarks'
+import { SessionRow } from './components/SessionRow'
 import { PreviewDock, type PreviewLoadState } from './components/PreviewDock/PreviewDock'
 import { AgentsTeamToolbar, SessionTeamPane } from './components/SessionTeamPane'
 import {
@@ -137,7 +139,13 @@ import {
   upsertPathChips,
   type PathChip
 } from '../../shared/drop-paths'
-import { fitMainComposer } from '../../shared/composer-autogrow'
+import { availableComposerMaxPx, fitMainComposer, MAIN_COMPOSER_MIN_PX } from '../../shared/composer-autogrow'
+import {
+  AT_BOTTOM_LEAVE_DEBOUNCE_MS,
+  JUMP_SETTLE_DELAYS_MS,
+  POST_LOAD_STICK_DELAYS_MS,
+  shouldPinAfterResize
+} from '../../shared/scroll-anchor'
 import {
   cwdDisplayName,
   filterSessionsByCwd,
@@ -228,14 +236,16 @@ function Markdown({ children, preview }: { children: string; preview?: PreviewHa
 }
 
 function EventCard({ event, query, preview }: { event: UiSessionEvent; query: string; preview?: PreviewHandlers }): React.JSX.Element {
-  const [open, setOpen] = useState(event.kind === 'message' || event.kind === 'error')
+  // Compaction is a thing the user needs to notice, not dig for — it silently changes what
+  // the model still remembers. Open by default so the before→after tokens are just there.
+  const [open, setOpen] = useState(event.kind === 'message' || event.kind === 'error' || event.kind === 'compact')
   const matches = query && eventText(event).toLocaleLowerCase().includes(query.toLocaleLowerCase())
   if (event.kind === 'message') return <article className={`message ${event.role} ${matches ? 'search-hit' : ''}`}>
     <div className="message-rail">{event.role === 'assistant' ? <Bot size={17} /> : <UserRound size={17} />}</div>
     <div className="message-body"><div className="message-label">{event.role === 'assistant' ? 'GROK' : 'YOU'}</div><Markdown preview={preview}>{event.text}</Markdown></div>
   </article>
   if (event.kind === 'turn') return <div className={`turn-marker ${event.status}`}><span />{event.status === 'running' ? 'Grok 正在工作' : `回合${event.status === 'completed' ? '完成' : event.status}`}</div>
-  const icon = event.kind === 'tool' ? <Wrench size={16} /> : event.kind === 'thought' ? <Zap size={16} /> : event.kind === 'plan' ? <ListTodo size={16} /> : event.kind === 'subagent' ? <Bot size={16} /> : event.kind === 'task' ? <Activity size={16} /> : <CircleAlert size={16} />
+  const icon = event.kind === 'tool' ? <Wrench size={16} /> : event.kind === 'thought' ? <Zap size={16} /> : event.kind === 'plan' ? <ListTodo size={16} /> : event.kind === 'subagent' ? <Bot size={16} /> : event.kind === 'task' ? <Activity size={16} /> : event.kind === 'compact' ? <Minimize2 size={16} /> : <CircleAlert size={16} />
   const title = eventTitle(event)
   return <article className={`event-card ${event.kind} ${matches ? 'search-hit' : ''}`}>
     <button className="event-head" onClick={() => setOpen(!open)}>{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{icon}<span>{title}</span>{'status' in event && <em>{event.status}</em>}</button>
@@ -417,6 +427,8 @@ export function App(): React.JSX.Element {
   const [renameDraft, setRenameDraft] = useState('')
   const [followTail, setFollowTail] = useState(true)
   const [unread, setUnread] = useState(0)
+  /** P-COMP-MAIN: a long draft may now cover the transcript, so offer a way back. */
+  const [composerCollapsed, setComposerCollapsed] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [previewItemsBySession, setPreviewItemsBySession] = useState<Record<string, PreviewItem[]>>({})
   const [previewActiveId, setPreviewActiveId] = useState<string | null>(null)
@@ -440,6 +452,7 @@ export function App(): React.JSX.Element {
   const transcriptSearchRef = useRef<HTMLInputElement>(null)
   const mainComposerRef = useRef<HTMLDivElement>(null)
   const mainComposerTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const transcriptRef = useRef<HTMLElement>(null)
   const createSessionRef = useRef<() => void>(() => {})
   const jumpToLatestRef = useRef<() => void>(() => {})
   const followTailRef = useRef(true)
@@ -456,6 +469,47 @@ export function App(): React.JSX.Element {
   activeIdRef.current = active?.id ?? null
   sessionsRef.current = sessions
   remoteControlActiveRef.current = remoteControlActive
+  const composerCollapsedRef = useRef(false)
+  composerCollapsedRef.current = composerCollapsed
+
+  /** P-SCROLL: re-pin the transcript to the newest event. Virtuoso's followOutput only
+   *  reacts to new items arriving, never to the viewport shrinking under it. */
+  const stickToBottom = useCallback((behavior: 'auto' | 'smooth' = 'auto'): void => {
+    virtuoso.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior })
+  }, [])
+
+  /** P-SCROLL/D2: a layout shift emits a transient atBottom=false. Debounce leaving the
+   *  bottom so it cannot strand followTail; arriving at the bottom applies at once. */
+  const atBottomLeaveTimerRef = useRef<number | null>(null)
+  const clearAtBottomLeaveTimer = (): void => {
+    if (atBottomLeaveTimerRef.current === null) return
+    window.clearTimeout(atBottomLeaveTimerRef.current)
+    atBottomLeaveTimerRef.current = null
+  }
+  const handleAtBottomChange = useCallback((bottom: boolean): void => {
+    clearAtBottomLeaveTimer()
+    if (bottom) {
+      setFollowTail(true)
+      setUnread(0)
+      return
+    }
+    atBottomLeaveTimerRef.current = window.setTimeout(() => {
+      atBottomLeaveTimerRef.current = null
+      setFollowTail(false)
+    }, AT_BOTTOM_LEAVE_DEBOUNCE_MS)
+  }, [])
+  useEffect(() => clearAtBottomLeaveTimer, [])
+
+  /** Staggered re-pin so a session load lands on the newest event regardless of how long
+   *  the replay takes to settle (today followOutput wins that race only by timing). */
+  const stickAfterReplay = useCallback((sessionId: string): void => {
+    for (const delay of POST_LOAD_STICK_DELAYS_MS) {
+      window.setTimeout(() => {
+        if (activeIdRef.current !== sessionId || !followTailRef.current) return
+        stickToBottom()
+      }, delay)
+    }
+  }, [stickToBottom])
 
   const updateConnectionGeneration = (newGen: number): void => {
     connectionGenerationRef.current = newGen
@@ -494,6 +548,7 @@ export function App(): React.JSX.Element {
           )
           return { ...current, [sessionId]: reduced.events }
         })
+        if (sessionId === activeIdRef.current) setNotice('可能已壓縮上下文（由 signals 推斷，非官方事件）')
       }
     } catch { /* usage 屬輔助資訊，讀不到不打斷操作 */ }
   }
@@ -617,6 +672,11 @@ export function App(): React.JSX.Element {
       if (event.kind === 'mode') setCaps((current) => ({ ...current, currentModeId: event.modeId }))
       if (event.kind === 'compact' && event.source !== 'inferred') {
         lastOfficialCompactAtRef.current[event.sessionId] = Date.now()
+        // The card alone reads like every other event row; a toast is what actually gets
+        // noticed when the context you were relying on just got summarised away.
+        if (event.sessionId === activeIdRef.current) {
+          setNotice(formatOfficialCompactTitle(event.before, event.after))
+        }
       }
       if (event.kind === 'error') setErrorPulse((value) => value + 1)
       if (event.kind === 'turn') {
@@ -817,27 +877,53 @@ export function App(): React.JSX.Element {
     const box = mainComposerRef.current
     const ta = mainComposerTextareaRef.current
     if (!box || !ta) return
-    fitMainComposer(box, ta, window.innerHeight)
-  }, [])
+    const before = box.getBoundingClientRect().height
+    // The cap comes from live geometry, not a viewport ratio: grow until the transcript
+    // hits its floor, so a long draft may cover the conversation (P-COMP-MAIN v0.11).
+    const transcriptH = transcriptRef.current?.getBoundingClientRect().height
+    const maxPx = composerCollapsedRef.current
+      ? MAIN_COMPOSER_MIN_PX
+      : transcriptH !== undefined ? availableComposerMaxPx(before, transcriptH) : undefined
+    fitMainComposer(box, ta, window.innerHeight, maxPx)
+    // D1: the transcript is a flex sibling — a taller composer steals its viewport and
+    // hides the newest message without moving scrollTop. Re-pin when we were following.
+    if (shouldPinAfterResize(before, box.getBoundingClientRect().height, followTailRef.current)) {
+      requestAnimationFrame(() => stickToBottom())
+    }
+  }, [stickToBottom])
 
   useEffect(() => {
     syncMainComposerHeight()
-  }, [syncMainComposerHeight, active?.id, drafts, running, attachments.length, pathChipsBySession])
+  }, [syncMainComposerHeight, active?.id, drafts, running, attachments.length, pathChipsBySession, composerCollapsed])
+
+  // A collapse only makes sense while a tall draft exists; switching session or clearing
+  // the draft should not leave the composer silently pinned to its minimum.
+  useEffect(() => {
+    if (!composerCollapsed) return
+    if (!(drafts[active?.id ?? ''] ?? '').trim()) setComposerCollapsed(false)
+  }, [composerCollapsed, drafts, active?.id])
+  useEffect(() => { setComposerCollapsed(false) }, [active?.id])
 
   useEffect(() => {
+    // A window resize can shrink the transcript without changing the composer at all,
+    // so re-pin here too rather than relying on the composer-height delta.
+    const onWindowResize = (): void => {
+      syncMainComposerHeight()
+      if (followTailRef.current) requestAnimationFrame(() => stickToBottom())
+    }
     const box = mainComposerRef.current
     if (!box || typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', syncMainComposerHeight)
-      return () => window.removeEventListener('resize', syncMainComposerHeight)
+      window.addEventListener('resize', onWindowResize)
+      return () => window.removeEventListener('resize', onWindowResize)
     }
     const ro = new ResizeObserver(() => syncMainComposerHeight())
     ro.observe(box)
-    window.addEventListener('resize', syncMainComposerHeight)
+    window.addEventListener('resize', onWindowResize)
     return () => {
       ro.disconnect()
-      window.removeEventListener('resize', syncMainComposerHeight)
+      window.removeEventListener('resize', onWindowResize)
     }
-  }, [syncMainComposerHeight, active?.id])
+  }, [syncMainComposerHeight, stickToBottom, active?.id])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
@@ -921,30 +1007,48 @@ export function App(): React.JSX.Element {
   const showTeamBoard = teamEnabled && team.slots.length >= 2
   // L2 orb: global connection + any running turn (not sticky error — errorPulse drives starfield only).
   const orbMode: StatusOrbMode = !status.connected ? 'offline' : anyRunning || running ? 'running' : 'idle'
-  const renderSessionRow = (session: SessionSummary): React.JSX.Element => {
-    const title = sessionDisplayTitle(session, settings.sessionTitles)
-    const isPinned = settings.pinnedSessions.includes(session.id)
-    const isSelected = selectedIds.has(session.id)
-    const inTeam = isInTeam(team, session.id)
-    return <div key={session.id} className={`session-row ${active?.id === session.id ? 'active' : ''} ${inTeam ? 'in-team' : ''} ${collapsingSessionId === session.id ? 'collapsing' : ''} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''}`}>
-      {selectMode && <input className="session-check" type="checkbox" aria-label={`選擇對話 ${title}`} checked={isSelected} onChange={(event) => toggleSessionSelection(session.id, event.currentTarget.checked)} />}
-      <button className="session-open" disabled={lifecycleBusy || loadingSessionIds.includes(session.id)} onClick={() => void loadSession(session)}>
-        <span className="session-dot" />
-        <div className="session-meta"><strong>{title}{inTeam ? <em className="team-badge">TEAM</em> : null}</strong><small>{session.cwd}</small><time>{formatDate(session.updatedAt)}</time></div>
-      </button>
-      {!selectMode && (
-        <div className="session-actions" data-testid="session-actions">
-          {teamEnabled && <button type="button" className={`session-team ${inTeam ? 'active' : ''}`} title={inTeam ? '移出 Agents Team' : '加入 Agents Team'} aria-label={inTeam ? `移出 Team ${title}` : `加入 Team ${title}`} onClick={() => {
-            if (inTeam) setTeam((current) => toggleTeamSlot(current, session.id))
-            else void loadSession(session)
-          }}><Users /></button>}
-          <button type="button" className={`session-pin ${isPinned ? 'pinned' : ''}`} title={isPinned ? '取消釘選' : '釘選'} aria-label={isPinned ? `取消釘選 ${title}` : `釘選 ${title}`} onClick={() => togglePinned(session)}><Pin /></button>
-          <button type="button" className="session-rename" title="重新命名" aria-label={`重新命名 ${title}`} onClick={() => { setRenameTarget(session); setRenameDraft(title) }}><Pencil /></button>
-          <button type="button" className="session-delete" data-nova-tone="danger" title="刪除對話" aria-label={`刪除對話 ${title}`} onClick={() => setDeleteTarget(session)}><Trash2 /></button>
-        </div>
-      )}
-    </div>
+  // D4: the row handlers go through refs so their identity never changes — otherwise every
+  // App render hands SessionRow fresh closures and React.memo compares unequal every time.
+  const sessionRowActions = {
+    open: (session: SessionSummary) => { void loadSession(session) },
+    toggleSelect: (sessionId: string, checked: boolean) => toggleSessionSelection(sessionId, checked),
+    toggleTeam: (session: SessionSummary, inTeam: boolean) => {
+      if (inTeam) setTeam((current) => toggleTeamSlot(current, session.id))
+      else void loadSession(session)
+    },
+    togglePin: (session: SessionSummary) => togglePinned(session),
+    rename: (session: SessionSummary, title: string) => { setRenameTarget(session); setRenameDraft(title) },
+    remove: (session: SessionSummary) => setDeleteTarget(session)
   }
+  const sessionRowActionsRef = useRef(sessionRowActions)
+  sessionRowActionsRef.current = sessionRowActions
+  const rowOpen = useCallback((session: SessionSummary) => sessionRowActionsRef.current.open(session), [])
+  const rowToggleSelect = useCallback((sessionId: string, checked: boolean) => sessionRowActionsRef.current.toggleSelect(sessionId, checked), [])
+  const rowToggleTeam = useCallback((session: SessionSummary, inTeam: boolean) => sessionRowActionsRef.current.toggleTeam(session, inTeam), [])
+  const rowTogglePin = useCallback((session: SessionSummary) => sessionRowActionsRef.current.togglePin(session), [])
+  const rowRename = useCallback((session: SessionSummary, title: string) => sessionRowActionsRef.current.rename(session, title), [])
+  const rowDelete = useCallback((session: SessionSummary) => sessionRowActionsRef.current.remove(session), [])
+
+  const renderSessionRow = (session: SessionSummary): React.JSX.Element => <SessionRow
+    key={session.id}
+    session={session}
+    title={sessionDisplayTitle(session, settings.sessionTitles)}
+    updatedLabel={formatDate(session.updatedAt)}
+    isActive={active?.id === session.id}
+    isPinned={settings.pinnedSessions.includes(session.id)}
+    isSelected={selectedIds.has(session.id)}
+    inTeam={isInTeam(team, session.id)}
+    isCollapsing={collapsingSessionId === session.id}
+    selectMode={selectMode}
+    teamEnabled={teamEnabled}
+    disabled={lifecycleBusy || loadingSessionIds.includes(session.id)}
+    onOpen={rowOpen}
+    onToggleSelect={rowToggleSelect}
+    onToggleTeam={rowToggleTeam}
+    onTogglePin={rowTogglePin}
+    onRename={rowRename}
+    onDelete={rowDelete}
+  />
   const togglePinned = (session: SessionSummary): void => {
     const next = { ...settings, pinnedSessions: togglePinnedSession(settings.pinnedSessions, session.id) }
     setSettings(next)
@@ -1249,6 +1353,9 @@ export function App(): React.JSX.Element {
         }
         setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, currentGen, connectionGenerationRef.current))
         window.setTimeout(() => { void refreshUsageRef.current(session.id) }, 0)
+        // Entering a conversation must land on the newest message, not wherever the
+        // replay happened to stop.
+        stickAfterReplay(session.id)
       } catch (error) {
         setSessionReady((current) => clearSessionReady(current, session.id))
         setActive((current) => current?.id === session.id ? previousActive : current)
@@ -1634,6 +1741,16 @@ export function App(): React.JSX.Element {
   const chooseFiles = async (): Promise<void> => { try { const files = await window.grokApi.chooseFiles(); addSelectedFiles(files) } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) } }
   const addSelectedFiles = (files: SelectedFile[]): void => { if (!active) return; const sessionId = active.id; const { blocks, paths } = selectedFilesToPrompt(files, caps.promptCapabilities.image === true); setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), ...blocks] })); if (paths) setDrafts((current) => ({ ...current, [sessionId]: `${current[sessionId] ?? ''}${current[sessionId] ? '\n' : ''}${paths}` })) }
   const jumpToLatest = (): void => { virtuoso.current?.scrollToIndex({ index: Math.max(0, activeEvents.length - 1), align: 'end', behavior: 'smooth' }); setFollowTail(true); setUnread(0) }
+  /** P-BOOKMARK: land on one of my earlier prompts. Deliberately leaves followTail alone —
+   *  you went back to read, so streaming output must not yank you forward again. */
+  const jumpToPrompt = (eventId: string): void => {
+    const index = activeEvents.findIndex((event) => event.id === eventId)
+    if (index < 0) return
+    const go = (behavior: 'smooth' | 'auto'): void => { virtuoso.current?.scrollToIndex({ index, align: 'start', behavior }) }
+    go('smooth')
+    // Virtuoso lands short when the target's height was never measured; settle onto it.
+    for (const delay of JUMP_SETTLE_DELAYS_MS) window.setTimeout(() => go('auto'), delay)
+  }
   createSessionRef.current = () => { void createSession() }
   jumpToLatestRef.current = jumpToLatest
   const composerKey = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -2293,9 +2410,9 @@ export function App(): React.JSX.Element {
             />
           })}
         </section> : active ? <>
-          <header className="session-header"><div><span className="eyebrow">ACTIVE SESSION · PROJECT</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) { setNotice(`已匯出：${path}（可在檔案總管開啟該路徑）`); setExportedPaths((current) => ({ ...current, [active.id]: path })); setLastExportedPath(path); } }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button>{exportedPaths[active.id] && <button className="icon-button" title="在檔案總管開啟匯出檔案" onClick={() => void window.grokApi.revealExport(exportedPaths[active.id]).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><FolderOpen /></button>}<button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
+          <header className="session-header"><PromptBookmarks events={activeEvents} onJump={jumpToPrompt} /><div className="session-title"><span className="eyebrow">ACTIVE SESSION · PROJECT</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) { setNotice(`已匯出：${path}（可在檔案總管開啟該路徑）`); setExportedPaths((current) => ({ ...current, [active.id]: path })); setLastExportedPath(path); } }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button>{exportedPaths[active.id] && <button className="icon-button" title="在檔案總管開啟匯出檔案" onClick={() => void window.grokApi.revealExport(exportedPaths[active.id]).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><FolderOpen /></button>}<button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
-          <section className="transcript"><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={(bottom) => { setFollowTail(bottom); if (bottom) setUnread(0) }} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} preview={previewHandlers} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
+          <section className="transcript" ref={transcriptRef}><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={handleAtBottomChange} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} preview={previewHandlers} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
           <footer className="composer-wrap" onDragOver={onComposerDragOver} onDrop={onComposerDrop}>
             <div className="composer-status" data-testid="composer-status">
               <span className={`composer-status-pill ${running ? 'is-running' : lifecycleBusy || sessionLoading ? 'is-busy' : 'is-ready'}`}>
@@ -2311,6 +2428,14 @@ export function App(): React.JSX.Element {
               {displayQueue && displayQueue.sessionId === active.id && hasQueuedPayload(displayQueue)
                 ? <em className="local-queue-status" data-testid="local-queue-status">{displayQueueStatus}</em>
                 : null}
+              {(drafts[active.id] ?? '').includes('\n') && <button
+                type="button"
+                className="composer-collapse"
+                data-testid="composer-collapse"
+                title={composerCollapsed ? '展開輸入框' : '收合輸入框，先看對話'}
+                aria-pressed={composerCollapsed}
+                onClick={() => setComposerCollapsed((current) => !current)}
+              >{composerCollapsed ? <ChevronUp /> : <ChevronDown />}{composerCollapsed ? '展開輸入框' : '收合輸入框'}</button>}
               <span className="composer-status-keys">{running ? `${shortcutLabel('sendPrompt')} 插話 · ${shortcutLabel('cancelTurn')} 停止` : `${shortcutLabel('sendPrompt')} 傳送 · ${shortcutLabel('newline')} 換行`}</span>
             </div>
             {attachments.length > 0 && <div className="attachment-row">{attachments.map((item, index) => <span key={index}><Paperclip />{'name' in item ? item.name : 'Attachment'}<button aria-label={`移除附件 ${'name' in item ? item.name : index + 1}`} onClick={() => setAttachmentsBySession((current) => ({ ...current, [active.id]: (current[active.id] ?? []).filter((_item, i) => i !== index) }))}><X /></button></span>)}</div>}

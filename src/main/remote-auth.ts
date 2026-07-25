@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto'
 import {
   REMOTE_ELEVATE_PIN_FAIL_LIMIT,
   REMOTE_ELEVATE_RATE_LIMIT,
@@ -70,7 +70,9 @@ export class RemoteAuthStore {
   openPairing(now = Date.now()): { pairingSecret: string; pin: string; expiresAt: number; generation: number } {
     this.generation += 1
     const pairingSecret = randomBytes(24).toString('base64url')
-    const pin = String(Math.floor(100000 + Math.random() * 900000))
+    // CSPRNG, not Math.random(): the PIN is the second factor and must not be weaker than
+    // the pairing secret it guards. V8's xorshift128+ is recoverable from a few outputs.
+    const pin = String(randomInt(100_000, 1_000_000))
     const pinSalt = randomBytes(16).toString('hex')
     const pinHash = hashPin(pin, pinSalt)
     this.pairing = {
@@ -119,8 +121,10 @@ export class RemoteAuthStore {
       return { ok: false, code: 'pairing_expired', message: '配對已過期，請在桌面重新產生' }
     }
     if (!safeEqualHex(sha256(pairingSecret), pairing.secretHash)) {
-      pairing.failures += 1
-      if (pairing.failures >= REMOTE_ELEVATE_PIN_FAIL_LIMIT) pairing.closed = true
+      // Deliberately NOT counted toward the lockout. Anyone holding only the tunnel URL
+      // cannot know the 192-bit secret, so counting these let them close pairing on the
+      // legitimate phone with five junk POSTs. Brute force is covered by the secret's
+      // entropy plus the 10-per-minute limit on /api/pair.
       return { ok: false, code: 'unauthorized', message: '配對失敗' }
     }
     const pinHash = hashPin(pin.trim(), pairing.pinSalt)
@@ -245,7 +249,14 @@ export function parseCookie(header: string | undefined, name: string): string | 
   if (!header) return null
   for (const part of header.split(';')) {
     const [rawKey, ...rest] = part.trim().split('=')
-    if (rawKey === name) return decodeURIComponent(rest.join('=') || '')
+    if (rawKey !== name) continue
+    try {
+      return decodeURIComponent(rest.join('=') || '')
+    } catch {
+      // Malformed percent-encoding (`%E0%A4%A`) threw URIError all the way out to a 500.
+      // An undecodable cookie is simply not a valid token → treat as absent (401).
+      return null
+    }
   }
   return null
 }

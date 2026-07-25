@@ -150,10 +150,27 @@ export function formatInferredCompactSummary(inferred: InferredCompact): string 
   return detail ? `可能已壓縮上下文（${detail}；由 signals 推斷，非官方事件）` : '可能已壓縮上下文（由 signals 推斷，非官方事件）'
 }
 
-/** 繁中 title for official wire compact. */
+/**
+ * Compact token counts for a card title / toast: 191000 → `191k`, 9500 → `9.5k`.
+ * Trailing `.0` is dropped so a pair never reads as mismatched (`191k → 96.0k`).
+ */
+export function formatCompactTokens(value: number): string {
+  if (value < 1000) return String(value)
+  const thousands = value / 1000
+  return `${thousands >= 100 ? Math.round(thousands) : Number(thousands.toFixed(1))}k`
+}
+
+/**
+ * 繁中 title for official wire compact.
+ * Carries the numbers so the collapsed card still says how much was reclaimed — the
+ * title was the only thing visible before the card defaulted to open.
+ */
 export function formatOfficialCompactTitle(before?: number, after?: number): string {
   if (before !== undefined && after !== undefined && before === after) {
     return '已執行上下文壓縮（用量未變）'
+  }
+  if (before !== undefined && after !== undefined) {
+    return `已自動壓縮上下文（${formatCompactTokens(before)} → ${formatCompactTokens(after)} tokens）`
   }
   return '已自動壓縮上下文'
 }

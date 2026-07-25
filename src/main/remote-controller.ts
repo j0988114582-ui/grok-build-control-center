@@ -15,6 +15,7 @@ import {
   type RemoteTranscriptItem
 } from '../shared/remote-protocol'
 import { canEnableRemote, canEnableYolo, YOLO_REMOTE_COEXIST_NOTICE } from '../shared/remote-yolo-mutex'
+import { formatOfficialCompactTitle } from '../shared/compact-infer'
 import { RemoteAuthStore } from './remote-auth'
 
 export type RemotePendingPermission = {
@@ -136,6 +137,21 @@ export class RemoteController {
 
   getBanner(): RemoteBannerState {
     return this.banner
+  }
+
+  /**
+   * Unauthenticated `/api/status` payload. Deliberately does NOT go through
+   * `getSnapshot()`: that reaches `listSessions()` (disk I/O) on every call, and this
+   * route answers before any cookie check — anyone holding the tunnel URL could pump it.
+   * Mirrors the banner/paired derivation in `getSnapshot()` without touching the session
+   * list; carries no titles, cwds, or transcript.
+   */
+  getPublicStatus(): { banner: RemoteBannerState; paired: boolean } {
+    const paired = this.auth.hasActiveSession(this.now())
+    return {
+      banner: paired ? this.banner : (this.banner === 'paired' ? 'expired' : this.banner),
+      paired
+    }
   }
 
   getPublicBaseUrl(): string | null {
@@ -684,6 +700,11 @@ export class RemoteController {
     if (!this.deps.interject) return { ok: false, code: 'not_ready', message: '插話能力未就緒' }
     const trimmed = text.trim()
     if (!trimmed) return { ok: false, code: 'invalid_request', message: '插話內容不可為空' }
+    // Same ceiling as handlePrompt — interject reaches the same ACP session, so leaving it
+    // uncapped just moved the hole one route over (only BODY_LIMIT stood behind it).
+    if (trimmed.length > REMOTE_PROMPT_MAX_CHARS) {
+      return { ok: false, code: 'invalid_request', message: `插話過長（上限 ${REMOTE_PROMPT_MAX_CHARS} 字）` }
+    }
     try {
       await this.deps.interject(sessionId, trimmed)
       this.notices = ['來自手機遙控：已插話']
@@ -748,6 +769,11 @@ export class RemoteController {
     }
     const trimmed = text.trim()
     if (!trimmed) return { ok: false, code: 'invalid_request', message: '排隊內容不可為空' }
+    // A queued turn is sent as a prompt when the session goes idle, so it must obey the
+    // prompt ceiling at queue time rather than failing later with no one watching.
+    if (trimmed.length > REMOTE_PROMPT_MAX_CHARS) {
+      return { ok: false, code: 'invalid_request', message: `排隊內容過長（上限 ${REMOTE_PROMPT_MAX_CHARS} 字）` }
+    }
     this.queue = { sessionId, text: trimmed, source }
     this.notices = [`來自${source === 'mobile-remote' ? '手機' : '桌面'}：已排隊下一輪`]
     this.emit()
@@ -898,7 +924,10 @@ export class RemoteController {
 
     const permissions: RemotePermissionCard[] = [...this.pending.values()]
       .filter((item) => !item.consumed && this.now() <= item.expiresAt)
-      .filter((item) => !focus || item.sessionId === focus)
+      // `!focus ||` used to disable the filter entirely when nothing was focused, leaking
+      // every session's permission titles (tool names, paths) to a paired phone. Tail is
+      // already focus-scoped below; permissions must be symmetric.
+      .filter((item) => focus !== null && item.sessionId === focus)
       .map((item) => ({
         requestId: item.requestId,
         sessionId: item.sessionId,
@@ -1018,7 +1047,11 @@ function toRemoteTranscriptItem(event: UiSessionEvent): RemoteTranscriptItem | n
     return {
       id,
       kind: 'compact',
-      text: event.source === 'official' ? '已自動壓縮上下文' : '可能已壓縮上下文'
+      // Same wording as the desktop card so the phone reports the same numbers, not a
+      // vaguer version of the same event.
+      text: event.source === 'official'
+        ? formatOfficialCompactTitle(event.before, event.after)
+        : '可能已壓縮上下文'
     }
   }
   return null

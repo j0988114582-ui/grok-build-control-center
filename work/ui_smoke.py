@@ -15,7 +15,7 @@ window.grokApi = {
   saveSettings: async (x) => x,
   createSession: async () => ({ sessionId: 'new' }),
   loadSession: async () => ({ models: { currentModelId: 'grok-4.5', availableModels: [{ modelId: 'grok-4.5', name: 'Grok 4.5', currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'high', value: 'high', label: 'High Effort', default: true },{ id: 'low', value: 'low', label: 'Low Effort' }] }] } }),
-  sendPrompt: async () => {}, cancel: async () => {}, setMode: async () => {}, setModel: async () => {}, setConfigOption: async () => {}, respondPermission: async () => {},
+  sendPrompt: async () => {}, cancel: async () => {}, setMode: async () => {}, setModel: async () => {}, respondPermission: async () => {},
   chooseDirectory: async () => null, chooseFiles: async () => [], exportSession: async () => null, revealExport: async () => true, openTui: async () => {}, openExternal: async () => {},
   onEvent: (cb) => { window.__emitEvent = cb; return () => {}; },
   onPermission: (cb) => { window.__emitPermission = cb; return () => {}; },

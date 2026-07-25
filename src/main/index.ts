@@ -41,7 +41,7 @@ import {
   PreviewMediaAllowlist,
   registerGrokPreviewSchemePrivileged
 } from './preview-protocol'
-import { PreviewRootTracker, previewReadText, previewRegister, previewStat } from './preview-service'
+import { PreviewRootTracker, previewReadText, previewRegister } from './preview-service'
 import { isAbsoluteLocalPath, rejectUnsafePreviewPath } from '../shared/preview-path-policy'
 
 // P-SEC-6: privileged scheme must be registered before app.whenReady().
@@ -447,7 +447,6 @@ function registerIpc(): void {
   }))
   ipcMain.handle('grok:mode', async (_event, sessionId: string, modeId: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setMode(sessionId, modeId)))
   ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort)))
-  ipcMain.handle('grok:config', async (_event, sessionId: string, configId: string, value: string | boolean) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setConfigOption(sessionId, configId, value)))
   ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => lifecycleOperation.runShared('Grok 權限回覆', async () => {
     acpConnection.current?.respondPermission(requestId, optionId)
     // Desktop answered — drop the phone-side pending card immediately (next poll reflects it).
@@ -561,7 +560,6 @@ function registerIpc(): void {
     const preview = settings().preview
     return { maxImageMb: preview.maxImageMb, maxVideoMb: preview.maxVideoMb }
   }
-  ipcMain.handle('preview:stat', (_event, filePath: unknown) => previewStat(filePath, previewRoots, previewLimits()))
   ipcMain.handle('preview:register', (_event, filePath: unknown) => previewRegister(filePath, previewRoots, previewAllowlist, previewLimits()))
   ipcMain.handle('preview:read-text', (_event, filePath: unknown) => previewReadText(filePath, previewRoots, previewLimits()))
   ipcMain.handle('preview:choose-file', async () => {
