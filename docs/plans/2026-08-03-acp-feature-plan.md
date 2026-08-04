@@ -65,8 +65,9 @@
 | ACP 證據 | `workflow(launch/pause/resume/stop/save)`、`goal(<objective> [--budget <tokens>] / status / pause / resume / clear)`、`deep-research(<query>)` 三命令已廣播。 |
 | 做 | 三個入口卡＋參數表單（workflow 名稱、goal 目標＋token 預算、research query）；啟動後把進度／子代理狀態接到 R2 背景面板；pause/resume/stop 控制。 |
 | 不做 | 自建 workflow 腳本編輯器（讀既有 saved workflow 即可）；**不碰 MCP OAuth 憑證**（維持 CLI 保管，不存 token）。 |
-| 未決 | **Q3：workflow/goal 進度事件走哪個 `session/update` 型別**（與 R2 共用顯示，先探再接）。 |
-| 驗收 | 能用 goal 啟一個帶預算的目標並在面板看到狀態；能列出並啟動一個 saved workflow；deep-research 能出報告；真 CLI smoke。 |
+| 狀態 | ✅ **完成（2026-08-04，Grok `--write` 實作、我驗收、`feat/r3` commit `f16d9d2`）**。三入口卡＋管理鈕、能力閘、composer-safe 送法、439 測試綠。 |
+| 真機 smoke | ✅ **三命令實跑確認**：`/goal … --budget` 進 goal 模式（寫 `~/.grok/sessions/.../goal/plan.md`）並運作，`/goal clear` 清掉；`/deep-research` 一回合 `end_turn`；`/workflow <不存在>` 優雅結束、`/workflow stop` 清理——全部經 `/cmd` prompt 觸發成功、cleanup 皆 `end_turn`，session 已刪。事件＝一般 transcript（thought/message/`write` 工具）；背景面板專屬項目只在 agent 呼叫背景工具（scheduler/spawn_subagent/workflow）時出現＝已驗證的 name-match 機制，本次未跑到 fan-out 階段。 |
+| 已解 | **Q3**：命令啟動＝送 `/cmd` prompt；進度＝一般 tool_call／transcript（重用 R2 顯示，未做專屬解析）。 |
 
 ---
 
