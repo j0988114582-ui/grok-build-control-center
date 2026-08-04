@@ -1230,6 +1230,39 @@ describe('App', () => {
     expect(composer).toHaveValue('別動我這段還沒送出的草稿')
   })
 
+  it('R3: launching a goal with budget sends exact /goal text through sendPrompt and never touches the main composer draft', async () => {
+    const api = createApiMock()
+    api.sendPrompt = vi.fn().mockResolvedValue(undefined)
+    api.connect = vi.fn().mockResolvedValue({
+      loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [],
+      commands: [
+        { name: 'workflow', description: 'Workflow', inputHint: '<name> [args] | pause|resume|stop|save [name]' },
+        { name: 'goal', description: 'Goal', inputHint: '<objective> [--budget <tokens>] | status | pause | resume | clear' },
+        { name: 'deep-research', description: 'Deep research', inputHint: '<query>' }
+      ]
+    })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByText('Fix tests'))
+
+    const composer = screen.getByPlaceholderText(/交給 Grok 一個任務/)
+    await user.type(composer, '別動我這段還沒送出的草稿')
+
+    await user.click(await screen.findByTitle('背景任務／Loop'))
+    const panel = await screen.findByTestId('background-tasks-panel')
+    expect(within(panel).queryByTestId('bgtasks-goal-unavailable')).not.toBeInTheDocument()
+
+    await user.type(within(panel).getByLabelText('目標內容'), 'ship the release')
+    await user.type(within(panel).getByLabelText('預算 tokens（選填）'), '100000')
+    await user.click(within(panel).getByRole('button', { name: '啟動 Goal' }))
+
+    await waitFor(() => expect(api.sendPrompt).toHaveBeenCalledWith('s1', [
+      { type: 'text', text: '/goal ship the release --budget 100000' }
+    ]))
+    expect(composer).toHaveValue('別動我這段還沒送出的草稿')
+  })
+
   it('R2 rework: stopping a recurring loop sends a scheduler_delete instruction, never session/cancel', async () => {
     const api = createApiMock()
     api.sendPrompt = vi.fn().mockResolvedValue(undefined)

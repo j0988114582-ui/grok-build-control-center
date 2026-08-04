@@ -770,6 +770,21 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .bgtasks-loop-form button[type='submit'] svg { width: 14px; }
 .bgtasks-loop-form button[type='submit']:disabled { cursor: not-allowed; opacity: .55; }
 .bgtasks-loop-warn { margin: 0; color: var(--text-status-warn); font-size: 10px; }
+/* R3: autonomous entry forms (workflow / goal / deep-research) inside the background panel */
+.bgtasks-autonomous { display: grid; gap: 14px; padding: 16px 0; border-top: 1px solid var(--line); }
+.bgtasks-autonomous-intro { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.bgtasks-auto-form { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.bgtasks-auto-form h4 { margin: 0; font: 520 13px 'Newsreader Variable', serif; }
+.bgtasks-auto-form label { display: grid; gap: 6px; font-size: 11px; color: var(--muted); }
+.bgtasks-auto-form input, .bgtasks-auto-form textarea { width: 100%; padding: 8px; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; font-family: inherit; resize: vertical; transition: border-color .16s ease, box-shadow .16s ease; }
+.bgtasks-auto-form input:focus, .bgtasks-auto-form textarea:focus { border-color: var(--line-gold); box-shadow: var(--glow-gold); }
+.bgtasks-auto-form button[type='submit'] { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; justify-self: start; border-radius: 4px; font-size: 11px; font-weight: 700; }
+.bgtasks-auto-form button[type='submit'] svg { width: 14px; }
+.bgtasks-auto-form button[type='submit']:disabled { cursor: not-allowed; opacity: .55; }
+.bgtasks-auto-form .bgtasks-error { margin: 0; }
+.bgtasks-auto-manage { display: flex; flex-wrap: wrap; gap: 6px; }
+.bgtasks-auto-manage button { padding: 6px 10px; border-radius: 3px; font-size: 10px; font-weight: 700; }
+.bgtasks-auto-manage button:disabled { cursor: not-allowed; opacity: .55; }
 .bgtasks-list-section { padding: 16px 0; border-top: 1px solid var(--line); }
 .bgtasks-empty { color: var(--muted); font-size: 11px; }
 .bgtasks-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }

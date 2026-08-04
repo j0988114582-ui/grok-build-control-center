@@ -50,6 +50,7 @@ const schedulerEntry = (over: Partial<BackgroundActivityEntry> = {}): Background
 function renderPanel(overrides: Partial<React.ComponentProps<typeof BackgroundTasksPanel>> = {}) {
   const onClose = vi.fn()
   const onCreateLoop = vi.fn().mockResolvedValue(undefined)
+  const onLaunchCommand = vi.fn().mockResolvedValue(undefined)
   const onStop = vi.fn().mockResolvedValue(undefined)
   const props: React.ComponentProps<typeof BackgroundTasksPanel> = {
     entries: [],
@@ -57,14 +58,18 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof BackgroundTa
     ready: true,
     running: false,
     loopCommandAvailable: true,
+    workflowAvailable: true,
+    goalAvailable: true,
+    deepResearchAvailable: true,
     onClose,
     onCreateLoop,
+    onLaunchCommand,
     onStop,
     EventCard: StubEventCard,
     ...overrides
   }
   render(<BackgroundTasksPanel {...props} />)
-  return { onClose, onCreateLoop, onStop }
+  return { onClose, onCreateLoop, onLaunchCommand, onStop }
 }
 
 describe('BackgroundTasksPanel', () => {
@@ -256,5 +261,88 @@ describe('BackgroundTasksPanel', () => {
     const { onClose } = renderPanel()
     await user.click(screen.getByRole('button', { name: '關閉背景任務面板' }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  describe('R3 autonomous entries (workflow / goal / deep-research)', () => {
+    it('previews and submits exact /workflow, /goal (with budget), and /deep-research commands via onLaunchCommand', async () => {
+      const user = userEvent.setup()
+      const { onLaunchCommand } = renderPanel()
+
+      await user.type(screen.getByLabelText('工作流名稱'), 'review-changes')
+      await user.type(screen.getByLabelText('參數（選填）'), '--budget 10')
+      expect(screen.getByTestId('bgtasks-workflow-preview')).toHaveTextContent('/workflow review-changes --budget 10')
+      await user.click(screen.getByRole('button', { name: '啟動 Workflow' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/workflow review-changes --budget 10')
+
+      onLaunchCommand.mockClear()
+      await user.type(screen.getByLabelText('目標內容'), 'ship the release')
+      await user.type(screen.getByLabelText('預算 tokens（選填）'), '100000')
+      expect(screen.getByTestId('bgtasks-goal-preview')).toHaveTextContent('/goal ship the release --budget 100000')
+      await user.click(screen.getByRole('button', { name: '啟動 Goal' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/goal ship the release --budget 100000')
+
+      onLaunchCommand.mockClear()
+      await user.type(screen.getByLabelText('研究查詢'), 'compare ACP event shapes')
+      expect(screen.getByTestId('bgtasks-deep-research-preview')).toHaveTextContent('/deep-research compare ACP event shapes')
+      await user.click(screen.getByRole('button', { name: '啟動深度研究' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/deep-research compare ACP event shapes')
+    })
+
+    it('management buttons send exact subcommands', async () => {
+      const user = userEvent.setup()
+      const { onLaunchCommand } = renderPanel()
+      await user.click(screen.getByRole('button', { name: '送出 /workflow pause' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/workflow pause')
+      await user.click(screen.getByRole('button', { name: '送出 /workflow resume' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/workflow resume')
+      await user.click(screen.getByRole('button', { name: '送出 /workflow stop' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/workflow stop')
+
+      await user.click(screen.getByRole('button', { name: '送出 /goal status' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/goal status')
+      await user.click(screen.getByRole('button', { name: '送出 /goal pause' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/goal pause')
+      await user.click(screen.getByRole('button', { name: '送出 /goal resume' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/goal resume')
+      await user.click(screen.getByRole('button', { name: '送出 /goal clear' }))
+      expect(onLaunchCommand).toHaveBeenCalledWith('/goal clear')
+    })
+
+    it('disables a capability-absent form and shows an explanation note', () => {
+      renderPanel({ workflowAvailable: false, goalAvailable: false, deepResearchAvailable: false })
+      expect(screen.getByTestId('bgtasks-workflow-unavailable')).toHaveTextContent('未廣播 /workflow 命令')
+      expect(screen.getByLabelText('工作流名稱')).toBeDisabled()
+      expect(screen.getByRole('button', { name: '啟動 Workflow' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '送出 /workflow pause' })).toBeDisabled()
+
+      expect(screen.getByTestId('bgtasks-goal-unavailable')).toHaveTextContent('未廣播 /goal 命令')
+      expect(screen.getByLabelText('目標內容')).toBeDisabled()
+      expect(screen.getByRole('button', { name: '啟動 Goal' })).toBeDisabled()
+
+      expect(screen.getByTestId('bgtasks-deep-research-unavailable')).toHaveTextContent('未廣播 /deep-research 命令')
+      expect(screen.getByLabelText('研究查詢')).toBeDisabled()
+      expect(screen.getByRole('button', { name: '啟動深度研究' })).toBeDisabled()
+    })
+
+    it('disables launch submit and management buttons while a turn is running', () => {
+      renderPanel({ ready: true, running: true })
+      expect(screen.getByRole('button', { name: '啟動 Workflow' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '啟動 Goal' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '啟動深度研究' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '送出 /workflow pause' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '送出 /goal status' })).toBeDisabled()
+      // Honest running note appears for the autonomous forms (shared copy across the three).
+      expect(screen.getAllByText('回合執行中，請待完成後再送出（或於主要輸入框插話）').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('shows a local error and keeps the typed fields when launch fails (never the global toast)', async () => {
+      const user = userEvent.setup()
+      const onLaunchCommand = vi.fn().mockRejectedValue(new Error('回合執行中，請待完成後再試'))
+      renderPanel({ onLaunchCommand })
+      await user.type(screen.getByLabelText('目標內容'), 'ship it')
+      await user.click(screen.getByRole('button', { name: '啟動 Goal' }))
+      expect(await screen.findByTestId('bgtasks-goal-error')).toHaveTextContent('回合執行中，請待完成後再試')
+      expect(screen.getByLabelText('目標內容')).toHaveValue('ship it')
+    })
   })
 })

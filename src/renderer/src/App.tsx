@@ -989,6 +989,10 @@ export function App(): React.JSX.Element {
   const backgroundActivity = useMemo<BackgroundActivityEntry[]>(() => deriveBackgroundActivity(activeEvents), [activeEvents])
   /** R2 rework (Codex fix #7): only offer "建立定時任務" when the CLI actually advertised /loop. */
   const loopCommandAvailable = caps.commands.some((command) => command.name === 'loop')
+  /** R3: capability-gate autonomous slash commands from the same availableCommands list. */
+  const workflowAvailable = caps.commands.some((command) => command.name === 'workflow')
+  const goalAvailable = caps.commands.some((command) => command.name === 'goal')
+  const deepResearchAvailable = caps.commands.some((command) => command.name === 'deep-research')
   const shortcutFor = (command: string): string => settings.shortcuts.find((binding) => binding.command === command)?.accelerator ?? ''
   const shortcutLabel = (command: string): string => shortcutFor(command).replaceAll('+', ' + ')
   const sessionSearchIndex = useMemo(() => {
@@ -1695,6 +1699,12 @@ export function App(): React.JSX.Element {
     if (!active) return Promise.reject(new Error('沒有進行中的對話'))
     return sendPanelPrompt(active.id, commandText)
   }
+
+  /** R3: generic panel send for /workflow /goal /deep-research launch + management — same
+   *  composer-safe path as createLoopTask (never touches drafts/attachments). */
+  const launchPanelCommand = (text: string): Promise<void> => (
+    active ? sendPanelPrompt(active.id, text) : Promise.reject(new Error('沒有進行中的對話'))
+  )
 
   /**
    * R2 rework (Codex fix #4): ACP has no per-task-id cancel, and a real-CLI capture
@@ -2681,8 +2691,12 @@ export function App(): React.JSX.Element {
           ready={activeReady}
           running={running}
           loopCommandAvailable={loopCommandAvailable}
+          workflowAvailable={workflowAvailable}
+          goalAvailable={goalAvailable}
+          deepResearchAvailable={deepResearchAvailable}
           onClose={() => setPanel('none')}
           onCreateLoop={createLoopTask}
+          onLaunchCommand={launchPanelCommand}
           onStop={stopBackgroundActivity}
           EventCard={renderBackgroundEventCard}
         />

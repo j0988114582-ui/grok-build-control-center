@@ -3,9 +3,12 @@ import type { UiSessionEvent } from '../src/shared/types'
 import {
   activityStatusLabel,
   deriveBackgroundActivity,
+  formatDeepResearchCommand,
+  formatGoalCommand,
   formatLoopCommand,
   formatSchedulerDeletePrompt,
   formatTokenCount,
+  formatWorkflowCommand,
   normalizeActivityStatus
 } from '../src/shared/background-activity'
 
@@ -160,6 +163,63 @@ describe('formatLoopCommand', () => {
 
   it('trims surrounding whitespace from both fields', () => {
     expect(formatLoopCommand('  5m  ', '  watch the build  ')).toBe('/loop 5m watch the build')
+  })
+})
+
+describe('formatWorkflowCommand (R3)', () => {
+  it('formats name only and name + args', () => {
+    expect(formatWorkflowCommand('review-changes')).toBe('/workflow review-changes')
+    expect(formatWorkflowCommand('review-changes', '--budget 10')).toBe('/workflow review-changes --budget 10')
+  })
+
+  it('returns empty string when name is blank, regardless of args', () => {
+    expect(formatWorkflowCommand('', 'args')).toBe('')
+    expect(formatWorkflowCommand('   ')).toBe('')
+  })
+
+  it('omits blank args and trims both fields', () => {
+    expect(formatWorkflowCommand('  review-changes  ', '   ')).toBe('/workflow review-changes')
+    expect(formatWorkflowCommand('  review-changes  ', '  --budget 10  ')).toBe('/workflow review-changes --budget 10')
+  })
+})
+
+describe('formatGoalCommand (R3)', () => {
+  it('formats objective alone and with a positive-integer budget', () => {
+    expect(formatGoalCommand('ship the release')).toBe('/goal ship the release')
+    expect(formatGoalCommand('ship the release', '100000')).toBe('/goal ship the release --budget 100000')
+  })
+
+  it('returns empty string when objective is blank', () => {
+    expect(formatGoalCommand('  ', '100000')).toBe('')
+    expect(formatGoalCommand('')).toBe('')
+  })
+
+  it('appends --budget only for a valid positive integer (not empty/0/-1/abc)', () => {
+    expect(formatGoalCommand('obj', '')).toBe('/goal obj')
+    expect(formatGoalCommand('obj', '0')).toBe('/goal obj')
+    expect(formatGoalCommand('obj', '-1')).toBe('/goal obj')
+    expect(formatGoalCommand('obj', 'abc')).toBe('/goal obj')
+    expect(formatGoalCommand('obj', '1.5')).toBe('/goal obj')
+    expect(formatGoalCommand('obj', '42')).toBe('/goal obj --budget 42')
+  })
+
+  it('trims objective and budget', () => {
+    expect(formatGoalCommand('  ship it  ', '  100000  ')).toBe('/goal ship it --budget 100000')
+  })
+})
+
+describe('formatDeepResearchCommand (R3)', () => {
+  it('formats a non-blank query', () => {
+    expect(formatDeepResearchCommand('compare ACP event shapes')).toBe('/deep-research compare ACP event shapes')
+  })
+
+  it('returns empty string when query is blank', () => {
+    expect(formatDeepResearchCommand('')).toBe('')
+    expect(formatDeepResearchCommand('   ')).toBe('')
+  })
+
+  it('trims surrounding whitespace', () => {
+    expect(formatDeepResearchCommand('  compare ACP event shapes  ')).toBe('/deep-research compare ACP event shapes')
   })
 })
 

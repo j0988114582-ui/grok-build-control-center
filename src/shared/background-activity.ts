@@ -252,6 +252,45 @@ export function formatLoopCommand(interval: string, prompt: string): string {
 }
 
 /**
+ * R3: builds `/workflow <name> [args]` for the panel launch form. Required `name` blank → `''`.
+ * Optional args are appended only when non-blank after trim. Management subcommands
+ * (`pause`/`resume`/`stop`) are sent as literal strings by the panel, not through this helper.
+ */
+export function formatWorkflowCommand(name: string, args?: string): string {
+  const trimmedName = name.trim()
+  if (!trimmedName) return ''
+  const trimmedArgs = (args ?? '').trim()
+  return trimmedArgs ? `/workflow ${trimmedName} ${trimmedArgs}` : `/workflow ${trimmedName}`
+}
+
+/**
+ * R3: builds `/goal <objective> [--budget <tokens>]`. Required `objective` blank → `''`.
+ * Appends ` --budget N` only when `budget` trims to a positive integer (not `''`/`0`/`-1`/`abc`).
+ * Management subcommands (`status`/`pause`/`resume`/`clear`) are sent as literal strings.
+ */
+export function formatGoalCommand(objective: string, budget?: string): string {
+  const trimmedObjective = objective.trim()
+  if (!trimmedObjective) return ''
+  const trimmedBudget = (budget ?? '').trim()
+  if (trimmedBudget) {
+    const n = Number(trimmedBudget)
+    if (Number.isInteger(n) && n > 0) {
+      return `/goal ${trimmedObjective} --budget ${n}`
+    }
+  }
+  return `/goal ${trimmedObjective}`
+}
+
+/**
+ * R3: builds `/deep-research <query>`. Required `query` blank → `''`.
+ */
+export function formatDeepResearchCommand(query: string): string {
+  const trimmedQuery = query.trim()
+  if (!trimmedQuery) return ''
+  return `/deep-research ${trimmedQuery}`
+}
+
+/**
  * The only ACP-confirmed way to stop a detached recurring loop: ask the agent to call its
  * own `scheduler_delete` tool with the loop's id. There is no client-invocable cancel-by-id
  * method — `session/cancel` does not stop a detached loop (verified live against the real

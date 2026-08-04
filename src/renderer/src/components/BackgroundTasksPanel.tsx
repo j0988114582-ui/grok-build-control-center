@@ -2,8 +2,11 @@ import React, { useState } from 'react'
 import { Activity, Bot, Check, ChevronDown, ChevronRight, Circle, CircleAlert, LoaderCircle, Send, Square, X } from 'lucide-react'
 import type { SessionUsage, UiSessionEvent } from '../../../shared/types'
 import {
+  formatDeepResearchCommand,
+  formatGoalCommand,
   formatLoopCommand,
   formatTokenCount,
+  formatWorkflowCommand,
   type BackgroundActivityEntry
 } from '../../../shared/background-activity'
 
@@ -18,10 +21,17 @@ export type BackgroundTasksPanelProps = {
   running: boolean
   /** R2 rework: only true when the CLI's availableCommands actually advertised `loop`. */
   loopCommandAvailable: boolean
+  /** R3: CLI advertised `workflow` / `goal` / `deep-research` in availableCommands. */
+  workflowAvailable: boolean
+  goalAvailable: boolean
+  deepResearchAvailable: boolean
   onClose: () => void
   /** Resolves on a successful send; rejects with a user-facing message on failure. Never
    *  touches the main composer either way — the panel shows its own error locally. */
   onCreateLoop: (commandText: string) => Promise<void>
+  /** R3: generic panel send for /workflow /goal /deep-research (launch + management). Same
+   *  composer-safe path as onCreateLoop — never touches drafts/attachments. */
+  onLaunchCommand: (commandText: string) => Promise<void>
   /** Rejects when the entry has no verified stop mechanism, or the send fails. */
   onStop: (entry: BackgroundActivityEntry) => Promise<void>
   EventCard: React.ComponentType<{ event: UiSessionEvent; query: string }>
@@ -50,8 +60,12 @@ export function BackgroundTasksPanel({
   ready,
   running,
   loopCommandAvailable,
+  workflowAvailable,
+  goalAvailable,
+  deepResearchAvailable,
   onClose,
   onCreateLoop,
+  onLaunchCommand,
   onStop,
   EventCard
 }: BackgroundTasksPanelProps): React.JSX.Element {
@@ -60,14 +74,34 @@ export function BackgroundTasksPanel({
   const [promptText, setPromptText] = useState('')
   const [loopSubmitting, setLoopSubmitting] = useState(false)
   const [loopError, setLoopError] = useState<string | null>(null)
+  // R3 autonomous launch forms (workflow / goal / deep-research)
+  const [workflowName, setWorkflowName] = useState('')
+  const [workflowArgs, setWorkflowArgs] = useState('')
+  const [workflowSubmitting, setWorkflowSubmitting] = useState(false)
+  const [workflowError, setWorkflowError] = useState<string | null>(null)
+  const [goalObjective, setGoalObjective] = useState('')
+  const [goalBudget, setGoalBudget] = useState('')
+  const [goalSubmitting, setGoalSubmitting] = useState(false)
+  const [goalError, setGoalError] = useState<string | null>(null)
+  const [deepResearchQuery, setDeepResearchQuery] = useState('')
+  const [deepResearchSubmitting, setDeepResearchSubmitting] = useState(false)
+  const [deepResearchError, setDeepResearchError] = useState<string | null>(null)
   const [stoppingId, setStoppingId] = useState<string | null>(null)
   const [stopRequestedIds, setStopRequestedIds] = useState<ReadonlySet<string>>(new Set())
   const [stopErrors, setStopErrors] = useState<Record<string, string>>({})
 
   const preview = formatLoopCommand(intervalText, promptText)
+  const workflowPreview = formatWorkflowCommand(workflowName, workflowArgs)
+  const goalPreview = formatGoalCommand(goalObjective, goalBudget)
+  const deepResearchPreview = formatDeepResearchCommand(deepResearchQuery)
   const displayEntries = [...entries].reverse()
   const runningCount = entries.filter((entry) => entry.status === 'running').length
   const canSubmitLoop = ready && !running && loopCommandAvailable && preview.length > 0 && !loopSubmitting
+  const canSubmitWorkflow = ready && !running && workflowAvailable && workflowPreview.length > 0 && !workflowSubmitting
+  const canManageWorkflow = ready && !running && workflowAvailable && !workflowSubmitting
+  const canSubmitGoal = ready && !running && goalAvailable && goalPreview.length > 0 && !goalSubmitting
+  const canManageGoal = ready && !running && goalAvailable && !goalSubmitting
+  const canSubmitDeepResearch = ready && !running && deepResearchAvailable && deepResearchPreview.length > 0 && !deepResearchSubmitting
 
   const submitLoop = (event: React.FormEvent): void => {
     event.preventDefault()
@@ -78,6 +112,45 @@ export function BackgroundTasksPanel({
       .then(() => setPromptText(''))
       .catch((error: unknown) => setLoopError(errorMessage(error)))
       .finally(() => setLoopSubmitting(false))
+  }
+
+  const runLaunch = (
+    text: string,
+    canSubmit: boolean,
+    setSubmitting: (value: boolean) => void,
+    setError: (value: string | null) => void,
+    onSuccess?: () => void
+  ): void => {
+    if (!canSubmit) return
+    setSubmitting(true)
+    setError(null)
+    onLaunchCommand(text)
+      .then(() => onSuccess?.())
+      .catch((error: unknown) => setError(errorMessage(error)))
+      .finally(() => setSubmitting(false))
+  }
+
+  const submitWorkflow = (event: React.FormEvent): void => {
+    event.preventDefault()
+    runLaunch(workflowPreview, canSubmitWorkflow, setWorkflowSubmitting, setWorkflowError, () => {
+      setWorkflowName('')
+      setWorkflowArgs('')
+    })
+  }
+
+  const submitGoal = (event: React.FormEvent): void => {
+    event.preventDefault()
+    runLaunch(goalPreview, canSubmitGoal, setGoalSubmitting, setGoalError, () => {
+      setGoalObjective('')
+      setGoalBudget('')
+    })
+  }
+
+  const submitDeepResearch = (event: React.FormEvent): void => {
+    event.preventDefault()
+    runLaunch(deepResearchPreview, canSubmitDeepResearch, setDeepResearchSubmitting, setDeepResearchError, () => {
+      setDeepResearchQuery('')
+    })
   }
 
   const handleStop = (entry: BackgroundActivityEntry): void => {
@@ -168,6 +241,124 @@ export function BackgroundTasksPanel({
         {ready && running && <p className="bgtasks-loop-warn">回合執行中，請待完成後再建立（或於主要輸入框插話）</p>}
         {loopError && <p className="bgtasks-error" role="alert" data-testid="bgtasks-loop-error">{loopError}</p>}
       </form>
+
+      <section className="bgtasks-autonomous" data-testid="bgtasks-autonomous" aria-label="自主任務">
+        <h3>自主任務</h3>
+        <p className="bgtasks-autonomous-intro">
+          這些會送出 /workflow、/goal、/deep-research 給 CLI；進度會出現在下方背景活動清單／對話流；
+          回合執行中需先完成才能送出；本區只負責啟動與送出管理指令，不追蹤個別執行狀態。
+        </p>
+
+        <form className="bgtasks-auto-form" data-testid="bgtasks-workflow-form" onSubmit={submitWorkflow}>
+          <h4>Workflow</h4>
+          {!workflowAvailable && (
+            <p className="bgtasks-loop-warn" data-testid="bgtasks-workflow-unavailable">
+              這次連線的 CLI 未廣播 /workflow 命令（availableCommands 沒有列出），暫時無法啟動或管理 Workflow。
+            </p>
+          )}
+          <label>
+            工作流名稱
+            <input
+              value={workflowName}
+              disabled={!ready || !workflowAvailable}
+              required
+              placeholder="例如 review-changes"
+              onChange={(event) => setWorkflowName(event.target.value)}
+            />
+          </label>
+          <label>
+            參數（選填）
+            <input
+              value={workflowArgs}
+              disabled={!ready || !workflowAvailable}
+              placeholder="例如 --budget 10"
+              onChange={(event) => setWorkflowArgs(event.target.value)}
+            />
+          </label>
+          {workflowPreview && <code className="bgtasks-loop-preview" data-testid="bgtasks-workflow-preview">{workflowPreview}</code>}
+          <button type="submit" className="primary" disabled={!canSubmitWorkflow}>
+            <Send size={14} />{workflowSubmitting ? '送出中…' : '啟動 Workflow'}
+          </button>
+          <div className="bgtasks-auto-manage" role="group" aria-label="Workflow 管理指令">
+            <button type="button" aria-label="送出 /workflow pause" disabled={!canManageWorkflow} onClick={() => runLaunch('/workflow pause', canManageWorkflow, setWorkflowSubmitting, setWorkflowError)}>暫停</button>
+            <button type="button" aria-label="送出 /workflow resume" disabled={!canManageWorkflow} onClick={() => runLaunch('/workflow resume', canManageWorkflow, setWorkflowSubmitting, setWorkflowError)}>繼續</button>
+            <button type="button" aria-label="送出 /workflow stop" disabled={!canManageWorkflow} onClick={() => runLaunch('/workflow stop', canManageWorkflow, setWorkflowSubmitting, setWorkflowError)}>停止</button>
+          </div>
+          {!ready && <p className="bgtasks-loop-warn">此對話尚未就緒，無法送出</p>}
+          {ready && running && <p className="bgtasks-loop-warn">回合執行中，請待完成後再送出（或於主要輸入框插話）</p>}
+          {workflowError && <p className="bgtasks-error" role="alert" data-testid="bgtasks-workflow-error">{workflowError}</p>}
+        </form>
+
+        <form className="bgtasks-auto-form" data-testid="bgtasks-goal-form" onSubmit={submitGoal}>
+          <h4>Goal</h4>
+          {!goalAvailable && (
+            <p className="bgtasks-loop-warn" data-testid="bgtasks-goal-unavailable">
+              這次連線的 CLI 未廣播 /goal 命令（availableCommands 沒有列出），暫時無法啟動或管理 Goal。
+            </p>
+          )}
+          <label>
+            目標內容
+            <textarea
+              value={goalObjective}
+              disabled={!ready || !goalAvailable}
+              rows={2}
+              required
+              placeholder="要達成的目標…"
+              onChange={(event) => setGoalObjective(event.target.value)}
+            />
+          </label>
+          <label>
+            預算 tokens（選填）
+            <input
+              value={goalBudget}
+              disabled={!ready || !goalAvailable}
+              inputMode="numeric"
+              placeholder="例如 100000；僅正整數會附加 --budget"
+              onChange={(event) => setGoalBudget(event.target.value)}
+            />
+          </label>
+          {goalPreview && <code className="bgtasks-loop-preview" data-testid="bgtasks-goal-preview">{goalPreview}</code>}
+          <button type="submit" className="primary" disabled={!canSubmitGoal}>
+            <Send size={14} />{goalSubmitting ? '送出中…' : '啟動 Goal'}
+          </button>
+          <div className="bgtasks-auto-manage" role="group" aria-label="Goal 管理指令">
+            <button type="button" aria-label="送出 /goal status" disabled={!canManageGoal} onClick={() => runLaunch('/goal status', canManageGoal, setGoalSubmitting, setGoalError)}>狀態</button>
+            <button type="button" aria-label="送出 /goal pause" disabled={!canManageGoal} onClick={() => runLaunch('/goal pause', canManageGoal, setGoalSubmitting, setGoalError)}>暫停</button>
+            <button type="button" aria-label="送出 /goal resume" disabled={!canManageGoal} onClick={() => runLaunch('/goal resume', canManageGoal, setGoalSubmitting, setGoalError)}>繼續</button>
+            <button type="button" aria-label="送出 /goal clear" disabled={!canManageGoal} onClick={() => runLaunch('/goal clear', canManageGoal, setGoalSubmitting, setGoalError)}>清除</button>
+          </div>
+          {!ready && <p className="bgtasks-loop-warn">此對話尚未就緒，無法送出</p>}
+          {ready && running && <p className="bgtasks-loop-warn">回合執行中，請待完成後再送出（或於主要輸入框插話）</p>}
+          {goalError && <p className="bgtasks-error" role="alert" data-testid="bgtasks-goal-error">{goalError}</p>}
+        </form>
+
+        <form className="bgtasks-auto-form" data-testid="bgtasks-deep-research-form" onSubmit={submitDeepResearch}>
+          <h4>深度研究</h4>
+          {!deepResearchAvailable && (
+            <p className="bgtasks-loop-warn" data-testid="bgtasks-deep-research-unavailable">
+              這次連線的 CLI 未廣播 /deep-research 命令（availableCommands 沒有列出），暫時無法啟動深度研究。
+            </p>
+          )}
+          <label>
+            研究查詢
+            <textarea
+              value={deepResearchQuery}
+              disabled={!ready || !deepResearchAvailable}
+              rows={2}
+              required
+              placeholder="要深入調查的問題…"
+              onChange={(event) => setDeepResearchQuery(event.target.value)}
+            />
+          </label>
+          {deepResearchPreview && <code className="bgtasks-loop-preview" data-testid="bgtasks-deep-research-preview">{deepResearchPreview}</code>}
+          <button type="submit" className="primary" disabled={!canSubmitDeepResearch}>
+            <Send size={14} />{deepResearchSubmitting ? '送出中…' : '啟動深度研究'}
+          </button>
+          {!ready && <p className="bgtasks-loop-warn">此對話尚未就緒，無法送出</p>}
+          {ready && running && <p className="bgtasks-loop-warn">回合執行中，請待完成後再送出（或於主要輸入框插話）</p>}
+          {deepResearchError && <p className="bgtasks-error" role="alert" data-testid="bgtasks-deep-research-error">{deepResearchError}</p>}
+        </form>
+      </section>
 
       <section className="bgtasks-list-section" aria-label="背景活動清單">
         <h3>背景活動{runningCount > 0 ? ` · ${runningCount} 進行中` : ''}</h3>
