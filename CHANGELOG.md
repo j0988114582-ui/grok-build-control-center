@@ -13,6 +13,24 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
 
+## [0.12.0] - 2026-08-04（背景任務面板 · 自主任務入口）
+
+### Added — 新功能
+
+- **背景任務／Loop 面板**：新面板彙整這個對話的排程迴圈、監視器、子代理與背景指令（沿用既有的 tool_call／subagent／task 通知，非新的 ACP 呼叫），並可一鍵**建立定時任務**（`/loop`）。排程迴圈以送出 `scheduler_delete` 指示停止——`session/cancel` 停不掉已分離的迴圈，面板文案已明說；無可靠個別終止方式的項目不提供假的停止鍵。順帶顯示 Context／回合數／工具呼叫用量（單回合成本服務未提供，照實顯示「—」）。
+- **自主任務入口**：同一面板新增 Workflow（`/workflow`）、Goal（`/goal`，可帶 `--budget`）、深度研究（`/deep-research`）三個一等入口卡，各含啟動表單、指令預覽、管理指令（暫停／繼續／停止／狀態／清除）與能力偵測（CLI 未廣播該命令時停用並說明）。進度沿用既有的工具卡與對話流顯示。
+
+### 行為 / 誠實界線
+
+- 面板送出的所有指令都走**不動主輸入框草稿與附件**的專用路徑，成功或失敗都不會清掉或蓋掉你正在打的字。
+- 面板只負責啟動與送出管理指令，不追蹤個別執行狀態；工作流即時分階段檢視、以及 goal/workflow 大規模 fan-out 的專屬顯示列為後續項目。
+
+### 驗證
+
+- 439 項自動測試、ESLint、TypeScript、建置全綠。
+- 真機驗證：對本機 Grok CLI 實跑 `/loop`（scheduler_create／scheduler_delete）、`/goal --budget`、`/deep-research`、`/workflow`，確認命令經 prompt 觸發、事件形狀與清理皆正確。
+- 審查鏈：Sonnet／Grok 實作 → Codex／Grok 獨立審查 → 逐條 grep 驗證 → 真機 smoke。
+
 ## [0.11.0] - 2026-07-25（捲動、書籤與遙控加固）
 
 ### Added — 新功能
