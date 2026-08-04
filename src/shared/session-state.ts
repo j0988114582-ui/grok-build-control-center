@@ -38,6 +38,10 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       id: item.id,
       title: event.title === 'Tool call' ? item.title : event.title,
       rawInput: event.rawInput ?? item.rawInput,
+      rawOutput: event.rawOutput ?? item.rawOutput,
+      // Real capture: only the *first* update or two carries `_meta['x.ai/tool']` — the final
+      // "completed" update usually omits it, so the merged card must not lose the identity.
+      toolName: event.toolName ?? item.toolName,
       output: event.output ?? item.output
     } : item) : [...state.events, event]
   } else if (event.kind === 'subagent') {

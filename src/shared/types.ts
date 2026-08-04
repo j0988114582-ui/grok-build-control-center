@@ -9,7 +9,22 @@ export type PlanEntry = {
 export type UiSessionEvent =
   | { id: string; sessionId: string; kind: 'message'; role: SessionRole; text: string }
   | { id: string; sessionId: string; kind: 'thought'; text: string }
-  | { id: string; sessionId: string; kind: 'tool'; toolCallId: string; title: string; status: string; rawInput?: unknown; output?: string }
+  | {
+      id: string
+      sessionId: string
+      kind: 'tool'
+      toolCallId: string
+      title: string
+      status: string
+      rawInput?: unknown
+      output?: string
+      /** Exact tool identity from `update._meta['x.ai/tool'].name` (e.g. "scheduler_create") —
+       *  the reliable identifier; `title` mutates between updates and must not be matched on. */
+      toolName?: string
+      /** Structured tool result (e.g. `{ type: "SchedulerCreate", id, humanSchedule }`) — separate
+       *  from `output`, which only ever holds narrative `content` text (often absent for these tools). */
+      rawOutput?: unknown
+    }
   | { id: string; sessionId: string; kind: 'plan'; entries: PlanEntry[] }
   | { id: string; sessionId: string; kind: 'subagent'; subagentId: string; description: string; status: string; output?: string }
   | { id: string; sessionId: string; kind: 'task'; taskId: string; description: string; status: string }

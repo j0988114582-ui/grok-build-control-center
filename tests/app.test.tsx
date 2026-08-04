@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/renderer/src/App'
@@ -1177,5 +1177,90 @@ describe('App', () => {
     expect(await screen.findByText('/compact')).toBeInTheDocument()
     expect(screen.getByText('/context')).toBeInTheDocument()
     expect(screen.getByText('/session-info')).toBeInTheDocument()
+  })
+
+  it('R2: opens the Background Tasks / Loop panel from the launcher, closes it with Escape, and capability-gates /loop when the CLI never advertised it', async () => {
+    window.grokApi = createApiMock()
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByText('Fix tests'))
+
+    await user.click(await screen.findByTitle('背景任務／Loop'))
+    const panel = await screen.findByTestId('background-tasks-panel')
+    expect(within(panel).getByRole('heading', { name: '背景任務／Loop' })).toBeInTheDocument()
+    // Context usage (already fetched via getUsage) is surfaced inside the panel too.
+    expect(within(panel).getByText('37%')).toBeInTheDocument()
+    expect(within(panel).getByText('服務未提供')).toBeInTheDocument()
+    // R2 rework fix #7: createApiMock's default connect() response never lists `loop` in
+    // commands, so the CLI never advertised /loop — the form must say so and stay disabled.
+    expect(within(panel).getByTestId('bgtasks-loop-unavailable')).toHaveTextContent('未廣播 /loop 命令')
+    expect(within(panel).getByLabelText('提示內容')).toBeDisabled()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('background-tasks-panel')).not.toBeInTheDocument()
+  })
+
+  it('R2 rework: creating a loop sends /loop through the existing prompt-send path and never touches the main composer draft', async () => {
+    const api = createApiMock()
+    api.sendPrompt = vi.fn().mockResolvedValue(undefined)
+    api.connect = vi.fn().mockResolvedValue({
+      loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [],
+      commands: [{ name: 'loop', description: '建立定時任務', inputHint: '[interval] <prompt>' }]
+    })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByText('Fix tests'))
+
+    // Sentinel draft in the main composer, independent of anything the panel does.
+    const composer = screen.getByPlaceholderText(/交給 Grok 一個任務/)
+    await user.type(composer, '別動我這段還沒送出的草稿')
+
+    await user.click(await screen.findByTitle('背景任務／Loop'))
+    await screen.findByTestId('background-tasks-panel')
+    expect(within(await screen.findByTestId('background-tasks-panel')).queryByTestId('bgtasks-loop-unavailable')).not.toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('間隔（選填）'), '5m')
+    await user.type(screen.getByLabelText('提示內容'), '檢查建置狀態')
+    await user.click(screen.getByRole('button', { name: '建立定時任務' }))
+
+    await waitFor(() => expect(api.sendPrompt).toHaveBeenCalledWith('s1', [{ type: 'text', text: '/loop 5m 檢查建置狀態' }]))
+    // Codex R2 review fix #1: dispatchPrompt-style composer clearing must never fire for a
+    // panel-originated send — the sentinel draft has to survive untouched.
+    expect(composer).toHaveValue('別動我這段還沒送出的草稿')
+  })
+
+  it('R2 rework: stopping a recurring loop sends a scheduler_delete instruction, never session/cancel', async () => {
+    const api = createApiMock()
+    api.sendPrompt = vi.fn().mockResolvedValue(undefined)
+    api.cancel = vi.fn().mockResolvedValue(undefined)
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByText('Fix tests'))
+
+    // Pre-normalized UiSessionEvent for the fully-merged real /loop capture (event-adapter and
+    // session-state have their own dedicated tests for the raw ACP -> merged-event pipeline).
+    act(() => {
+      onEvent?.({
+        id: 'sched-1', sessionId: 's1', kind: 'tool', toolCallId: 'call-0dd47cf8-9112-45b5-b7bb-00b3ee434628-0',
+        title: 'Create scheduled task (every 60s)', status: 'completed', toolName: 'scheduler_create',
+        rawOutput: { type: 'SchedulerCreate', id: '019fc84ace8a', humanSchedule: 'every 1 minute', updated: false }
+      })
+    })
+
+    await user.click(await screen.findByTitle('背景任務／Loop'))
+    const panel = await screen.findByTestId('background-tasks-panel')
+    expect(within(panel).getByText(/排程 ID：019fc84ace8a/)).toBeInTheDocument()
+    expect(within(panel).getByText('執行中（every 1 minute）')).toBeInTheDocument()
+
+    await user.click(within(panel).getByRole('button', { name: /停止/ }))
+    await waitFor(() => expect(api.sendPrompt).toHaveBeenCalledWith('s1', [
+      { type: 'text', text: '請使用 scheduler_delete 工具刪除排程 ID「019fc84ace8a」，停止這個定時任務。' }
+    ]))
+    expect(api.cancel).not.toHaveBeenCalled()
+    expect(await within(panel).findByTestId('bgtasks-stop-requested')).toBeInTheDocument()
   })
 })

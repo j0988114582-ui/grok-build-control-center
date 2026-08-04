@@ -41,6 +41,8 @@ import { PromptBookmarks } from './components/PromptBookmarks'
 import { SessionRow } from './components/SessionRow'
 import { PreviewDock, type PreviewLoadState } from './components/PreviewDock/PreviewDock'
 import { AgentsTeamToolbar, SessionTeamPane } from './components/SessionTeamPane'
+import { BackgroundTasksPanel } from './components/BackgroundTasksPanel'
+import { deriveBackgroundActivity, formatSchedulerDeletePrompt, type BackgroundActivityEntry } from '../../shared/background-activity'
 import {
   discoverPreviewCandidates,
   isMediaPreviewItem
@@ -161,7 +163,7 @@ import { RemoteControlPanel } from './components/RemoteControlPanel'
 
 const EMPTY_CAPS: AgentCapabilities = { loadSession: false, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [] }
 const emptyStatus: CliStatus = { executable: '', found: false, connected: false }
-type Panel = 'none' | 'settings' | 'features' | 'commands' | 'shortcuts'
+type Panel = 'none' | 'settings' | 'features' | 'commands' | 'shortcuts' | 'background'
 type SetupDialog = 'install' | 'account' | null
 
 const containDialogFocus = (event: React.KeyboardEvent<HTMLElement>): void => {
@@ -872,6 +874,12 @@ export function App(): React.JSX.Element {
     return () => clearInterval(timer)
   }, [running, active?.id])
 
+  /** R2: one-off refresh so the background panel's context/turns numbers are current on open. */
+  useEffect(() => {
+    if (panel !== 'background' || !active?.id) return
+    void refreshUsageRef.current(active.id)
+  }, [panel, active?.id])
+
   /** P-COMP-MAIN: grow whole .composer up to 50vh; shrink when draft cleared. */
   const syncMainComposerHeight = useCallback((): void => {
     const box = mainComposerRef.current
@@ -977,6 +985,10 @@ export function App(): React.JSX.Element {
 
   const activeEvents = useMemo(() => active ? events[active.id] ?? [] : [], [active, events])
   const searchHits = useMemo(() => transcriptQuery ? activeEvents.filter((event) => eventText(event).toLocaleLowerCase().includes(transcriptQuery.toLocaleLowerCase())).length : 0, [activeEvents, transcriptQuery])
+  /** R2: background tasks / loop panel — aggregated from the same event stream, no new ACP call. */
+  const backgroundActivity = useMemo<BackgroundActivityEntry[]>(() => deriveBackgroundActivity(activeEvents), [activeEvents])
+  /** R2 rework (Codex fix #7): only offer "建立定時任務" when the CLI actually advertised /loop. */
+  const loopCommandAvailable = caps.commands.some((command) => command.name === 'loop')
   const shortcutFor = (command: string): string => settings.shortcuts.find((binding) => binding.command === command)?.accelerator ?? ''
   const shortcutLabel = (command: string): string => shortcutFor(command).replaceAll('+', ' + ')
   const sessionSearchIndex = useMemo(() => {
@@ -1657,6 +1669,47 @@ export function App(): React.JSX.Element {
     await doThisNowFor(active.id)
   }
 
+  /**
+   * R2 rework (Codex fix #1): a composer-preserving send for panel-originated prompts
+   * (loop create / loop stop). Unlike dispatchPrompt/sendPromptFor, this never touches
+   * `drafts` or `attachmentsBySession` — on success *or* failure — because the text being
+   * sent has nothing to do with whatever the user is independently drafting in the main
+   * composer. Failures are thrown so the panel can show them locally instead of injecting
+   * `/loop …`-style text into the composer or firing the main toast.
+   */
+  const sendPanelPrompt = async (sessionId: string, text: string): Promise<void> => {
+    const check = sessionActionAllowed(sessionReady, sessionId, connectionGenerationRef.current, {
+      loading: loadingSessionIds.includes(sessionId),
+      reconnecting
+    })
+    if (!check.ok) throw new Error(check.notice)
+    if (runningMap[sessionId]) throw new Error('回合執行中，請待完成後再試')
+    const trimmed = text.trim()
+    if (!trimmed) return
+    await window.grokApi.sendPrompt(sessionId, [{ type: 'text', text: trimmed }])
+  }
+
+  /** R2: "建立定時任務" sends the formatted `/loop [interval] <prompt>` text through the
+   *  same sendPrompt bridge call the composer uses, without touching composer state. */
+  const createLoopTask = (commandText: string): Promise<void> => {
+    if (!active) return Promise.reject(new Error('沒有進行中的對話'))
+    return sendPanelPrompt(active.id, commandText)
+  }
+
+  /**
+   * R2 rework (Codex fix #4): ACP has no per-task-id cancel, and a real-CLI capture
+   * confirmed `session/cancel` does NOT stop a detached recurring loop. The only verified
+   * stop path is asking the agent to run its own `scheduler_delete` tool on the loop's id.
+   * Entries without a known `stopAction` (subagents, generic tasks, unverified tool kinds)
+   * have no Stop button at all — see src/shared/background-activity.ts.
+   */
+  const stopBackgroundActivity = (entry: BackgroundActivityEntry): Promise<void> => {
+    if (!active) return Promise.reject(new Error('沒有進行中的對話'))
+    if (!entry.stopAction) return Promise.reject(new Error('這個項目沒有已驗證的停止方式'))
+    const prompt = formatSchedulerDeletePrompt(entry.stopAction.schedulerId)
+    return sendPanelPrompt(active.id, prompt)
+  }
+
   /** F-INT-4 / E9: queue next turn — main single-slot when Remote is on (last writer wins). */
   const queueNextTurn = (): void => {
     if (!active || !running || interjectBusy) return
@@ -2235,6 +2288,15 @@ export function App(): React.JSX.Element {
     onPreviewCode: openPreviewCode
   }), [openPreviewPath, openPreviewRemote, openPreviewCode])
 
+  /** R2 rework (Codex fix #6): a stable component reference so BackgroundTasksPanel's
+   *  expanded EventCard does not remount (losing its own open/closed state) every time App
+   *  re-renders from an incoming event or the 5s usage poll — an inline arrow function here
+   *  would get a new identity every render. */
+  const renderBackgroundEventCard = useCallback(
+    (props: { event: UiSessionEvent; query: string }) => <MemoEventCard {...props} preview={previewHandlers} />,
+    [previewHandlers]
+  )
+
   const activeModel = models?.availableModels.find((model) => model.modelId === models.currentModelId)
   const usageTotal = usage?.contextWindowTokens ?? activeModel?.totalContextTokens
   const usagePercent = usage?.contextWindowUsage ?? (usage?.contextTokensUsed !== undefined && usageTotal ? Math.round((usage.contextTokensUsed / usageTotal) * 100) : undefined)
@@ -2247,6 +2309,7 @@ export function App(): React.JSX.Element {
   const paletteCommands: PaletteCommand[] = [
     { id: 'new-session', label: '建立新對話', description: '選擇專案資料夾並啟動 Grok', keywords: 'new session 專案 資料夾', shortcut: shortcutFor('newSession').replaceAll('+', ' '), onRun: () => { createSessionRef.current() } },
     { id: 'search-transcript', label: '搜尋目前對話', description: '在已載入的訊息中找文字', keywords: 'find search transcript 尋找', shortcut: shortcutFor('searchTranscript').replaceAll('+', ' '), onRun: () => { setSearchOpen(true); window.setTimeout(() => transcriptSearchRef.current?.focus(), 0) } },
+    { id: 'open-background-tasks', label: '背景任務／Loop 面板', description: '查看排程、子代理、監視器與背景指令；建立 /loop 定時任務', keywords: 'background tasks loop scheduler monitor subagent workflow 背景 任務 排程 迴圈 子代理', onRun: () => { if (!active) return; setPanel('background') } },
     ...slashPalette.map((entry): PaletteCommand => ({
       id: entry.id,
       label: entry.label,
@@ -2410,7 +2473,7 @@ export function App(): React.JSX.Element {
             />
           })}
         </section> : active ? <>
-          <header className="session-header"><PromptBookmarks events={activeEvents} onJump={jumpToPrompt} /><div className="session-title"><span className="eyebrow">ACTIVE SESSION · PROJECT</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) { setNotice(`已匯出：${path}（可在檔案總管開啟該路徑）`); setExportedPaths((current) => ({ ...current, [active.id]: path })); setLastExportedPath(path); } }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button>{exportedPaths[active.id] && <button className="icon-button" title="在檔案總管開啟匯出檔案" onClick={() => void window.grokApi.revealExport(exportedPaths[active.id]).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><FolderOpen /></button>}<button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
+          <header className="session-header"><PromptBookmarks events={activeEvents} onJump={jumpToPrompt} /><div className="session-title"><span className="eyebrow">ACTIVE SESSION · PROJECT</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) { setNotice(`已匯出：${path}（可在檔案總管開啟該路徑）`); setExportedPaths((current) => ({ ...current, [active.id]: path })); setLastExportedPath(path); } }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button>{exportedPaths[active.id] && <button className="icon-button" title="在檔案總管開啟匯出檔案" onClick={() => void window.grokApi.revealExport(exportedPaths[active.id]).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><FolderOpen /></button>}<button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" data-testid="open-background-tasks" title="背景任務／Loop" aria-label="開啟背景任務／Loop 面板" onClick={() => setPanel('background')}><Activity /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
           <section className="transcript" ref={transcriptRef}><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={handleAtBottomChange} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} preview={previewHandlers} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
           <footer className="composer-wrap" onDragOver={onComposerDragOver} onDrop={onComposerDrop}>
@@ -2608,6 +2671,21 @@ export function App(): React.JSX.Element {
             onBusy={setRemoteBusy}
           />
         </aside>
+      )}
+      {panel === 'background' && active && (
+        <BackgroundTasksPanel
+          entries={backgroundActivity}
+          usage={usage}
+          usageTotal={usageTotal}
+          usagePercent={usagePercent}
+          ready={activeReady}
+          running={running}
+          loopCommandAvailable={loopCommandAvailable}
+          onClose={() => setPanel('none')}
+          onCreateLoop={createLoopTask}
+          onStop={stopBackgroundActivity}
+          EventCard={renderBackgroundEventCard}
+        />
       )}
     </div>
     {panel === 'commands' && <CommandPalette commands={paletteCommands} recentIds={settings.recentCommands} onUse={rememberCommand} onClose={() => setPanel('none')} />}

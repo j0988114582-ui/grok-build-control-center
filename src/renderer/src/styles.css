@@ -752,6 +752,49 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .feature-list svg { width: 13px; }
 .feature-list strong { font-size: 12px; }
 .feature-list small { color: var(--muted); font-size: 9px; }
+/* R2 — Background Tasks / Loop panel. Reuses .drawer/.drawer-head/.drawer-intro chrome. */
+.bgtasks-drawer h3 { margin: 0 0 10px; font: 520 15px 'Newsreader Variable', serif; }
+.bgtasks-usage { padding: 16px 0; border-top: 1px solid var(--line); }
+.bgtasks-usage-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.bgtasks-usage-cell { display: grid; gap: 3px; padding: 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); }
+.bgtasks-usage-cell span { color: var(--muted); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.bgtasks-usage-cell strong { font-size: 16px; }
+.bgtasks-usage-cell small { color: var(--muted); font-size: 9px; }
+.bgtasks-usage-cell.unavailable strong { color: var(--muted); }
+.bgtasks-loop-form { display: grid; gap: 10px; padding: 16px 0; border-top: 1px solid var(--line); }
+.bgtasks-loop-form label { display: grid; gap: 6px; font-size: 11px; color: var(--muted); }
+.bgtasks-loop-form input, .bgtasks-loop-form textarea { width: 100%; padding: 8px; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; font-family: inherit; resize: vertical; transition: border-color .16s ease, box-shadow .16s ease; }
+.bgtasks-loop-form input:focus, .bgtasks-loop-form textarea:focus { border-color: var(--line-gold); box-shadow: var(--glow-gold); }
+.bgtasks-loop-preview { padding: 8px 10px; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); color: var(--ice); font-size: 11px; }
+.bgtasks-loop-form button[type='submit'] { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; justify-self: start; border-radius: 4px; font-size: 11px; font-weight: 700; }
+.bgtasks-loop-form button[type='submit'] svg { width: 14px; }
+.bgtasks-loop-form button[type='submit']:disabled { cursor: not-allowed; opacity: .55; }
+.bgtasks-loop-warn { margin: 0; color: var(--text-status-warn); font-size: 10px; }
+.bgtasks-list-section { padding: 16px 0; border-top: 1px solid var(--line); }
+.bgtasks-empty { color: var(--muted); font-size: 11px; }
+.bgtasks-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.bgtasks-item { border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.bgtasks-item-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px; text-align: left; color: inherit; }
+.bgtasks-item-head > svg { flex: none; width: 14px; color: var(--muted); }
+.bgtasks-item-title { flex: 1; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.bgtasks-loop-badge { padding: 1px 6px; border-radius: 999px; background: rgba(233,173,71,.16); color: var(--gold); font-size: 8px; letter-spacing: .04em; }
+.bgtasks-status { display: inline-flex; align-items: center; gap: 4px; font-style: normal; font-size: 9px; letter-spacing: .03em; white-space: nowrap; }
+.bgtasks-status svg { width: 12px; }
+.bgtasks-status.status-running { color: var(--text-status-warn); }
+.bgtasks-status.status-done { color: var(--text-status-ok); }
+.bgtasks-status.status-failed { color: var(--text-status-danger); }
+.bgtasks-status.status-unknown { color: var(--muted); }
+.bgtasks-item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; padding: 0 10px 10px; }
+.bgtasks-item-meta small { color: var(--muted); font-size: 9px; }
+.bgtasks-item-toggle-label { color: var(--muted); font-size: 9px; font-style: normal; }
+.bgtasks-stop-button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: 3px; background: var(--danger-fill); color: white; font-size: 9px; font-weight: 700; }
+.bgtasks-stop-button svg { width: 11px; }
+.bgtasks-stop-button:disabled { cursor: not-allowed; opacity: .55; }
+.bgtasks-stop-requested { color: var(--text-status-ok); font-size: 9px; font-style: normal; }
+.bgtasks-item-detail { padding: 0 10px 10px; }
+/* Panel-local failure surface (loop create / stop) — never routed through the main composer. */
+.bgtasks-error { margin: 0 10px 10px; padding: 8px; display: flex; gap: 6px; background: rgba(213,105,95,.12); color: var(--danger); font-size: 10px; }
+.bgtasks-loop-form .bgtasks-error { margin: 0; }
 .command-drawer > button:not(.icon-button) { width: 100%; min-height: 48px; display: grid; grid-template-columns: 28px 1fr auto; align-items: center; text-align: left; padding: 8px; border-top: 1px solid var(--line); }
 .command-drawer > button:hover { background: var(--panel-2); }
 /* Blur glass surface 3/3 — command palette backdrop. */
@@ -1787,6 +1830,9 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .app[data-theme='light'] .preview-type-dot.kind-code { background: var(--ok); }
 .app[data-theme='light'] .preview-foot-keys { opacity: 1; }
 .app[data-theme='light'] .preview-lightbox { background: rgba(22,26,34,.86); }
+
+/* — Background Tasks / Loop panel — same gold-tint-badge contrast bump as .preview-rail-count. */
+.app[data-theme='light'] .bgtasks-loop-badge { background: rgba(233,173,71,.24); color: var(--gold-ink); }
 
 /* — Cursor identity: screen blend is invisible on cream; multiply keeps the trail. — */
 .app[data-theme='light'] .cursor-trail {

@@ -14,6 +14,20 @@ const textOf = (value: unknown): string => {
 }
 const stringOf = (value: unknown, fallback = ''): string => typeof value === 'string' ? value : fallback
 const numberOf = (value: unknown): number | undefined => typeof value === 'number' ? value : undefined
+/**
+ * Real-CLI capture (2026-08-03, `/loop 15s echo …`) showed the reliable tool identity is
+ * `update._meta["x.ai/tool"].name` (exact, e.g. "scheduler_create") — `title` mutates between
+ * the initial announcement and later updates for the same toolCallId, so it must not be matched
+ * on for tool identity (see src/shared/background-activity.ts).
+ */
+const toolNameOf = (update: Record<string, unknown>): string | undefined => {
+  const meta = update._meta
+  if (!meta || typeof meta !== 'object') return undefined
+  const tool = (meta as Record<string, unknown>)['x.ai/tool']
+  if (!tool || typeof tool !== 'object') return undefined
+  const name = (tool as Record<string, unknown>).name
+  return typeof name === 'string' && name.trim() ? name.trim() : undefined
+}
 
 export function normalizeAcpUpdate(sessionId: string, update: Record<string, unknown>): UiSessionEvent {
   const updateType = stringOf(update.sessionUpdate, 'unknown')
@@ -27,7 +41,8 @@ export function normalizeAcpUpdate(sessionId: string, update: Record<string, unk
     case 'agent_thought_chunk':
       return { id: eventId, sessionId, kind: 'thought', text: textOf(update.content) }
     case 'tool_call':
-    case 'tool_call_update':
+    case 'tool_call_update': {
+      const toolName = toolNameOf(update)
       return {
         id: eventId,
         sessionId,
@@ -36,8 +51,11 @@ export function normalizeAcpUpdate(sessionId: string, update: Record<string, unk
         title: stringOf(update.title, 'Tool call'),
         status: stringOf(update.status, updateType === 'tool_call' ? 'pending' : 'running'),
         ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+        ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
+        ...(toolName ? { toolName } : {}),
         ...(textOf(update.content) ? { output: textOf(update.content) } : {})
       }
+    }
     case 'plan':
       return { id: eventId, sessionId, kind: 'plan', entries: Array.isArray(update.entries) ? update.entries as PlanEntry[] : [] }
     case 'subagent_spawned':

@@ -35,3 +35,80 @@ describe('normalizeAcpUpdate', () => {
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'auto_compact_completed', tokens_before: 900, tokens_after: 300 })).toMatchObject({ kind: 'compact', before: 900, after: 300, source: 'official' })
   })
 })
+
+/**
+ * R2 rework: exact `update` payloads from a real-CLI capture (2026-08-03, `/loop 15s echo
+ * grok_loop_probe_tick` against a live Grok Build CLI). These are the three sequential
+ * updates the SDK delivered for the single scheduler_create toolCallId, byte-for-byte minus
+ * the outer envelope's capture-only `_meta.updateParams` summary (normalizeAcpUpdate only
+ * ever sees the `update` object, never that outer envelope).
+ */
+describe('normalizeAcpUpdate — real scheduler_create capture', () => {
+  const toolCallId = 'call-0dd47cf8-9112-45b5-b7bb-00b3ee434628-0'
+  const prompt = 'You are a detached loop probe. One fire only — do not poll or wait.'
+
+  it('update 1/3 (tool_call, Pending): carries toolName + rawInput even before any status', () => {
+    const event = normalizeAcpUpdate('s', {
+      toolCallId,
+      title: 'scheduler_create',
+      rawInput: { interval: '60s', prompt, fire_immediately: true },
+      _meta: { 'x.ai/tool': { version: 1, name: 'scheduler_create', kind: 'other', namespace: 'grok_build', label: 'Tool', read_only: false } },
+      sessionUpdate: 'tool_call'
+    })
+    expect(event).toMatchObject({
+      kind: 'tool',
+      toolCallId,
+      title: 'scheduler_create',
+      status: 'pending',
+      toolName: 'scheduler_create',
+      rawInput: { interval: '60s', fire_immediately: true }
+    })
+  })
+
+  it('update 2/3 (tool_call_update): title mutates to human text but toolName stays exact', () => {
+    const event = normalizeAcpUpdate('s', {
+      toolCallId,
+      kind: 'other',
+      title: 'Create scheduled task (every 60s)',
+      locations: [],
+      rawInput: { variant: 'SchedulerCreate', task_id: null, interval: '60s', prompt, recurring: true, durable: null, foreground: null, fire_immediately: true },
+      _meta: { 'x.ai/tool': { version: 1, name: 'scheduler_create', kind: 'other', namespace: 'grok_build', label: 'Tool', read_only: false } },
+      sessionUpdate: 'tool_call_update'
+    })
+    expect(event).toMatchObject({
+      kind: 'tool',
+      toolCallId,
+      title: 'Create scheduled task (every 60s)',
+      toolName: 'scheduler_create',
+      rawInput: { variant: 'SchedulerCreate', recurring: true }
+    })
+  })
+
+  it('update 3/3 (tool_call_update, completed): rawOutput carries the recurring loop id; no _meta on this one', () => {
+    const event = normalizeAcpUpdate('s', {
+      toolCallId,
+      status: 'completed',
+      rawOutput: { type: 'SchedulerCreate', id: '019fc84ace8a', humanSchedule: 'every 1 minute', updated: false },
+      sessionUpdate: 'tool_call_update'
+    })
+    expect(event).toMatchObject({
+      kind: 'tool',
+      toolCallId,
+      status: 'completed',
+      rawOutput: { type: 'SchedulerCreate', id: '019fc84ace8a', humanSchedule: 'every 1 minute' }
+    })
+    // Real capture: the completed update omits _meta entirely — the adapter must not invent one.
+    expect((event as { toolName?: string }).toolName).toBeUndefined()
+  })
+
+  it('a control/query call (get_command_or_subagent_output) gets the same exact toolName treatment', () => {
+    const event = normalizeAcpUpdate('s', {
+      toolCallId: 'call-3d8becd4-d14b-4848-b90e-77b7aa9a1428-1',
+      title: 'get_command_or_subagent_output',
+      rawInput: { task_ids: ['019fc84a-ce8b-7690-b590-a440ec43d6c2'] },
+      _meta: { 'x.ai/tool': { version: 1, name: 'get_command_or_subagent_output', kind: 'background_task_action', namespace: 'grok_build', label: 'Background Task', read_only: true } },
+      sessionUpdate: 'tool_call'
+    })
+    expect(event).toMatchObject({ kind: 'tool', toolName: 'get_command_or_subagent_output' })
+  })
+})
