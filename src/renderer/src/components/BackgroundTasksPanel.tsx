@@ -177,9 +177,8 @@ export function BackgroundTasksPanel({
         <button type="button" className="icon-button" aria-label="關閉背景任務面板" onClick={onClose}><X /></button>
       </div>
       <p className="drawer-intro">
-        彙整這個對話裡的排程、監視器、子代理與背景指令（來自 tool_call 與 subagent／task 通知），不是新的 ACP 呼叫。
-        目前只有排程迴圈（scheduler_create）有已驗證的停止方式：送出指示請代理呼叫 scheduler_delete；
-        取消目前回合（session/cancel）不會停止已分離的背景排程。子代理與一般背景任務暫無可靠的個別終止方式，因此不提供停止按鈕。
+        彙整這個對話裡的排程、子代理與背景指令（來自 tool_call 與 subagent／task 通知，不是新的 ACP 呼叫）。
+        目前只有排程迴圈能以 scheduler_delete 指示停止（session/cancel 停不掉已分離的排程）；子代理與一般背景任務沒有可靠的個別終止方式，因此不提供假的停止按鈕。
       </p>
 
       <section className="bgtasks-usage" data-testid="bgtasks-usage" aria-label="Context 與回合用量">
@@ -206,13 +205,73 @@ export function BackgroundTasksPanel({
         </div>
       </section>
 
-      <form className="bgtasks-loop-form" onSubmit={submitLoop}>
-        <h3>建立定時任務</h3>
-        {!loopCommandAvailable && (
-          <p className="bgtasks-loop-warn" data-testid="bgtasks-loop-unavailable">
-            這次連線的 CLI 未廣播 /loop 命令（availableCommands 沒有列出），暫時無法建立定時任務。
-          </p>
+      <section className="bgtasks-list-section" aria-label="背景活動清單">
+        <h3>背景活動{runningCount > 0 ? ` · ${runningCount} 進行中` : ''}</h3>
+        {displayEntries.length === 0 && <p className="bgtasks-empty">目前沒有偵測到背景任務、子代理或排程活動。</p>}
+        {displayEntries.length > 0 && (
+          <ul className="bgtasks-list">
+            {displayEntries.map((entry) => {
+              const expanded = expandedId === entry.id
+              const hasOutput = Boolean(entry.output && entry.output.trim())
+              const toggleLabel = hasOutput ? '查看輸出' : '事件詳情'
+              const stopRequested = stopRequestedIds.has(entry.id)
+              const stopping = stoppingId === entry.id
+              const stopError = stopErrors[entry.id]
+              return (
+                <li key={entry.id} className={`bgtasks-item status-${entry.status}`} data-testid="bgtasks-item">
+                  <button
+                    type="button"
+                    className="bgtasks-item-head"
+                    aria-expanded={expanded}
+                    aria-label={`${entry.title} － ${toggleLabel}（${expanded ? '收合' : '展開'}）`}
+                    onClick={() => setExpandedId(expanded ? null : entry.id)}
+                  >
+                    {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <SourceIcon source={entry.source} />
+                    <span className="bgtasks-item-title">{entry.title}</span>
+                    {entry.loopLike && <b className="bgtasks-loop-badge">LOOP</b>}
+                    <em className={`bgtasks-status status-${entry.status}`}><StatusIcon status={entry.status} />{entry.statusLabel}</em>
+                  </button>
+                  <div className="bgtasks-item-meta">
+                    <small>{entry.kindLabel}{entry.detail ? ` · ${entry.detail}` : ''}</small>
+                    <span className="bgtasks-item-toggle-label">{toggleLabel}</span>
+                    {entry.stopAction && !stopRequested && (
+                      <button
+                        type="button"
+                        className="bgtasks-stop-button"
+                        disabled={!ready || stopping || running}
+                        title={running
+                          ? '回合執行中無法送出停止指示：scheduler_delete 需要一個空檔回合，請待目前回合完成'
+                          : '送出指示請代理呼叫 scheduler_delete 刪除這個排程；不是立即終止，需等代理執行'}
+                        aria-label={`停止排程「${entry.title}」：送出 scheduler_delete 指示，非立即終止`}
+                        onClick={() => handleStop(entry)}
+                      ><Square size={11} />{stopping ? '送出中…' : '停止'}</button>
+                    )}
+                    {stopRequested && <em className="bgtasks-stop-requested" data-testid="bgtasks-stop-requested">已送出停止請求</em>}
+                  </div>
+                  {stopError && <p className="bgtasks-error" role="alert" data-testid="bgtasks-stop-error">{stopError}</p>}
+                  {expanded && (
+                    <div className="bgtasks-item-detail">
+                      <EventCard event={entry.event} query="" />
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
         )}
+      </section>
+
+      <details className="bgtasks-details">
+        <summary className="bgtasks-details-summary" aria-label="展開或收合：建立定時任務">
+          <h3>建立定時任務</h3>
+          {!loopCommandAvailable && (
+            <p className="bgtasks-loop-warn" data-testid="bgtasks-loop-unavailable">
+              這次連線的 CLI 未廣播 /loop 命令（availableCommands 沒有列出），暫時無法建立定時任務。
+            </p>
+          )}
+        </summary>
+      <form className="bgtasks-loop-form" onSubmit={submitLoop}>
         <label>
           間隔（選填）
           <input
@@ -241,11 +300,15 @@ export function BackgroundTasksPanel({
         {ready && running && <p className="bgtasks-loop-warn">回合執行中，請待完成後再建立（或於主要輸入框插話）</p>}
         {loopError && <p className="bgtasks-error" role="alert" data-testid="bgtasks-loop-error">{loopError}</p>}
       </form>
+      </details>
 
+      <details className="bgtasks-details">
+        <summary className="bgtasks-details-summary" aria-label="展開或收合：自主任務">
+          <h3>自主任務</h3>
+        </summary>
       <section className="bgtasks-autonomous" data-testid="bgtasks-autonomous" aria-label="自主任務">
-        <h3>自主任務</h3>
         <p className="bgtasks-autonomous-intro">
-          這些會送出 /workflow、/goal、/deep-research 給 CLI；進度會出現在下方背景活動清單／對話流；
+          這些會送出 /workflow、/goal、/deep-research 給 CLI；進度會出現在上方背景活動清單／對話流；
           回合執行中需先完成才能送出；本區只負責啟動與送出管理指令，不追蹤個別執行狀態。
         </p>
 
@@ -359,63 +422,7 @@ export function BackgroundTasksPanel({
           {deepResearchError && <p className="bgtasks-error" role="alert" data-testid="bgtasks-deep-research-error">{deepResearchError}</p>}
         </form>
       </section>
-
-      <section className="bgtasks-list-section" aria-label="背景活動清單">
-        <h3>背景活動{runningCount > 0 ? ` · ${runningCount} 進行中` : ''}</h3>
-        {displayEntries.length === 0 && <p className="bgtasks-empty">目前沒有偵測到背景任務、子代理或排程活動。</p>}
-        {displayEntries.length > 0 && (
-          <ul className="bgtasks-list">
-            {displayEntries.map((entry) => {
-              const expanded = expandedId === entry.id
-              const hasOutput = Boolean(entry.output && entry.output.trim())
-              const toggleLabel = hasOutput ? '查看輸出' : '事件詳情'
-              const stopRequested = stopRequestedIds.has(entry.id)
-              const stopping = stoppingId === entry.id
-              const stopError = stopErrors[entry.id]
-              return (
-                <li key={entry.id} className={`bgtasks-item status-${entry.status}`} data-testid="bgtasks-item">
-                  <button
-                    type="button"
-                    className="bgtasks-item-head"
-                    aria-expanded={expanded}
-                    aria-label={`${entry.title} － ${toggleLabel}（${expanded ? '收合' : '展開'}）`}
-                    onClick={() => setExpandedId(expanded ? null : entry.id)}
-                  >
-                    {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    <SourceIcon source={entry.source} />
-                    <span className="bgtasks-item-title">{entry.title}</span>
-                    {entry.loopLike && <b className="bgtasks-loop-badge">LOOP</b>}
-                    <em className={`bgtasks-status status-${entry.status}`}><StatusIcon status={entry.status} />{entry.statusLabel}</em>
-                  </button>
-                  <div className="bgtasks-item-meta">
-                    <small>{entry.kindLabel}{entry.detail ? ` · ${entry.detail}` : ''}</small>
-                    <span className="bgtasks-item-toggle-label">{toggleLabel}</span>
-                    {entry.stopAction && !stopRequested && (
-                      <button
-                        type="button"
-                        className="bgtasks-stop-button"
-                        disabled={!ready || stopping || running}
-                        title={running
-                          ? '回合執行中無法送出停止指示：scheduler_delete 需要一個空檔回合，請待目前回合完成'
-                          : '送出指示請代理呼叫 scheduler_delete 刪除這個排程；不是立即終止，需等代理執行'}
-                        aria-label={`停止排程「${entry.title}」：送出 scheduler_delete 指示，非立即終止`}
-                        onClick={() => handleStop(entry)}
-                      ><Square size={11} />{stopping ? '送出中…' : '停止'}</button>
-                    )}
-                    {stopRequested && <em className="bgtasks-stop-requested" data-testid="bgtasks-stop-requested">已送出停止請求</em>}
-                  </div>
-                  {stopError && <p className="bgtasks-error" role="alert" data-testid="bgtasks-stop-error">{stopError}</p>}
-                  {expanded && (
-                    <div className="bgtasks-item-detail">
-                      <EventCard event={entry.event} query="" />
-                    </div>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </section>
+      </details>
     </aside>
   )
 }

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   AT_BOTTOM_LEAVE_DEBOUNCE_MS,
   COMPOSER_RESIZE_EPSILON_PX,
+  isTranscriptAtBottom,
   POST_LOAD_STICK_DELAYS_MS,
+  TRANSCRIPT_BOTTOM_THRESHOLD_PX,
   shouldPinAfterResize
 } from '../src/shared/scroll-anchor'
 
@@ -44,5 +46,13 @@ describe('transcript bottom-lock policy (P-SCROLL)', () => {
       (value, index, all) => index === 0 || value > all[index - 1]
     )
     expect(ascending).toBe(true)
+  })
+
+  it('uses the same bounded bottom geometry for manual-scroll resume decisions', () => {
+    expect(isTranscriptAtBottom(896, 1000, 100)).toBe(true)
+    expect(isTranscriptAtBottom(895, 1000, 100)).toBe(false)
+    expect(isTranscriptAtBottom(0, 80, 100)).toBe(true)
+    expect(isTranscriptAtBottom(Number.NaN, 1000, 100)).toBe(false)
+    expect(TRANSCRIPT_BOTTOM_THRESHOLD_PX).toBe(4)
   })
 })

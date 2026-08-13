@@ -19,6 +19,9 @@
 /** A real scroll-up survives this; a resize transient does not. */
 export const AT_BOTTOM_LEAVE_DEBOUNCE_MS = 160
 
+/** Matches Virtuoso's default bottom threshold and is shared by input-intent checks. */
+export const TRANSCRIPT_BOTTOM_THRESHOLD_PX = 4
+
 /** Sub-pixel composer jitter is not worth a re-pin. */
 export const COMPOSER_RESIZE_EPSILON_PX = 1
 
@@ -48,4 +51,16 @@ export function shouldPinAfterResize(
   if (!following) return false
   if (!Number.isFinite(previousHeight) || !Number.isFinite(nextHeight)) return false
   return Math.abs(nextHeight - previousHeight) > COMPOSER_RESIZE_EPSILON_PX
+}
+
+/** Whether the real transcript scroller is at (or within a few pixels of) its tail. */
+export function isTranscriptAtBottom(
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+  threshold = TRANSCRIPT_BOTTOM_THRESHOLD_PX
+): boolean {
+  if (![scrollTop, scrollHeight, clientHeight, threshold].every(Number.isFinite)) return false
+  if (scrollHeight <= clientHeight) return true
+  return scrollHeight - scrollTop - clientHeight <= Math.max(0, threshold)
 }

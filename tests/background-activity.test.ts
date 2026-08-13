@@ -117,6 +117,107 @@ describe('deriveBackgroundActivity — real scheduler_create capture', () => {
   })
 })
 
+describe('deriveBackgroundActivity — spawn_subagent lifecycle', () => {
+  const spawnCompleted: UiSessionEvent = {
+    id: 'spawn-1',
+    sessionId: 's1',
+    kind: 'tool',
+    toolCallId: 'call-spawn',
+    title: 'Review the PR',
+    status: 'completed',
+    toolName: 'spawn_subagent',
+    rawInput: { description: 'Review the PR' },
+    rawOutput: { child_session_id: 'child-9' }
+  }
+
+  it('shows a completed spawn_subagent as 執行中, not 已完成', () => {
+    const [entry] = deriveBackgroundActivity([spawnCompleted])
+    expect(entry.status).toBe('running')
+    expect(entry.statusLabel).toBe('執行中')
+    expect(entry.statusLabel).not.toBe('已完成')
+  })
+
+  it('keeps a failed/cancelled spawn as failed', () => {
+    const failed: UiSessionEvent = { ...spawnCompleted, status: 'failed' }
+    const cancelled: UiSessionEvent = { ...spawnCompleted, id: 'spawn-2', toolCallId: 'call-2', status: 'cancelled' }
+    expect(deriveBackgroundActivity([failed])[0].status).toBe('failed')
+    expect(deriveBackgroundActivity([cancelled])[0].status).toBe('failed')
+    expect(deriveBackgroundActivity([cancelled])[0].statusLabel).toBe('已取消')
+  })
+
+  it('TaskOutput completed updates the matching spawn to done and is not its own card', () => {
+    const taskOutput: UiSessionEvent = {
+      id: 'out-1',
+      sessionId: 's1',
+      kind: 'tool',
+      toolCallId: 'call-out',
+      title: 'get_command_or_subagent_output',
+      status: 'completed',
+      toolName: 'get_command_or_subagent_output',
+      rawInput: { variant: 'TaskOutput', task_ids: ['child-9'] },
+      rawOutput: { type: 'TaskOutput', Result: { task_id: 'child-9', status: 'completed' } },
+      output: 'child finished'
+    }
+    const entries = deriveBackgroundActivity([spawnCompleted, taskOutput])
+    expect(entries).toHaveLength(1)
+    expect(entries[0].status).toBe('done')
+    expect(entries[0].statusLabel).toBe('已完成')
+    expect(entries[0].output).toBe('child finished')
+    expect(entries[0].event).toMatchObject({ output: 'child finished' })
+  })
+
+  it('unmatched TaskOutput does not invent success — spawn stays running and control tools stay hidden', () => {
+    const entries = deriveBackgroundActivity([spawnCompleted, getOutputControlEvent])
+    expect(entries).toHaveLength(1)
+    expect(entries[0].status).toBe('running')
+    expect(entries[0].name).toBe('spawn_subagent')
+  })
+
+  it('merges spawn tool + subagent finish into one card; subagent wins status, tool keeps the human title', () => {
+    const finish: UiSessionEvent = {
+      id: 'sub-1',
+      sessionId: 's1',
+      kind: 'subagent',
+      subagentId: 'child-9',
+      description: 'Subagent',
+      status: 'completed',
+      output: 'review notes'
+    }
+    const entries = deriveBackgroundActivity([spawnCompleted, finish])
+    expect(entries).toHaveLength(1)
+    expect(entries[0].status).toBe('done')
+    expect(entries[0].title).toBe('Review the PR')
+    expect(entries[0].output).toBe('review notes')
+    expect(entries[0].source).toBe('subagent')
+  })
+
+  it('merges spawn + subagent by human title when the spawn tool carries no child id', () => {
+    const spawnNoId: UiSessionEvent = {
+      id: 'spawn-noid',
+      sessionId: 's1',
+      kind: 'tool',
+      toolCallId: 'call-noid',
+      title: 'Count 1 to 8',
+      status: 'completed',
+      toolName: 'spawn_subagent'
+    }
+    const finish: UiSessionEvent = {
+      id: 'sub-noid',
+      sessionId: 's1',
+      kind: 'subagent',
+      subagentId: 'child-live-1',
+      description: 'Count 1 to 8',
+      status: 'completed',
+      output: '1 2 3 4 5 6 7 8'
+    }
+    const entries = deriveBackgroundActivity([spawnNoId, finish])
+    expect(entries).toHaveLength(1)
+    expect(entries[0].status).toBe('done')
+    expect(entries[0].title).toBe('Count 1 to 8')
+    expect(entries[0].output).toBe('1 2 3 4 5 6 7 8')
+  })
+})
+
 describe('normalizeActivityStatus / activityStatusLabel', () => {
   it('buckets pending/in_progress/running as running', () => {
     expect(normalizeActivityStatus('pending')).toBe('running')

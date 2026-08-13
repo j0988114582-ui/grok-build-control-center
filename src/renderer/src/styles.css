@@ -254,21 +254,21 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 }
 .cleanup-suggest-bar { padding: 0 10px 10px; }
 .cleanup-suggest-button {
-  width: 100%;
-  min-height: 40px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(233, 173, 71, 0.55);
-  background: linear-gradient(180deg, rgba(233, 173, 71, 0.28), rgba(233, 173, 71, 0.14));
-  color: #f3d28a;
-  font-size: 13px;
-  font-weight: 750;
-  letter-spacing: 0.04em;
-  box-shadow: 0 0 18px rgba(233, 173, 71, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  width: auto;
+  min-height: 0;
+  padding: 4px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: none;
 }
 .cleanup-suggest-button:hover {
-  background: linear-gradient(180deg, rgba(233, 173, 71, 0.38), rgba(233, 173, 71, 0.2));
-  color: #ffe6a8;
+  color: inherit;
+  background: var(--panel-2);
 }
 .cleanup-suggest-panel {
   margin-top: 8px;
@@ -755,6 +755,26 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 /* R2 — Background Tasks / Loop panel. Reuses .drawer/.drawer-head/.drawer-intro chrome. */
 .bgtasks-drawer h3 { margin: 0 0 10px; font: 520 15px 'Newsreader Variable', serif; }
 .bgtasks-usage { padding: 16px 0; border-top: 1px solid var(--line); }
+.bgtasks-details { padding: 16px 0; border-top: 1px solid var(--line); }
+.bgtasks-details-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.bgtasks-details-summary::-webkit-details-marker { display: none; }
+.bgtasks-details-summary::before {
+  content: '▸';
+  color: var(--muted);
+  font-size: 11px;
+}
+.bgtasks-details[open] > .bgtasks-details-summary::before { content: '▾'; }
+.bgtasks-details-summary h3 { margin: 0; }
+.bgtasks-details-summary .bgtasks-loop-warn { flex: 1 1 100%; margin: 0; }
+.bgtasks-details .bgtasks-loop-form,
+.bgtasks-details .bgtasks-autonomous { border-top: 0; padding-top: 12px; }
 .bgtasks-usage-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .bgtasks-usage-cell { display: grid; gap: 3px; padding: 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); }
 .bgtasks-usage-cell span { color: var(--muted); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
@@ -870,7 +890,7 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .rename-modal > label input:focus { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(233,173,71,.14), var(--glow-gold); }
 /* pointer-events: none so a toast parked over the drawer never eats clicks meant
    for the controls beneath it; its own buttons opt back in. */
-.notice { position: absolute; z-index: 60; right: 22px; bottom: 22px; max-width: 480px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: rgba(9,15,27,.92); color: #e7edf4; border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 18px 48px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04); font-size: 11px; text-align: left; pointer-events: none; }
+.notice { position: absolute; z-index: 60; top: 56px; right: 22px; bottom: auto; max-width: 480px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: rgba(9,15,27,.92); color: #e7edf4; border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 18px 48px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04); font-size: 11px; text-align: left; pointer-events: none; }
 .notice button, .notice a { pointer-events: auto; }
 .notice svg { width: 14px; color: var(--accent); }
 .notice svg:last-child { color: var(--muted); margin-left: auto; }
@@ -1537,12 +1557,12 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .app[data-theme='light'] .session-pin:hover { color: var(--gold-ink); background: rgba(233,173,71,.2); }
 .app[data-theme='light'] .session-delete:hover { color: var(--danger); background: rgba(152,37,27,.12); }
 .app[data-theme='light'] .cleanup-suggest-button {
-  border-color: var(--gold-edge);
-  background: linear-gradient(180deg, rgba(233,173,71,.34), rgba(233,173,71,.2));
-  color: #6f470c;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 2px 8px rgba(122,77,15,.16);
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
 }
-.app[data-theme='light'] .cleanup-suggest-button:hover { background: linear-gradient(180deg, rgba(233,173,71,.46), rgba(233,173,71,.3)); color: #573708; }
+.app[data-theme='light'] .cleanup-suggest-button:hover { background: var(--panel-2); color: var(--ink); }
 .app[data-theme='light'] .cleanup-suggest-panel { background: rgba(255,254,250,.96); border-color: var(--line-gold); }
 .app[data-theme='light'] .cleanup-suggest-panel > p { color: var(--muted); }
 .app[data-theme='light'] .cleanup-suggest-panel li label { color: var(--ink); }

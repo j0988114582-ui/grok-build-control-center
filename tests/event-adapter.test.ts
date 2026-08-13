@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeAcpUpdate } from '../src/shared/event-adapter'
+import { isTranscriptVisibleEvent, normalizeAcpUpdate, normalizeInterjectionNotification } from '../src/shared/event-adapter'
 
 describe('normalizeAcpUpdate', () => {
   it('maps assistant message chunks to stable message events', () => {
@@ -15,10 +15,30 @@ describe('normalizeAcpUpdate', () => {
     })
   })
 
+  it('treats session_info_update as silent (no Unsupported Grok event card)', () => {
+    expect(normalizeAcpUpdate('s1', { sessionUpdate: 'session_info_update', model: 'grok-4.6' })).toBeNull()
+  })
+
+  it('keeps commands/mode/usage for state but not as transcript rows', () => {
+    const commands = normalizeAcpUpdate('s', { sessionUpdate: 'available_commands_update', availableCommands: [] })
+    const mode = normalizeAcpUpdate('s', { sessionUpdate: 'current_mode_update', currentModeId: 'plan' })
+    const usage = normalizeAcpUpdate('s', { sessionUpdate: 'usage_update', used: 1 })
+    expect(commands).toMatchObject({ kind: 'commands' })
+    expect(mode).toMatchObject({ kind: 'mode' })
+    expect(usage).toMatchObject({ kind: 'usage' })
+    expect(isTranscriptVisibleEvent(commands!)).toBe(false)
+    expect(isTranscriptVisibleEvent(mode!)).toBe(false)
+    expect(isTranscriptVisibleEvent(usage!)).toBe(false)
+    expect(isTranscriptVisibleEvent(normalizeAcpUpdate('s', { sessionUpdate: 'auto_compact_completed', tokens_before: 2, tokens_after: 1 })!)).toBe(true)
+    expect(isTranscriptVisibleEvent(normalizeAcpUpdate('s', { sessionUpdate: 'subagent_spawned', child_session_id: 'c' })!)).toBe(true)
+  })
+
   it('maps tool, plan, subagent and turn completion events', () => {
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'tool_call', toolCallId: 't', title: 'Read file', rawInput: { path: 'a' } })).toMatchObject({ kind: 'tool', toolCallId: 't', title: 'Read file' })
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'plan', entries: [{ content: 'Build', status: 'pending' }] })).toMatchObject({ kind: 'plan', entries: [{ content: 'Build', status: 'pending' }] })
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'subagent_spawned', subagent_id: 'a', description: 'Review' })).toMatchObject({ kind: 'subagent', subagentId: 'a', status: 'running' })
+    expect(normalizeAcpUpdate('s', { sessionUpdate: 'subagent_spawned', child_session_id: 'child-1', description: 'Review' })).toMatchObject({ kind: 'subagent', subagentId: 'child-1', status: 'running' })
+    expect(normalizeAcpUpdate('s', { sessionUpdate: 'subagent_finished', child_session_id: 'child-1', output: 'done' })).toMatchObject({ kind: 'subagent', subagentId: 'child-1', status: 'completed', output: 'done' })
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'turn_completed', stop_reason: 'end_turn' })).toMatchObject({ kind: 'turn', status: 'completed', stopReason: 'end_turn' })
   })
 
@@ -33,6 +53,18 @@ describe('normalizeAcpUpdate', () => {
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'current_mode_update', currentModeId: 'plan' })).toMatchObject({ kind: 'mode', modeId: 'plan' })
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'usage_update', used: 120, size: 1000 })).toMatchObject({ kind: 'usage' })
     expect(normalizeAcpUpdate('s', { sessionUpdate: 'auto_compact_completed', tokens_before: 900, tokens_after: 300 })).toMatchObject({ kind: 'compact', before: 900, after: 300, source: 'official' })
+  })
+
+  it('maps official interjection notifications to user messages with origin interject', () => {
+    expect(normalizeInterjectionNotification('s1', { text: 'steer', interjectionId: 'i-9' })).toEqual({
+      id: 's1:interject:i-9',
+      sessionId: 's1',
+      kind: 'message',
+      role: 'user',
+      text: 'steer',
+      origin: 'interject',
+      interjectionId: 'i-9'
+    })
   })
 })
 

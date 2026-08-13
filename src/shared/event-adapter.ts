@@ -29,8 +29,19 @@ const toolNameOf = (update: Record<string, unknown>): string | undefined => {
   return typeof name === 'string' && name.trim() ? name.trim() : undefined
 }
 
-export function normalizeAcpUpdate(sessionId: string, update: Record<string, unknown>): UiSessionEvent {
+/** Known ACP updates that have no transcript card and must not become "Unsupported Grok event". */
+const SILENT_SESSION_UPDATES = new Set([
+  'session_info_update'
+])
+
+/** Control events stay in state (palette / mode / usage) but must not occupy transcript rows. */
+export function isTranscriptVisibleEvent(event: UiSessionEvent): boolean {
+  return event.kind !== 'commands' && event.kind !== 'mode' && event.kind !== 'usage'
+}
+
+export function normalizeAcpUpdate(sessionId: string, update: Record<string, unknown>): UiSessionEvent | null {
   const updateType = stringOf(update.sessionUpdate, 'unknown')
+  if (SILENT_SESSION_UPDATES.has(updateType)) return null
   const eventId = id(sessionId, updateType)
 
   switch (updateType) {
@@ -59,9 +70,24 @@ export function normalizeAcpUpdate(sessionId: string, update: Record<string, unk
     case 'plan':
       return { id: eventId, sessionId, kind: 'plan', entries: Array.isArray(update.entries) ? update.entries as PlanEntry[] : [] }
     case 'subagent_spawned':
-      return { id: eventId, sessionId, kind: 'subagent', subagentId: stringOf(update.subagent_id), description: stringOf(update.description, 'Subagent'), status: 'running' }
+      return {
+        id: eventId,
+        sessionId,
+        kind: 'subagent',
+        subagentId: stringOf(update.child_session_id) || stringOf(update.subagent_id),
+        description: stringOf(update.description, stringOf(update.title, 'Subagent')),
+        status: 'running'
+      }
     case 'subagent_finished':
-      return { id: eventId, sessionId, kind: 'subagent', subagentId: stringOf(update.subagent_id), description: stringOf(update.description, 'Subagent'), status: stringOf(update.status, 'completed'), output: textOf(update.output) }
+      return {
+        id: eventId,
+        sessionId,
+        kind: 'subagent',
+        subagentId: stringOf(update.child_session_id) || stringOf(update.subagent_id),
+        description: stringOf(update.description, stringOf(update.title, 'Subagent')),
+        status: stringOf(update.status, 'completed'),
+        output: textOf(update.output)
+      }
     case 'task_backgrounded':
       return { id: eventId, sessionId, kind: 'task', taskId: stringOf(update.task_id), description: stringOf(update.description, stringOf(update.command, 'Background task')), status: 'running' }
     case 'task_completed': {
@@ -113,5 +139,22 @@ export function normalizeAcpUpdate(sessionId: string, update: Record<string, unk
     }
     default:
       return { id: eventId, sessionId, kind: 'unknown', updateType, summary: `Unsupported Grok event: ${updateType}` }
+  }
+}
+
+/** Official `_x.ai/session/interjection` broadcast → user message with origin interject. */
+export function normalizeInterjectionNotification(
+  sessionId: string,
+  payload: { text: string; interjectionId?: string }
+): UiSessionEvent {
+  const interjectionId = payload.interjectionId?.trim()
+  return {
+    id: interjectionId ? `${sessionId}:interject:${interjectionId}` : id(sessionId, 'interject'),
+    sessionId,
+    kind: 'message',
+    role: 'user',
+    text: payload.text,
+    origin: 'interject',
+    ...(interjectionId ? { interjectionId } : {})
   }
 }

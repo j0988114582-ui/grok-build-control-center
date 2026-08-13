@@ -10,10 +10,14 @@ import type {
   SessionModeState
 } from '@agentclientprotocol/sdk'
 import type { AgentCapabilities, ModelState, PermissionOption, PermissionRequest, PromptBlock, UiSessionEvent } from '../shared/types'
-import { normalizeAcpUpdate } from '../shared/event-adapter'
-import { buildInterjectParams, INTERJECT_METHOD, parseInterjectResult, type InterjectResult } from '../shared/interject'
+import { normalizeAcpUpdate, normalizeInterjectionNotification } from '../shared/event-adapter'
+import { buildInterjectParams, INTERJECT_METHOD, mintInterjectionId, parseInterjectResult, type InterjectResult } from '../shared/interject'
 import { normalizeAvailableCommands } from '../shared/palette-commands'
-import { isAutoCompactUpdate, parseXaiSessionNotificationLine } from '../shared/xai-session-notification'
+import {
+  isForwardedXaiSessionUpdate,
+  parseXaiInterjectionLine,
+  parseXaiSessionNotificationLine
+} from '../shared/xai-session-notification'
 import { buildAgentArgs } from './grok-cli'
 import { killProcessTree } from './process-tree'
 import { selectPermissionOutcome } from './permissions'
@@ -123,7 +127,8 @@ export class GrokAcpClient {
     const app = acp.client({ name: 'Grok Build GUI' })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) => this.queuePermission(params))
       .onNotification(acp.methods.client.session.update, ({ params }) => {
-        this.callbacks.onEvent(normalizeAcpUpdate(params.sessionId, params.update as unknown as Record<string, unknown>))
+        const event = normalizeAcpUpdate(params.sessionId, params.update as unknown as Record<string, unknown>)
+        if (event) this.callbacks.onEvent(event)
       })
 
     // Scheme A: tee stdout NDJSON before SDK parse. Grok emits auto_compact_completed
@@ -239,7 +244,8 @@ export class GrokAcpClient {
    * Wire: `_x.ai/interject` (underscore prefix, same convention as billing).
    */
   async interject(sessionId: string, text: string, options?: { interjectionId?: string; content?: unknown[] }): Promise<InterjectResult> {
-    const params = buildInterjectParams(sessionId, text, options)
+    const interjectionId = options?.interjectionId ?? mintInterjectionId()
+    const params = buildInterjectParams(sessionId, text, { ...options, interjectionId })
     const response = await this.requireContext().request(INTERJECT_METHOD, params)
     return parseInterjectResult(response)
   }
@@ -314,8 +320,9 @@ export class GrokAcpClient {
   }
 
   /**
-   * Scheme A raw tee: scan NDJSON for `_x.ai/session_notification` compact events
-   * and forward through the same normalizeAcpUpdate path as standard session/update.
+   * Scheme A raw tee: scan NDJSON for `_x.ai/session_notification` compact +
+   * subagent lifecycle, and `_x.ai/session/interjection` echoes. SDK closed-union
+   * never delivers these on session/update.
    */
   private consumeRawStdoutChunk(text: string): void {
     this.rawLineBuffer += text
@@ -329,15 +336,16 @@ export class GrokAcpClient {
   }
 
   private handleRawAcpLine(line: string): void {
-    const parsed = parseXaiSessionNotificationLine(line)
-    if (!parsed || !isAutoCompactUpdate(parsed.update)) return
-    this.callbacks.onEvent(normalizeAcpUpdate(parsed.sessionId, parsed.update))
+    const event = mapRawAcpLineToEvent(line)
+    if (event) this.callbacks.onEvent(event)
   }
 }
 
 /** Test seam: process one raw NDJSON line the same way as the live tee. */
 export function mapRawAcpLineToEvent(line: string): UiSessionEvent | null {
+  const interjection = parseXaiInterjectionLine(line)
+  if (interjection) return normalizeInterjectionNotification(interjection.sessionId, interjection)
   const parsed = parseXaiSessionNotificationLine(line)
-  if (!parsed || !isAutoCompactUpdate(parsed.update)) return null
+  if (!parsed || !isForwardedXaiSessionUpdate(parsed.update)) return null
   return normalizeAcpUpdate(parsed.sessionId, parsed.update)
 }

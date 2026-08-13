@@ -8,18 +8,18 @@ import { createDefaultSettings } from '../src/shared/settings'
 import type { GrokBridgeApi } from '../src/shared/bridge'
 
 const createApiMock = (): GrokBridgeApi => ({
-  getStatus: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
-  installCli: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '0.2.93', connected: false }),
+  getStatus: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '1.0.3', connected: false }),
+  installCli: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '1.0.3', connected: false }),
   reauthenticate: vi.fn().mockResolvedValue({ loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [] }),
   getPermissionMode: vi.fn().mockResolvedValue('ask' as const),
   setPermissionMode: vi.fn((mode) => Promise.resolve(mode)),
   connect: vi.fn().mockResolvedValue({
     loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [{ name: 'compact', description: '壓縮目前 context' }],
     modelState: {
-      currentModelId: 'grok-4.5',
+      currentModelId: 'grok-4.6',
       availableModels: [
-        { modelId: 'grok-4.5', name: 'Grok 4.5', totalContextTokens: 500000, currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'high', value: 'high', label: 'High Effort', default: true }] },
-        { modelId: 'grok-composer-2.5-fast', name: 'Composer 2.5', totalContextTokens: 200000, reasoningEfforts: [] }
+        { modelId: 'grok-4.6', name: 'Grok 4.6', description: "SpaceXAI's latest frontier model", totalContextTokens: 500000, currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'xhigh', value: 'xhigh', label: 'Extra High Effort', default: true }, { id: 'high', value: 'high', label: 'High Effort', default: true }] },
+        { modelId: 'grok-4.5', name: 'Grok 4.5', totalContextTokens: 500000, currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'high', value: 'high', label: 'High Effort', default: true }] }
       ]
     }
   }),
@@ -77,7 +77,7 @@ describe('App', () => {
     window.grokApi = createApiMock()
     render(<App />)
     expect(await screen.findByText('Fix tests')).toBeInTheDocument()
-    expect(screen.getByText(/Grok 0.2.93/)).toBeInTheDocument()
+    expect(screen.getByText(/Grok 1.0.3/)).toBeInTheDocument()
     expect(screen.queryByText('Terminal')).not.toBeInTheDocument()
   })
 
@@ -117,7 +117,7 @@ describe('App', () => {
     const api = createApiMock()
     api.reauthenticate = vi.fn().mockResolvedValue({
       loadSession: true, promptCapabilities: {}, sessionCapabilities: {}, modes: [], commands: [],
-      modelState: { currentModelId: 'grok-4.5', availableModels: [] }
+      modelState: { currentModelId: 'grok-4.6', availableModels: [] }
     })
     window.grokApi = api
     const user = userEvent.setup()
@@ -170,7 +170,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '開啟瀏覽器並重新登入' }))
 
     expect(screen.getByRole('button', { name: /新 Session/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /Grok 0\.2\.93/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Grok 1\.0\.3/ })).toBeDisabled()
   })
 
   it('deletes a session after the in-app confirmation', async () => {
@@ -194,9 +194,10 @@ describe('App', () => {
     await user.click(await screen.findByText('Fix tests'))
     expect(await screen.findByText('37%')).toBeInTheDocument()
     expect(screen.getByText(/186.8k \/ 500k|187k \/ 500k/)).toBeInTheDocument()
-    const modelPicker = await screen.findByRole('button', { name: '模型：Grok 4.5' })
+    const modelPicker = await screen.findByRole('button', { name: '模型：Grok 4.6' })
     await user.click(modelPicker)
-    expect(screen.getByRole('option', { name: /Composer 2.5/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Grok 4.5/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Extra High Effort' })).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: 'High Effort' })).toHaveAttribute('aria-checked', 'true')
   })
 
@@ -305,7 +306,7 @@ describe('App', () => {
     await user.click(await screen.findByText('Fix tests'))
     expect(screen.getByRole('combobox', { name: '工作模式' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /Grok 0\.2\.93.*Connected/ }))
+    await user.click(screen.getByRole('button', { name: /Grok 1\.0\.3.*Connected/ }))
     await user.click(screen.getByTitle('命令'))
 
     expect(screen.queryByText('/legacy-command')).not.toBeInTheDocument()
@@ -551,6 +552,41 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /新 Session/ }))
     expect(await screen.findByRole('heading', { name: 'New session' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /跳到最新/ })).not.toBeInTheDocument()
+  })
+
+  it('pauses follow-tail immediately when the user scrolls up during streaming thoughts', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]') as HTMLElement | null
+    expect(scroller).not.toBeNull()
+    Object.defineProperties(scroller!, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 1000 },
+      scrollTop: { configurable: true, writable: true, value: 900 }
+    })
+
+    act(() => {
+      onEvent?.({ id: 'turn-running', sessionId: 's1', kind: 'turn', status: 'running' })
+      onEvent?.({ id: 'thought-1', sessionId: 's1', kind: 'thought', text: '正在分析第一段' })
+    })
+
+    fireEvent.wheel(scroller!, { deltaY: -160 })
+    expect(screen.getByRole('button', { name: /跳到最新/ })).toBeInTheDocument()
+
+    // A streaming resize may briefly report "at bottom" again. The user's explicit
+    // scroll-up intent must win so later thought chunks cannot yank the viewport back.
+    scroller!.scrollTop = 900
+    fireEvent.scroll(scroller!)
+    act(() => {
+      onEvent?.({ id: 'thought-2', sessionId: 's1', kind: 'thought', text: '，繼續分析第二段' })
+    })
+    expect(screen.getByRole('button', { name: /跳到最新/ })).toBeInTheDocument()
   })
 
   it('restores a failed prompt and leaves the session ready to retry', async () => {
@@ -849,9 +885,15 @@ describe('App', () => {
     await user.type(composer, '改做這件事')
     await user.click(screen.getByTestId('interject-button'))
 
-    await waitFor(() => expect(api.interject).toHaveBeenCalledWith('s1', '改做這件事'))
+    await waitFor(() => expect(api.interject).toHaveBeenCalledWith(
+      's1',
+      '改做這件事',
+      expect.objectContaining({ interjectionId: expect.any(String) })
+    ))
     expect(api.cancel).not.toHaveBeenCalled()
     expect(await screen.findByTestId('interject-status')).toHaveTextContent('已排入，下一個安全點生效')
+    expect(composer).toHaveValue('')
+    await waitFor(() => expect(screen.getByTestId('prompt-bookmarks-trigger')).toHaveTextContent('1'))
   })
 
   it('F-INT-3: 立刻改做 cancels then sends a new prompt', async () => {
@@ -891,6 +933,26 @@ describe('App', () => {
     await user.click(screen.getByTestId('interject-button'))
 
     expect(await screen.findByText(/不支援插話/)).toBeInTheDocument()
+    expect(api.cancel).not.toHaveBeenCalled()
+  })
+
+  it('strips Electron IPC prefixes from interject errors', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    api.interject = vi.fn().mockRejectedValue(new Error("Error invoking remote method 'grok:interject': Error: 網路逾時"))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
+    const composer = await screen.findByPlaceholderText(/回合進行中可插話/)
+    await user.type(composer, 'hello')
+    await user.click(screen.getByTestId('interject-button'))
+
+    expect(await screen.findByText('網路逾時')).toBeInTheDocument()
+    expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument()
     expect(api.cancel).not.toHaveBeenCalled()
   })
 
@@ -1045,8 +1107,9 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
     await user.click(await screen.findByRole('button', { name: /設定/ }))
-    expect(await screen.findByTestId('cli-update-hint')).toHaveTextContent(/官方腳本更新/)
-    expect(screen.getByTestId('cli-update-hint')).toHaveTextContent('0.2.93')
+    expect(await screen.findByTestId('cli-update-hint')).toHaveTextContent(/官方更新/)
+    expect(screen.getByTestId('cli-update-hint')).toHaveTextContent('1.0.3')
+    expect(screen.getByTestId('cli-update-hint')).toHaveTextContent('grok update')
   })
 
   it('Agents Team: enables side-by-side board for two sessions', async () => {
@@ -1170,7 +1233,7 @@ describe('App', () => {
     window.grokApi = api
     const user = userEvent.setup()
     render(<App />)
-    await user.click(await screen.findByText(/Grok 0.2.93/))
+    await user.click(await screen.findByText(/Grok 1.0.3/))
     await waitFor(() => expect(api.connect).toHaveBeenCalled())
     await user.click(await screen.findByText('Fix tests'))
     await user.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
@@ -1194,6 +1257,9 @@ describe('App', () => {
     // R2 rework fix #7: createApiMock's default connect() response never lists `loop` in
     // commands, so the CLI never advertised /loop — the form must say so and stay disabled.
     expect(within(panel).getByTestId('bgtasks-loop-unavailable')).toHaveTextContent('未廣播 /loop 命令')
+    const loopHeading = within(panel).getByRole('heading', { name: '建立定時任務' })
+    const loopDetails = loopHeading.closest('details')
+    if (loopDetails) loopDetails.open = true
     expect(within(panel).getByLabelText('提示內容')).toBeDisabled()
 
     await user.keyboard('{Escape}')
@@ -1219,6 +1285,9 @@ describe('App', () => {
     await user.click(await screen.findByTitle('背景任務／Loop'))
     await screen.findByTestId('background-tasks-panel')
     expect(within(await screen.findByTestId('background-tasks-panel')).queryByTestId('bgtasks-loop-unavailable')).not.toBeInTheDocument()
+    const loopHeading = screen.getByRole('heading', { name: '建立定時任務' })
+    const loopDetails = loopHeading.closest('details')
+    if (loopDetails) loopDetails.open = true
 
     await user.type(screen.getByLabelText('間隔（選填）'), '5m')
     await user.type(screen.getByLabelText('提示內容'), '檢查建置狀態')
@@ -1252,6 +1321,9 @@ describe('App', () => {
     await user.click(await screen.findByTitle('背景任務／Loop'))
     const panel = await screen.findByTestId('background-tasks-panel')
     expect(within(panel).queryByTestId('bgtasks-goal-unavailable')).not.toBeInTheDocument()
+    const autoHeading = within(panel).getByRole('heading', { name: '自主任務' })
+    const autoDetails = autoHeading.closest('details')
+    if (autoDetails) autoDetails.open = true
 
     await user.type(within(panel).getByLabelText('目標內容'), 'ship the release')
     await user.type(within(panel).getByLabelText('預算 tokens（選填）'), '100000')

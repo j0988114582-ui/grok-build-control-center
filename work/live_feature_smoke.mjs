@@ -17,14 +17,17 @@ try {
     const capabilities = await window.grokApi.connect()
     out.modelStateFromConnect = capabilities.modelState ?? null
     out.commandCount = capabilities.commands.length
+    out.commandNames = capabilities.commands.map((command) => command.name)
+    out.hasSessionInfo = out.commandNames.includes('session-info')
     out.billing = await window.grokApi.getBilling()
     const created = await window.grokApi.createSession(cwd)
     out.sessionId = created.sessionId
     out.modelsFromSession = created.models ?? null
     out.usage = await window.grokApi.getUsage(created.sessionId)
     out.usageForFreshSession = out.usage !== null
-    out.setModel = await window.grokApi.setModel(created.sessionId, 'grok-composer-2.5-fast').then(() => 'ok').catch(String)
-    out.setModelBack = await window.grokApi.setModel(created.sessionId, 'grok-4.5', 'high').then(() => 'ok').catch(String)
+    out.hasGrok46 = (created.models?.availableModels ?? capabilities.modelState?.availableModels ?? []).some((model) => model.modelId === 'grok-4.6')
+    out.setModel = await window.grokApi.setModel(created.sessionId, 'grok-4.5', 'high').then(() => 'ok').catch(String)
+    out.setModelBack = await window.grokApi.setModel(created.sessionId, 'grok-4.6', 'high').then(() => 'ok').catch(String)
     out.deleted = await window.grokApi.deleteSession(created.sessionId).catch(String)
     const after = await window.grokApi.listSessions()
     out.sessionGoneFromIndex = !after.some((session) => session.id === created.sessionId)
@@ -39,4 +42,4 @@ try {
 const models = result?.modelsFromSession?.availableModels ?? result?.modelStateFromConnect?.availableModels ?? []
 const billingEnd = result?.billing?.billingPeriodEnd
 const validBilling = typeof result?.billing?.creditUsagePercent === 'number' && typeof billingEnd === 'string' && Number.isFinite(Date.parse(billingEnd))
-if (models.length < 2 || !validBilling || result.setModel !== 'ok' || result.setModelBack !== 'ok' || result.deleted !== true || !result.sessionGoneFromIndex) process.exitCode = 1
+if (models.length < 2 || result?.hasGrok46 !== true || result?.hasSessionInfo !== true || !validBilling || result.setModel !== 'ok' || result.setModelBack !== 'ok' || result.deleted !== true || !result.sessionGoneFromIndex) process.exitCode = 1

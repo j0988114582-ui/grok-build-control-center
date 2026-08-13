@@ -17,7 +17,10 @@ import { quotaAlertStorageKey, selectCrossedQuotaThreshold } from '../../shared/
 import {
   INTERJECT_QUEUED_NOTICE,
   INTERJECT_UNSUPPORTED_NOTICE,
+  formatInterjectError,
+  formatUserMessageLabel,
   isMethodNotFoundError,
+  mintInterjectionId,
   type InterjectUiState
 } from '../../shared/interject'
 import {
@@ -31,6 +34,7 @@ import {
   takeQueueForSession,
   type LocalQueuedPrompt
 } from '../../shared/local-queue'
+import { isTranscriptVisibleEvent } from '../../shared/event-adapter'
 import { buildSlashPaletteEntries } from '../../shared/palette-commands'
 import { localizeSessionModes, sessionModeControlTitle } from '../../shared/session-modes'
 import { QuotaRings } from './components/QuotaRings'
@@ -144,8 +148,10 @@ import {
 import { availableComposerMaxPx, fitMainComposer, MAIN_COMPOSER_MIN_PX } from '../../shared/composer-autogrow'
 import {
   AT_BOTTOM_LEAVE_DEBOUNCE_MS,
+  isTranscriptAtBottom,
   JUMP_SETTLE_DELAYS_MS,
   POST_LOAD_STICK_DELAYS_MS,
+  TRANSCRIPT_BOTTOM_THRESHOLD_PX,
   shouldPinAfterResize
 } from '../../shared/scroll-anchor'
 import {
@@ -196,8 +202,8 @@ const eventText = (event: UiSessionEvent): string => event.kind === 'message' ||
 const eventTitle = (event: Exclude<UiSessionEvent, { kind: 'message' } | { kind: 'turn' }>): string => {
   switch (event.kind) {
     case 'tool': return event.title
-    case 'thought': return 'Reasoning'
-    case 'plan': return 'Plan'
+    case 'thought': return '推理'
+    case 'plan': return '計畫'
     case 'subagent': return event.description
     case 'task': return event.description
     case 'recap': return 'Session recap'
@@ -237,14 +243,15 @@ function Markdown({ children, preview }: { children: string; preview?: PreviewHa
   }}>{children}</ReactMarkdown>
 }
 
-function EventCard({ event, query, preview }: { event: UiSessionEvent; query: string; preview?: PreviewHandlers }): React.JSX.Element {
+function EventCard({ event, query, preview }: { event: UiSessionEvent; query: string; preview?: PreviewHandlers }): React.JSX.Element | null {
   // Compaction is a thing the user needs to notice, not dig for — it silently changes what
   // the model still remembers. Open by default so the before→after tokens are just there.
   const [open, setOpen] = useState(event.kind === 'message' || event.kind === 'error' || event.kind === 'compact')
   const matches = query && eventText(event).toLocaleLowerCase().includes(query.toLocaleLowerCase())
+  if (!isTranscriptVisibleEvent(event)) return null
   if (event.kind === 'message') return <article className={`message ${event.role} ${matches ? 'search-hit' : ''}`}>
     <div className="message-rail">{event.role === 'assistant' ? <Bot size={17} /> : <UserRound size={17} />}</div>
-    <div className="message-body"><div className="message-label">{event.role === 'assistant' ? 'GROK' : 'YOU'}</div><Markdown preview={preview}>{event.text}</Markdown></div>
+    <div className="message-body"><div className="message-label">{event.role === 'assistant' ? 'GROK' : formatUserMessageLabel(event.origin)}</div><Markdown preview={preview}>{event.text}</Markdown></div>
   </article>
   if (event.kind === 'turn') return <div className={`turn-marker ${event.status}`}><span />{event.status === 'running' ? 'Grok 正在工作' : `回合${event.status === 'completed' ? '完成' : event.status}`}</div>
   const icon = event.kind === 'tool' ? <Wrench size={16} /> : event.kind === 'thought' ? <Zap size={16} /> : event.kind === 'plan' ? <ListTodo size={16} /> : event.kind === 'subagent' ? <Bot size={16} /> : event.kind === 'task' ? <Activity size={16} /> : event.kind === 'compact' ? <Minimize2 size={16} /> : <CircleAlert size={16} />
@@ -310,7 +317,7 @@ function SettingsPanel({
   return <aside className="drawer" data-testid="settings-drawer"><div className="drawer-head"><div><span className="eyebrow">LOCAL PREFERENCES</span><h2>工作台設定</h2></div><button className="icon-button" onClick={onClose}><X /></button></div>
     <p className="settings-live-hint">深色／亮色、字級、座艙開關會<strong>即時預覽</strong>；按「儲存設定」才寫入本機。</p>
     <div className="settings-section"><label>Grok 執行檔<input value={draft.grokExecutable} onChange={(event) => update({ ...draft, grokExecutable: event.target.value })} /></label>
-      <p className="cli-update-hint" data-testid="cli-update-hint">目前 CLI{cliVersion ? ` ${cliVersion}` : ''}。若缺少插話、額度或新指令，請以官方腳本更新：<code>irm https://x.ai/cli/install.ps1 | iex</code></p>
+      <p className="cli-update-hint" data-testid="cli-update-hint">目前 CLI{cliVersion ? ` ${cliVersion}` : ''}。若缺少新模型或指令，先執行官方更新：<code>grok update</code>；尚未安裝時才使用 <code>irm https://x.ai/cli/install.ps1 | iex</code>。</p>
     </div>
     <div className="settings-grid">
       <label>字級 <output>{draft.fontSize}px</output><input type="range" min="12" max="22" value={draft.fontSize} onChange={(event) => update({ ...draft, fontSize: Number(event.target.value) })} /></label>
@@ -345,8 +352,9 @@ function SettingsPanel({
 
 const FEATURES = [
   ['聊天、串流、工具、權限', 'ACP 原生', 'native'], ['Session 新建／載入', 'ACP 原生', 'native'], ['模型與模式', '依 capability', 'conditional'],
-  ['Plan、Todos、Subagents', '結構化事件', 'native'], ['Compact／Rewind', '在 TUI 開啟', 'fallback'], ['Plugins／MCP／Memory', '在 TUI 開啟', 'fallback'],
-  ['Worktree／Fork', '依 capability', 'conditional'], ['Session 匯出', 'CLI 子命令', 'native']
+  ['Plan、Todos', '結構化事件', 'native'], ['Subagents', '部分原生（派出／完成可見，無 ACP 控制台）', 'conditional'],
+  ['Compact', '官方通知＋推斷卡片', 'native'], ['Rewind', 'ACP 可查詢，GUI 尚未接上', 'conditional'],
+  ['Plugins／MCP／Memory', '在 TUI 開啟', 'fallback'], ['Worktree／Fork', '依 capability', 'conditional'], ['Session 匯出', 'CLI 子命令', 'native']
 ]
 
 export function App(): React.JSX.Element {
@@ -458,6 +466,12 @@ export function App(): React.JSX.Element {
   const createSessionRef = useRef<() => void>(() => {})
   const jumpToLatestRef = useRef<() => void>(() => {})
   const followTailRef = useRef(true)
+  /** Explicit reading intent wins over Virtuoso's transient bottom reports while content streams. */
+  const manualScrollPauseRef = useRef(false)
+  const manualScrollDirectionRef = useRef<'up' | 'down' | null>(null)
+  const transcriptScrollerRef = useRef<HTMLElement | null>(null)
+  const transcriptTouchYRef = useRef<number | null>(null)
+  const transcriptPointerYRef = useRef<number | null>(null)
   const activeIdRef = useRef<string | null>(null)
   const billingRef = useRef<BillingInfo | null>(null)
   const loadingSessionsRef = useRef<Set<string>>(new Set())
@@ -483,24 +497,102 @@ export function App(): React.JSX.Element {
   /** P-SCROLL/D2: a layout shift emits a transient atBottom=false. Debounce leaving the
    *  bottom so it cannot strand followTail; arriving at the bottom applies at once. */
   const atBottomLeaveTimerRef = useRef<number | null>(null)
-  const clearAtBottomLeaveTimer = (): void => {
+  const clearAtBottomLeaveTimer = useCallback((): void => {
     if (atBottomLeaveTimerRef.current === null) return
     window.clearTimeout(atBottomLeaveTimerRef.current)
     atBottomLeaveTimerRef.current = null
-  }
+  }, [])
+  const resumeTranscriptFollowing = useCallback((): void => {
+    clearAtBottomLeaveTimer()
+    manualScrollPauseRef.current = false
+    manualScrollDirectionRef.current = null
+    followTailRef.current = true
+    setFollowTail(true)
+    setUnread(0)
+  }, [clearAtBottomLeaveTimer])
+  const pauseTranscriptFollowing = useCallback((): void => {
+    clearAtBottomLeaveTimer()
+    manualScrollPauseRef.current = true
+    manualScrollDirectionRef.current = 'up'
+    // Update the ref synchronously: a thought chunk can arrive before React commits state.
+    followTailRef.current = false
+    setFollowTail(false)
+  }, [clearAtBottomLeaveTimer])
+  const noteManualScrollDown = useCallback((): void => {
+    manualScrollDirectionRef.current = 'down'
+    window.requestAnimationFrame(() => {
+      const scroller = transcriptScrollerRef.current
+      if (manualScrollPauseRef.current && scroller && isTranscriptAtBottom(
+        scroller.scrollTop,
+        scroller.scrollHeight,
+        scroller.clientHeight
+      )) resumeTranscriptFollowing()
+    })
+  }, [resumeTranscriptFollowing])
   const handleAtBottomChange = useCallback((bottom: boolean): void => {
     clearAtBottomLeaveTimer()
     if (bottom) {
-      setFollowTail(true)
-      setUnread(0)
+      // A streaming resize can snap back to the tail immediately after a wheel-up. Do not
+      // reinterpret that programmatic rebound as the user asking to follow again.
+      if (manualScrollPauseRef.current) {
+        const scroller = transcriptScrollerRef.current
+        if (manualScrollDirectionRef.current !== 'down' || !scroller || !isTranscriptAtBottom(
+          scroller.scrollTop,
+          scroller.scrollHeight,
+          scroller.clientHeight
+        )) return
+      }
+      resumeTranscriptFollowing()
+      return
+    }
+    if (manualScrollPauseRef.current) {
+      followTailRef.current = false
+      setFollowTail(false)
       return
     }
     atBottomLeaveTimerRef.current = window.setTimeout(() => {
       atBottomLeaveTimerRef.current = null
+      followTailRef.current = false
       setFollowTail(false)
     }, AT_BOTTOM_LEAVE_DEBOUNCE_MS)
+  }, [clearAtBottomLeaveTimer, resumeTranscriptFollowing])
+  useEffect(() => clearAtBottomLeaveTimer, [clearAtBottomLeaveTimer])
+
+  const handleTranscriptWheel = useCallback((event: React.WheelEvent<HTMLElement>): void => {
+    if (event.deltaY < 0) pauseTranscriptFollowing()
+    else if (event.deltaY > 0) noteManualScrollDown()
+  }, [noteManualScrollDown, pauseTranscriptFollowing])
+  const handleTranscriptKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>): void => {
+    if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) {
+      pauseTranscriptFollowing()
+    } else if (['ArrowDown', 'PageDown', 'End'].includes(event.key) || event.key === ' ') {
+      noteManualScrollDown()
+    }
+  }, [noteManualScrollDown, pauseTranscriptFollowing])
+  const handleTranscriptTouchStart = useCallback((event: React.TouchEvent<HTMLElement>): void => {
+    transcriptTouchYRef.current = event.touches[0]?.clientY ?? null
   }, [])
-  useEffect(() => clearAtBottomLeaveTimer, [])
+  const handleTranscriptTouchMove = useCallback((event: React.TouchEvent<HTMLElement>): void => {
+    const nextY = event.touches[0]?.clientY
+    const previousY = transcriptTouchYRef.current
+    if (nextY === undefined || previousY === null) return
+    transcriptTouchYRef.current = nextY
+    if (nextY > previousY) pauseTranscriptFollowing()
+    else if (nextY < previousY) noteManualScrollDown()
+  }, [noteManualScrollDown, pauseTranscriptFollowing])
+  const handleTranscriptPointerDown = useCallback((event: React.PointerEvent<HTMLElement>): void => {
+    if (event.pointerType === 'mouse') transcriptPointerYRef.current = event.clientY
+  }, [])
+  const handleTranscriptPointerMove = useCallback((event: React.PointerEvent<HTMLElement>): void => {
+    const previousY = transcriptPointerYRef.current
+    if (event.pointerType !== 'mouse' || event.buttons === 0 || previousY === null) return
+    transcriptPointerYRef.current = event.clientY
+    if (event.clientY < previousY) pauseTranscriptFollowing()
+    else if (event.clientY > previousY) noteManualScrollDown()
+  }, [noteManualScrollDown, pauseTranscriptFollowing])
+  const clearTranscriptPointer = useCallback((): void => {
+    transcriptPointerYRef.current = null
+  }, [])
 
   /** Staggered re-pin so a session load lands on the newest event regardless of how long
    *  the replay takes to settle (today followOutput wins that race only by timing). */
@@ -638,6 +730,20 @@ export function App(): React.JSX.Element {
         setActive(session)
         setEvents((current) => current[session.id] ? current : { ...current, [session.id]: [] })
         setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, connectionGenerationRef.current, connectionGenerationRef.current))
+      },
+      setModelState: (nextModels: ModelState | undefined) => setModels(nextModels),
+      seedSessionEvents: (sessionId: string, nextEvents: UiSessionEvent[]) => {
+        setEvents((current) => ({ ...current, [sessionId]: nextEvents }))
+      },
+      appendSessionEvent: (event: UiSessionEvent) => {
+        setEvents((current) => {
+          const previous = current[event.sessionId] ?? []
+          const next = sessionReducer(
+            { sessionId: event.sessionId, events: previous, running: false, followTail: true, unread: 0 },
+            { type: 'event', event }
+          )
+          return { ...current, [event.sessionId]: next.events }
+        })
       },
       openPreviewPath: (filePath: string) => {
         openPreviewPathRef.current?.(filePath)
@@ -831,8 +937,7 @@ export function App(): React.JSX.Element {
           }
           setActive(session)
           activeIdRef.current = sessionId
-          setFollowTail(true)
-          setUnread(0)
+          resumeTranscriptFollowing()
           if (payload.focusStatus === 'ready') {
             setSessionReady((current) =>
               markSessionReadyIfCurrent(current, sessionId, connectionGenerationRef.current, connectionGenerationRef.current)
@@ -853,7 +958,7 @@ export function App(): React.JSX.Element {
       })()
     })
     return off
-  }, [])
+  }, [resumeTranscriptFollowing])
 
   useEffect(() => {
     if (!remoteControlActive) return
@@ -984,7 +1089,8 @@ export function App(): React.JSX.Element {
   }, [running, active, panel, setupDialog, lifecycleBusy, batchDeleteTargets, yoloConfirm, deleteTarget, renameTarget, searchOpen, selectMode, sidebarOpen, settings.shortcuts, previewActiveId, previewLoad.status])
 
   const activeEvents = useMemo(() => active ? events[active.id] ?? [] : [], [active, events])
-  const searchHits = useMemo(() => transcriptQuery ? activeEvents.filter((event) => eventText(event).toLocaleLowerCase().includes(transcriptQuery.toLocaleLowerCase())).length : 0, [activeEvents, transcriptQuery])
+  const transcriptEvents = useMemo(() => activeEvents.filter(isTranscriptVisibleEvent), [activeEvents])
+  const searchHits = useMemo(() => transcriptQuery ? transcriptEvents.filter((event) => eventText(event).toLocaleLowerCase().includes(transcriptQuery.toLocaleLowerCase())).length : 0, [transcriptEvents, transcriptQuery])
   /** R2: background tasks / loop panel — aggregated from the same event stream, no new ACP call. */
   const backgroundActivity = useMemo<BackgroundActivityEntry[]>(() => deriveBackgroundActivity(activeEvents), [activeEvents])
   /** R2 rework (Codex fix #7): only offer "建立定時任務" when the CLI actually advertised /loop. */
@@ -1264,8 +1370,7 @@ export function App(): React.JSX.Element {
       setRunningMap({})
       setTeam(emptyAgentsTeam())
       setTeamEnabled(false)
-      setFollowTail(true)
-      setUnread(0)
+      resumeTranscriptFollowing()
       setStatus((current) => ({ ...current, found: true, connected: true }))
       setSetupDialog(null)
       setNotice('Grok 帳號已重新登入')
@@ -1323,8 +1428,7 @@ export function App(): React.JSX.Element {
         })
       }
       setUsage(null)
-      setFollowTail(true)
-      setUnread(0)
+      resumeTranscriptFollowing()
       void refreshUsage(newSessionId)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error))
@@ -1358,8 +1462,7 @@ export function App(): React.JSX.Element {
         })
       }
       setUsage(null)
-      setFollowTail(true)
-      setUnread(0)
+      resumeTranscriptFollowing()
       setEvents((current) => ({ ...current, [session.id]: [] }))
       try {
         const response = await window.grokApi.loadSession(session.id, session.cwd)
@@ -1587,17 +1690,35 @@ export function App(): React.JSX.Element {
     const text = drafts[sessionId]?.trim()
     if (!text) return
     setInterjectBusy(true)
+    const interjectionId = mintInterjectionId()
     try {
-      const result = await window.grokApi.interject(sessionId, text)
+      const result = await window.grokApi.interject(sessionId, text, { interjectionId })
       if (result.status === 'queued') {
         setInterjectState({ status: 'queued', sessionId, text })
         setNotice(INTERJECT_QUEUED_NOTICE)
         setDrafts((current) => ({ ...current, [sessionId]: '' }))
+        const event: UiSessionEvent = {
+          id: `${sessionId}:interject:${interjectionId}`,
+          sessionId,
+          kind: 'message',
+          role: 'user',
+          text,
+          origin: 'interject',
+          interjectionId
+        }
+        setEvents((current) => {
+          const previous = current[sessionId] ?? []
+          const next = sessionReducer(
+            { sessionId, events: previous, running: false, followTail: true, unread: 0 },
+            { type: 'event', event }
+          )
+          return { ...current, [sessionId]: next.events }
+        })
       }
     } catch (error) {
       // Method not found → degrade notice only; never fall back to cancel.
       if (isMethodNotFoundError(error)) setNotice(INTERJECT_UNSUPPORTED_NOTICE)
-      else setNotice(error instanceof Error ? error.message : String(error))
+      else setNotice(formatInterjectError(error))
     } finally {
       setInterjectBusy(false)
     }
@@ -1803,12 +1924,16 @@ export function App(): React.JSX.Element {
 
   const chooseFiles = async (): Promise<void> => { try { const files = await window.grokApi.chooseFiles(); addSelectedFiles(files) } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) } }
   const addSelectedFiles = (files: SelectedFile[]): void => { if (!active) return; const sessionId = active.id; const { blocks, paths } = selectedFilesToPrompt(files, caps.promptCapabilities.image === true); setAttachmentsBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), ...blocks] })); if (paths) setDrafts((current) => ({ ...current, [sessionId]: `${current[sessionId] ?? ''}${current[sessionId] ? '\n' : ''}${paths}` })) }
-  const jumpToLatest = (): void => { virtuoso.current?.scrollToIndex({ index: Math.max(0, activeEvents.length - 1), align: 'end', behavior: 'smooth' }); setFollowTail(true); setUnread(0) }
-  /** P-BOOKMARK: land on one of my earlier prompts. Deliberately leaves followTail alone —
-   *  you went back to read, so streaming output must not yank you forward again. */
+  const jumpToLatest = (): void => {
+    resumeTranscriptFollowing()
+    virtuoso.current?.scrollToIndex({ index: Math.max(0, transcriptEvents.length - 1), align: 'end', behavior: 'smooth' })
+  }
+  /** P-BOOKMARK: landing on an earlier prompt is explicit reading intent, so streaming
+   *  output must not yank the viewport forward again. */
   const jumpToPrompt = (eventId: string): void => {
-    const index = activeEvents.findIndex((event) => event.id === eventId)
+    const index = transcriptEvents.findIndex((event) => event.id === eventId)
     if (index < 0) return
+    pauseTranscriptFollowing()
     const go = (behavior: 'smooth' | 'auto'): void => { virtuoso.current?.scrollToIndex({ index, align: 'start', behavior }) }
     go('smooth')
     // Virtuoso lands short when the target's height was never measured; settle onto it.
@@ -2485,7 +2610,19 @@ export function App(): React.JSX.Element {
         </section> : active ? <>
           <header className="session-header"><PromptBookmarks events={activeEvents} onJump={jumpToPrompt} /><div className="session-title"><span className="eyebrow">ACTIVE SESSION · PROJECT</span><h1>{sessionDisplayTitle(active, settings.sessionTitles)}</h1><p>{active.cwd}</p></div><div className="session-tools">{models && <ModelPicker models={models} onModelChange={(modelId) => void changeModel(modelId)} onEffortChange={(effort) => void changeEffort(effort)} />}{localizedModes.length > 0 && <label className="session-mode-label" title={sessionModeControlTitle(caps.currentModeId, caps.modes)}><span className="session-mode-caption">工作模式</span><select data-testid="session-mode-select" aria-label="工作模式" value={caps.currentModeId ?? ''} onChange={(event) => { if (event.target.value) void window.grokApi.setMode(active.id, event.target.value).then(() => setCaps((current) => ({ ...current, currentModeId: event.target.value }))).catch((error) => setNotice(error instanceof Error ? error.message : String(error))) }}><option value="" disabled>選擇模式</option>{localizedModes.map((mode) => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}</select></label>}<button className="icon-button" title="搜尋" onClick={() => setSearchOpen(!searchOpen)}><Search /></button><button className="icon-button" title="匯出" onClick={() => void window.grokApi.exportSession(active.id).then((path) => { if (path) { setNotice(`已匯出：${path}（可在檔案總管開啟該路徑）`); setExportedPaths((current) => ({ ...current, [active.id]: path })); setLastExportedPath(path); } }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><Archive /></button>{exportedPaths[active.id] && <button className="icon-button" title="在檔案總管開啟匯出檔案" onClick={() => void window.grokApi.revealExport(exportedPaths[active.id]).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))}><FolderOpen /></button>}<button className="icon-button" title="在 TUI 開啟" onClick={() => openTui(active.cwd)}><TerminalSquare /></button><button className="icon-button" data-testid="open-background-tasks" title="背景任務／Loop" aria-label="開啟背景任務／Loop 面板" onClick={() => setPanel('background')}><Activity /></button><button className="icon-button" title="命令" onClick={() => setPanel('commands')}><Command /></button></div></header>
           {searchOpen && <div className="transcript-search"><Search /><input ref={transcriptSearchRef} value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="搜尋目前對話…" /><span>{searchHits} 筆</span><button onClick={() => { setSearchOpen(false); setTranscriptQuery('') }}><X /></button></div>}
-          <section className="transcript" ref={transcriptRef}><Virtuoso ref={virtuoso} data={activeEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomStateChange={handleAtBottomChange} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} preview={previewHandlers} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
+          <section
+            className="transcript"
+            ref={transcriptRef}
+            onWheelCapture={handleTranscriptWheel}
+            onKeyDownCapture={handleTranscriptKeyDown}
+            onTouchStartCapture={handleTranscriptTouchStart}
+            onTouchMoveCapture={handleTranscriptTouchMove}
+            onTouchEndCapture={() => { transcriptTouchYRef.current = null }}
+            onPointerDownCapture={handleTranscriptPointerDown}
+            onPointerMoveCapture={handleTranscriptPointerMove}
+            onPointerUpCapture={clearTranscriptPointer}
+            onPointerCancelCapture={clearTranscriptPointer}
+          ><Virtuoso ref={virtuoso} scrollerRef={(element) => { transcriptScrollerRef.current = element instanceof HTMLElement ? element : null }} data={transcriptEvents} computeItemKey={(_index, event) => event.id} followOutput={followTail ? 'auto' : false} atBottomThreshold={TRANSCRIPT_BOTTOM_THRESHOLD_PX} atBottomStateChange={handleAtBottomChange} itemContent={(_index, event) => <div className="event-wrap"><MemoEventCard event={event} query={transcriptQuery} preview={previewHandlers} /></div>} components={{ Footer: TranscriptFooter }} />{!followTail && <button className="jump-latest" onClick={jumpToLatest}>跳到最新 {unread > 0 && <b>{unread}</b>}</button>}</section>
           <footer className="composer-wrap" onDragOver={onComposerDragOver} onDrop={onComposerDrop}>
             <div className="composer-status" data-testid="composer-status">
               <span className={`composer-status-pill ${running ? 'is-running' : lifecycleBusy || sessionLoading ? 'is-busy' : 'is-ready'}`}>
@@ -2633,7 +2770,7 @@ export function App(): React.JSX.Element {
             </div>
             <button className="icon-button" onClick={() => setPanel('none')}><X /></button>
           </div>
-          <p className="drawer-intro">有結構化 ACP 介面才在 GUI 原生操作；其餘明確回到 TUI，不模擬終端按鍵。</p>
+          <p className="drawer-intro">有結構化 ACP 介面才在 GUI 原生操作；Rewind 目前僅 ACP 可查詢、尚未接上；其餘明確回到 TUI，不模擬終端按鍵。</p>
           <div className="feature-list">
             {FEATURES.map(([name, route, state]) => (
               <div key={name}>

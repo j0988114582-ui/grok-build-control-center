@@ -73,19 +73,20 @@ async function main(): Promise<void> {
   let mode: AgentPermissionMode = 'ask'
   const caps = {
     modelState: {
-      currentModelId: 'grok-4.5',
+      currentModelId: 'grok-4.6',
       availableModels: [
         {
-          modelId: 'grok-4.5',
-          name: 'Grok 4.5',
+          modelId: 'grok-4.6',
+          name: 'Grok 4.6',
           currentReasoningEffort: 'high',
           reasoningEfforts: [
+            { id: 'xhigh', value: 'xhigh', label: 'Extra High' },
             { id: 'high', value: 'high', label: 'High' },
             { id: 'medium', value: 'medium', label: 'Medium' },
             { id: 'low', value: 'low', label: 'Low' }
           ]
         },
-        { modelId: 'grok-composer-2.5-fast', name: 'Grok Composer', reasoningEfforts: [] }
+        { modelId: 'grok-4.5', name: 'Grok 4.5', currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'high', value: 'high', label: 'High' }] }
       ]
     },
     modes: [{ id: 'build', name: 'Build' }, { id: 'chat', name: 'Chat' }],
@@ -294,12 +295,12 @@ async function main(): Promise<void> {
     await ensureOverflowOpen(page)
     await page.waitForFunction("!document.getElementById('model-select-wrap').classList.contains('hidden')", undefined, { timeout: 10_000 })
     const currentModel = await page.locator('#model-select').inputValue()
-    check('model-picker-visible', currentModel === 'grok-4.5', `selected=${currentModel}`)
+    check('model-picker-visible', currentModel === 'grok-4.6', `selected=${currentModel}`)
     await shot(page, '07-pickers.png')
-    await page.selectOption('#model-select', 'grok-composer-2.5-fast')
+    await page.selectOption('#model-select', 'grok-4.5')
     await page.locator('#set-model-btn').click()
     await page.waitForFunction("document.getElementById('notices').textContent.includes('已切換模型')", undefined, { timeout: 10_000 })
-    check('model-apply', recorded.setModel.some((m) => m.modelId === 'grok-composer-2.5-fast'), JSON.stringify(recorded.setModel))
+    check('model-apply', recorded.setModel.some((m) => m.modelId === 'grok-4.5'), JSON.stringify(recorded.setModel))
 
     await page.selectOption('#mode-select', 'chat')
     await page.locator('#set-mode-btn').click()

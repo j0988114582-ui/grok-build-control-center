@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { mapRawAcpLineToEvent } from '../src/main/acp-client'
 import {
   isAutoCompactUpdate,
+  parseXaiInterjectionLine,
   parseXaiSessionNotificationLine,
+  XAI_INTERJECTION_METHOD,
   XAI_SESSION_NOTIFICATION_METHOD
 } from '../src/shared/xai-session-notification'
 import { normalizeAcpUpdate } from '../src/shared/event-adapter'
@@ -105,5 +107,88 @@ describe('xAI session_notification raw parse (Scheme A)', () => {
       tokens_after: 300,
       summary_preview: 'x'
     })).toMatchObject({ kind: 'compact', before: 900, after: 300, summary: 'x', source: 'official' })
+  })
+
+  it('parses underscore, bare, and nested-wrap session_notification methods', () => {
+    const update = { sessionUpdate: 'auto_compact_completed', tokens_before: 1, tokens_after: 1 }
+    const underscore = JSON.stringify({
+      method: '_x.ai/session_notification',
+      params: { sessionId: 's1', update }
+    })
+    const bare = JSON.stringify({
+      method: 'x.ai/session_notification',
+      params: { sessionId: 's1', update }
+    })
+    const nested = JSON.stringify({
+      method: '_x.ai/session_notification',
+      params: { method: 'x.ai/session_notification', params: { sessionId: 's1', update } }
+    })
+    expect(parseXaiSessionNotificationLine(underscore)).toEqual({ sessionId: 's1', update })
+    expect(parseXaiSessionNotificationLine(bare)).toEqual({ sessionId: 's1', update })
+    expect(parseXaiSessionNotificationLine(nested)).toEqual({ sessionId: 's1', update })
+  })
+
+  it('maps subagent_spawned / subagent_finished from the raw tee using child_session_id', () => {
+    const spawned = JSON.stringify({
+      jsonrpc: '2.0',
+      method: XAI_SESSION_NOTIFICATION_METHOD,
+      params: {
+        sessionId: 's1',
+        update: { sessionUpdate: 'subagent_spawned', child_session_id: 'child-9', description: 'Review PR' }
+      }
+    })
+    const finished = JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'x.ai/session_notification',
+      params: {
+        method: 'x.ai/session_notification',
+        params: {
+          sessionId: 's1',
+          update: { sessionUpdate: 'subagent_finished', child_session_id: 'child-9', status: 'completed', output: 'ok' }
+        }
+      }
+    })
+    expect(mapRawAcpLineToEvent(spawned)).toMatchObject({
+      kind: 'subagent',
+      subagentId: 'child-9',
+      status: 'running',
+      description: 'Review PR'
+    })
+    expect(mapRawAcpLineToEvent(finished)).toMatchObject({
+      kind: 'subagent',
+      subagentId: 'child-9',
+      status: 'completed',
+      output: 'ok'
+    })
+  })
+
+  it('maps official interjection lines to a user message with origin interject', () => {
+    const line = JSON.stringify({
+      jsonrpc: '2.0',
+      method: XAI_INTERJECTION_METHOD,
+      params: { sessionId: 's1', text: 'steer left', interjectionId: 'i-22' }
+    })
+    expect(parseXaiInterjectionLine(line)).toEqual({
+      sessionId: 's1',
+      text: 'steer left',
+      interjectionId: 'i-22'
+    })
+    expect(mapRawAcpLineToEvent(line)).toMatchObject({
+      kind: 'message',
+      role: 'user',
+      text: 'steer left',
+      origin: 'interject',
+      interjectionId: 'i-22'
+    })
+    const nested = JSON.stringify({
+      method: '_x.ai/session/interjection',
+      params: { method: 'x.ai/session/interjection', params: { sessionId: 's1', text: 'nested' } }
+    })
+    expect(mapRawAcpLineToEvent(nested)).toMatchObject({
+      kind: 'message',
+      role: 'user',
+      origin: 'interject',
+      text: 'nested'
+    })
   })
 })

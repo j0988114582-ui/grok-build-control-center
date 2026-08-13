@@ -33,7 +33,7 @@
 
 ## TUI 出口
 
-Compact、Rewind、Plugins、MCP、Memory 等尚無穩定結構化 ACP 介面的功能，請按 session 標題列的終端圖示，在 Windows Terminal 中開啟真正的 Grok TUI。GUI 不模擬終端按鍵。
+Plugins、MCP、Memory 等仍請按 session 標題列的終端圖示，在 Windows Terminal 中開啟真正的 Grok TUI。Rewind 的 ACP 可查詢檢查點，但 GUI 尚未接上，執行仍走 TUI。GUI 不模擬終端按鍵。
 
 ## Windows 安全提醒
 

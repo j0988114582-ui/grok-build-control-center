@@ -31,4 +31,29 @@ describe('availableCommands → palette (F-RT-5)', () => {
     expect(entries[1].id).toBe('slash:session-info')
     expect(entries[0].keywords).toContain('命令')
   })
+
+  it('maps well-known slash descriptions to zh-TW and keeps official English as fallback', () => {
+    const entries = buildSlashPaletteEntries([
+      { name: 'compact', description: 'Compress conversation history to save context window' },
+      { name: 'always-approve', description: 'Toggle always-approve mode (skip all permission prompts)' },
+      { name: 'context', description: 'Show context window usage and session stats' },
+      { name: 'session-info', description: 'Show session details (model, turns, context usage)' },
+      { name: 'deep-research', description: 'Start a deep research task' },
+      { name: 'workflow', description: 'Launch or manage a workflow' },
+      { name: 'goal', description: 'Set, manage, or check an autonomous goal' },
+      { name: 'plugins', description: 'Manage plugins (list, reload, trust, add, remove)' },
+      { name: 'reload-plugins', description: 'Reload plugins from disk (alias for /plugins reload)' },
+      { name: 'mystery-cmd', description: 'Official English leftover' }
+    ])
+    expect(entries.find((item) => item.id === 'slash:compact')?.description).toContain('壓縮對話歷史')
+    expect(entries.find((item) => item.id === 'slash:always-approve')?.description).toContain('一律核准')
+    expect(entries.find((item) => item.id === 'slash:context')?.description).toContain('context 用量')
+    expect(entries.find((item) => item.id === 'slash:session-info')?.description).toContain('對話詳情')
+    expect(entries.find((item) => item.id === 'slash:deep-research')?.description).toContain('深度研究')
+    expect(entries.find((item) => item.id === 'slash:workflow')?.description).toContain('工作流')
+    expect(entries.find((item) => item.id === 'slash:goal')?.description).toContain('自主目標')
+    expect(entries.find((item) => item.id === 'slash:plugins')?.description).toContain('外掛')
+    expect(entries.find((item) => item.id === 'slash:reload-plugins')?.description).toContain('重新載入外掛')
+    expect(entries.find((item) => item.id === 'slash:mystery-cmd')?.description).toBe('Official English leftover')
+  })
 })

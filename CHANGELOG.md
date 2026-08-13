@@ -6,12 +6,46 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 
 ## [Unreleased]
 
+### Changed
+
+- **功能矩陣誠實度（CLI 1.0.3 探針）**：Compact 與 Rewind 拆開——Compact 為官方通知＋推斷卡片；Rewind 為 `_x.ai/rewind/points` 可查詢、GUI 尚未接上（無底線的 `x.ai/rewind/points` 回 `-32601`，未呼叫 execute）。Subagents 改為部分原生（派出／完成可見，無 ACP 控制台）；`_x.ai/subagent/list_running`／`get` 可呼叫，官方無底線形式回 `-32601`。`/loop` 在 session 的 `available_commands_update` 有廣播（initialize 清單沒有），既有能力閘門維持不變。本波未實作 Rewind UI 或子代理 ACP 控制台。
+- **背景任務面板**：活動清單改到上方；建立定時任務／自主任務預設收合。
+- **對話流**：不再顯示 Commands／模式／用量列；`session_info_update` 改為靜默，不再變成 Unsupported Grok event。
+- **Toast**：改到標題列右下，不再擋住插話／排隊／立刻改做／停止。
+- **側欄清理**：建議清理改為次要文字按鈕，建議面板仍預設關閉。
+- **命令面板**：常見 slash 命令說明改為繁中，未知命令保留官方英文。
+
+### Fixed
+
+- **插話**：接受 CLI 1.0.3 `ExtMethodResult` 包層（`{ result: { status: "queued" } }`），成功後清草稿、顯示「已排入」並在對話留下 `YOU · 插話`；官方 `_x.ai/session/interjection` 回聲以 `interjectionId` 去重，不再併進上一則使用者提示。使用者錯誤改為繁中並去掉 Electron IPC 前綴；method-not-found 仍只提示更新 CLI，絕不改走取消。
+- **子代理**：`spawn_subagent` 完成只代表衍生握手，面板改顯示「執行中」；raw tee 轉送 `_x.ai/session_notification` 的 `subagent_spawned`／`subagent_finished`（`child_session_id`）。`get_command_or_subagent_output` 仍不自成卡片，但會把匹配的 `TaskOutput` 狀態與輸出寫回同一張子代理卡。
+
 ### Added
 
 - GitHub Actions quality checks and Windows UI smoke evidence.
 - Structured bug, feature, and beta feedback forms.
 - Pull request validation and risk-review checklist.
 - Public roadmap, beta testing guide, support guidance, and release metrics script.
+
+## [0.13.0] - 2026-08-13（Grok 4.6 · 對話閱讀位置）
+
+### Changed — 最新 Grok 相容性
+
+- 依 [Grok 4.6 官方公告](https://x.ai/news/grok-4-6)與[官方模型規格](https://docs.x.ai/developers/grok-4-6)，以 Grok Build CLI `1.0.3` 的即時 ACP 模型清單驗證 GUI；帳號目前提供 `grok-4.6`（預設）與 `grok-4.5`，Grok 4.6 的 500k context 與 `xhigh`／`high`／`medium`／`low` 推理強度可由既有模型選單完整呈現。
+- live CLI smoke 改為先切到 Grok 4.5、再切回 Grok 4.6；不再把已不在目前帳號模型清單中的 Composer 2.5 當成驗收條件。
+- 設定頁更新說明改用官方 `grok update`，仍保留首次安裝的官方 PowerShell 來源。
+
+### Fixed — 修正
+
+- **對話回看不再一直跳回「Reasoning／Grok 正在工作」**：往上滾動會同步鎖定閱讀位置，不再等待 160ms；串流內容高度變動造成的暫時到底訊號也不能取消這個使用者意圖。
+- 滾輪、觸控、捲軸拖曳、Page Up／Home／方向鍵與對話書籤共用相同的閱讀暫停規則；使用者往下回到底部或按「跳到最新」時才恢復自動跟隨。
+
+### 驗證
+
+- 67 個測試檔、441 項自動測試、ESLint、TypeScript 與 production build 全部通過。
+- 真實官方 CLI 驗證：`grok 1.0.3` stable、`grok update --check` 無可用更新；ACP 即時清單預設為 Grok 4.6，並可由 GUI 切到 Grok 4.5 再切回 4.6；[1.0.3 新增的 `/session-info`](https://x.ai/build/changelog)也會出現在 GUI 命令面板，全程不送出 prompt。
+- 真實 Electron 與正式 `win-unpacked` 程式各跑一次長對話滾動測試：滑鼠往上滾後連續加入 14 段 Reasoning，閱讀位置保持不動；按「跳到最新」後才回到底部，renderer console 無錯誤。
+- Windows x64 NSIS 安裝檔成功產出；目前仍未程式碼簽章，需以 SHA-256 核對。
 
 ## [0.12.0] - 2026-08-04（背景任務面板 · 自主任務入口）
 

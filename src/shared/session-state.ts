@@ -44,9 +44,15 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       toolName: event.toolName ?? item.toolName,
       output: event.output ?? item.output
     } : item) : [...state.events, event]
-  } else if (event.kind === 'subagent') {
+  } else if (event.kind === 'subagent' && event.subagentId) {
     const index = state.events.findIndex((item) => item.kind === 'subagent' && item.subagentId === event.subagentId)
-    events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'subagent' ? { ...item, ...event, id: item.id } : item) : [...state.events, event]
+    events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'subagent' ? {
+      ...item,
+      ...event,
+      id: item.id,
+      description: !event.description.trim() || event.description === 'Subagent' ? item.description : event.description,
+      output: event.output ?? item.output
+    } : item) : [...state.events, event]
   } else if (event.kind === 'task' && event.taskId) {
     const index = state.events.findIndex((item) => item.kind === 'task' && item.taskId === event.taskId)
     events = index >= 0 ? state.events.map((item, itemIndex) => itemIndex === index && item.kind === 'task' ? {
@@ -58,8 +64,30 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     } : item) : [...state.events, event]
   } else if (event.kind === 'turn' && last?.kind === 'turn' && last.status === event.status) {
     events = [...state.events.slice(0, -1), event]
-  } else if (event.kind === 'message' && last?.kind === 'message' && last.role === event.role) {
-    events = [...state.events.slice(0, -1), { ...last, text: last.text + event.text }]
+  } else if (event.kind === 'message') {
+    const existingIndex = event.interjectionId
+      ? state.events.findIndex((item) => item.kind === 'message' && item.interjectionId === event.interjectionId)
+      : -1
+    if (existingIndex >= 0) {
+      events = state.events.map((item, itemIndex) => {
+        if (itemIndex !== existingIndex || item.kind !== 'message') return item
+        return {
+          ...item,
+          text: item.text || event.text,
+          origin: item.origin ?? event.origin,
+          interjectionId: item.interjectionId ?? event.interjectionId
+        }
+      })
+    } else if (
+      last?.kind === 'message'
+      && last.role === event.role
+      && last.origin !== 'interject'
+      && event.origin !== 'interject'
+    ) {
+      events = [...state.events.slice(0, -1), { ...last, text: last.text + event.text }]
+    } else {
+      events = [...state.events, event]
+    }
   } else if (event.kind === 'thought' && last?.kind === 'thought') {
     events = [...state.events.slice(0, -1), { ...last, text: last.text + event.text }]
   } else {

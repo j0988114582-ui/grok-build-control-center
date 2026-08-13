@@ -16,6 +16,7 @@ Grok Build Control Center 把 Grok Build 的結構化 ACP 介面變成一般人�
 
 - Windows 10 或 11（x64）
 - 第一次安裝 Grok CLI 與登入時需要網路連線
+- 模型由登入帳號的 Grok Build CLI 即時提供；GUI 不把模型名稱寫死，也不另存 API key
 
 步驟：
 
@@ -42,8 +43,10 @@ Grok Build Control Center 把 Grok Build 的結構化 ACP 介面變成一般人�
 
 貼上剪貼簿圖片時：若本機 Grok ACP 未宣告內嵌圖片支援，程式會把圖存到 Windows 暫存目錄並把**絕對路徑**插入草稿（不會自動加提示句）。
 
-## 目前版本內容（v0.12.0）
+## 目前版本內容（v0.13.0）
 
+- **Grok 4.6**：已依 [xAI 官方公告](https://x.ai/news/grok-4-6)與[官方模型規格](https://docs.x.ai/developers/grok-4-6)，用 Grok Build CLI `1.0.3` 的真實 ACP 清單驗證；模型選單會顯示帳號實際可用的 Grok 4.6／4.5 與各自推理強度，並可在不送出 prompt 的情況下切換後再切回 4.6。
+- **閱讀位置不再被「正在思考」拉走**：只要使用者往上滾動、觸控回看、拖曳捲軸或用鍵盤回看，GUI 會立即暫停自動跟隨；串流思考造成的瞬間「到底部」訊號不會把畫面搶回去。往下回到底部或按「跳到最新」才恢復跟隨。
 - **背景任務／Loop 面板**：彙整這個對話的排程迴圈、監視器、子代理與背景指令，可一鍵建立定時任務（`/loop`）；排程迴圈以送出 `scheduler_delete` 指示停止（`session/cancel` 停不掉已分離的迴圈）。順帶顯示 Context／回合數／工具呼叫用量。
 - **自主任務入口**：Workflow（`/workflow`）、Goal（`/goal`，可帶 `--budget`）、深度研究（`/deep-research`）三個一等入口卡，含指令預覽、管理指令與能力偵測；面板送出的指令不會動到主輸入框草稿。
 - **對話書籤**：列出你在這個對話發過的每則指令，一鍵跳回，不再無限往上滾。
@@ -117,6 +120,8 @@ GitHub Actions 會在 Pull Request 自動執行測試、lint、typecheck、build
 > Unofficial Windows desktop control center for the locally installed Grok Build CLI.
 
 Grok Build Control Center turns Grok Build's structured ACP interface into a readable Windows app. Choose a project folder, describe a task in plain language, and review permissions inside the app.
+
+Version 0.13.0 is verified against the official Grok Build CLI 1.0.3 model catalog, including Grok 4.6. Manual upward scrolling now pauses tail-follow immediately so streaming reasoning cannot pull the reader back to the bottom.
 
 This project is not affiliated with or endorsed by xAI. Grok and Grok Build are trademarks of their respective owner.
 

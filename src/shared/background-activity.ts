@@ -29,8 +29,13 @@ import type { UiSessionEvent } from './types'
  *    `kill_command_or_subagent` are control/query calls that act *on* an entity; they are
  *    excluded from the derived list so they don't show up as their own (misleading) cards.
  *
- * Unverified: `monitor`, `spawn_subagent` (as a raw tool_call — distinct from the dedicated
- * `subagent_spawned` update kind), and `workflow` were never exercised by this capture. They
+ *  - `spawn_subagent` completing is only the spawn handshake — the child is still running.
+ *    Same spirit as a completed `scheduler_create`. Failed/cancelled spawn stays failed.
+ *    Official child lifecycle arrives as `_x.ai/session_notification` `subagent_spawned` /
+ *    `subagent_finished` (child_session_id). `get_command_or_subagent_output` is not its
+ *    own card; a matching `TaskOutput` updates that child's status + output.
+ *
+ * Unverified: `monitor` and `workflow` were never exercised by the /loop capture. They
  * are kept in the known-name registry (per the original ACP capability probe's tool-name
  * evidence) and treated as entity-creating by analogy with scheduler_create, but neither
  * their rawOutput shape nor a stop mechanism has been confirmed — real-CLI smoke needed.
@@ -152,10 +157,113 @@ function readSchedulerCreateResult(rawOutput: unknown): SchedulerCreateResult | 
   return { id: id.trim(), humanSchedule }
 }
 
+function uniqueIds(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))]
+}
+
+function collectNamedIds(record: Record<string, unknown> | undefined, keys: string[]): string[] {
+  if (!record) return []
+  const ids: string[] = []
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) ids.push(value.trim())
+  }
+  const taskIds = record.task_ids
+  if (Array.isArray(taskIds)) {
+    for (const item of taskIds) {
+      if (typeof item === 'string' && item.trim()) ids.push(item.trim())
+    }
+  }
+  return ids
+}
+
+const CHILD_ID_KEYS = ['child_session_id', 'subagent_id', 'task_id']
+
+/** Child ids carried on a spawn_subagent tool_call (input or structured result). */
+export function extractSpawnChildIds(event: Extract<UiSessionEvent, { kind: 'tool' }>): string[] {
+  const output = asRecord(event.rawOutput)
+  const input = asRecord(event.rawInput)
+  const result = asRecord(output?.Result) ?? asRecord(output?.result)
+  const ids = [
+    ...collectNamedIds(output, CHILD_ID_KEYS),
+    ...collectNamedIds(result, CHILD_ID_KEYS),
+    ...collectNamedIds(input, CHILD_ID_KEYS)
+  ]
+  for (const rec of [output, result, input]) {
+    if (!rec) continue
+    if ((rec.type === 'SpawnSubagent' || rec.variant === 'SpawnSubagent') && typeof rec.id === 'string' && rec.id.trim()) {
+      ids.push(rec.id.trim())
+    }
+  }
+  return uniqueIds(ids)
+}
+
+type TaskOutputUpdate = { ids: string[]; status?: string; output?: string }
+
+/** Live shape: `{ type:"TaskOutput", Result:{ task_id, status } }` + input `{ variant:"TaskOutput", task_ids }`. */
+export function readTaskOutputUpdate(event: Extract<UiSessionEvent, { kind: 'tool' }>): TaskOutputUpdate | null {
+  const output = asRecord(event.rawOutput)
+  const input = asRecord(event.rawInput)
+  const isTaskOutput = output?.type === 'TaskOutput' || input?.variant === 'TaskOutput' || event.toolName === 'get_command_or_subagent_output'
+  if (!isTaskOutput) return null
+  const result = asRecord(output?.Result) ?? asRecord(output?.result)
+  const ids = uniqueIds([
+    ...collectNamedIds(result, CHILD_ID_KEYS),
+    ...collectNamedIds(output, CHILD_ID_KEYS),
+    ...collectNamedIds(input, CHILD_ID_KEYS)
+  ])
+  const status = typeof result?.status === 'string'
+    ? result.status
+    : typeof output?.status === 'string' ? output.status : undefined
+  const narrative = event.output
+    || (typeof result?.output === 'string' ? result.output : undefined)
+    || (typeof result?.text === 'string' ? result.text : undefined)
+  return { ids, ...(status ? { status } : {}), ...(narrative ? { output: narrative } : {}) }
+}
+
+function isGenericSubagentTitle(title: string): boolean {
+  const t = title.trim()
+  return !t || t === 'Tool call' || t === 'spawn_subagent' || t === 'Subagent' || t === KIND_LABELS.subagent || t === KIND_LABELS.spawn_subagent
+}
+
+function pickSubagentTitle(toolTitle: string | undefined, description: string | undefined): string {
+  if (toolTitle && !isGenericSubagentTitle(toolTitle)) return toolTitle
+  if (description && !isGenericSubagentTitle(description)) return description
+  return toolTitle?.trim() || description?.trim() || KIND_LABELS.subagent
+}
+
+/** Spawn handshake completing is not the child finishing — pending/running/completed stay 執行中. */
+function spawnToolActivityStatus(raw: string): { status: ActivityStatus; statusLabel: string } {
+  const bucket = normalizeActivityStatus(raw)
+  if (bucket === 'failed') return { status: 'failed', statusLabel: activityStatusLabel(raw) }
+  return { status: 'running', statusLabel: '執行中' }
+}
+
+function makeSpawnToolEntry(event: Extract<UiSessionEvent, { kind: 'tool' }>): BackgroundActivityEntry {
+  const { status, statusLabel } = spawnToolActivityStatus(event.status)
+  return {
+    id: event.id,
+    sessionId: event.sessionId,
+    source: 'tool',
+    name: 'spawn_subagent',
+    kindLabel: KIND_LABELS.spawn_subagent,
+    title: event.title && event.title !== 'Tool call' ? event.title : KIND_LABELS.spawn_subagent,
+    status,
+    statusLabel,
+    output: event.output,
+    loopLike: /loop/i.test(event.title),
+    event
+  }
+}
+
 function pushToolEntry(out: BackgroundActivityEntry[], event: Extract<UiSessionEvent, { kind: 'tool' }>): void {
   const name = event.toolName
   if (!name || !isKnownBackgroundToolName(name)) return
   if (CONTROL_TOOL_NAMES.has(name)) return
+  if (name === 'spawn_subagent') {
+    out.push(makeSpawnToolEntry(event))
+    return
+  }
 
   const schedulerResult = name === 'scheduler_create' ? readSchedulerCreateResult(event.rawOutput) : undefined
   const isRunningLoop = schedulerResult !== undefined
@@ -221,20 +329,174 @@ function pushTaskEntry(out: BackgroundActivityEntry[], event: Extract<UiSessionE
   })
 }
 
+type TrackedKind = 'scheduler' | 'spawn' | 'subagent' | 'task' | 'other-tool'
+
+type TrackedEntry = {
+  entry: BackgroundActivityEntry
+  ids: Set<string>
+  kind: TrackedKind
+}
+
+function findChildMatch(tracked: TrackedEntry[], id: string): TrackedEntry | undefined {
+  return tracked.find((item) => (item.kind === 'spawn' || item.kind === 'subagent') && item.ids.has(id))
+}
+
+function normalizeCardTitle(title: string): string {
+  return title.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/** Live CLI 1.0.3 spawn tools often omit child_session_id; fall back to the human title. */
+function findTitleMatch(tracked: TrackedEntry[], title: string | undefined): TrackedEntry | undefined {
+  if (!title || isGenericSubagentTitle(title)) return undefined
+  const key = normalizeCardTitle(title)
+  if (!key) return undefined
+  return tracked.find((item) =>
+    (item.kind === 'spawn' || item.kind === 'subagent')
+    && !isGenericSubagentTitle(item.entry.title)
+    && normalizeCardTitle(item.entry.title) === key
+  )
+}
+
+function attachOutput(event: UiSessionEvent, output?: string, status?: string): UiSessionEvent {
+  if (event.kind === 'tool') {
+    return { ...event, ...(output ? { output } : {}), ...(status ? { status } : {}) }
+  }
+  if (event.kind === 'subagent') {
+    return { ...event, ...(output ? { output } : {}), ...(status ? { status } : {}) }
+  }
+  return event
+}
+
+function applyTaskOutput(tracked: TrackedEntry[], event: Extract<UiSessionEvent, { kind: 'tool' }>): void {
+  const update = readTaskOutputUpdate(event)
+  if (!update || update.ids.length === 0) return
+  for (const id of update.ids) {
+    const match = findChildMatch(tracked, id)
+    if (!match) continue
+    if (update.status) {
+      match.entry = {
+        ...match.entry,
+        status: normalizeActivityStatus(update.status),
+        statusLabel: activityStatusLabel(update.status)
+      }
+    }
+    if (update.output) match.entry = { ...match.entry, output: update.output }
+    match.entry = {
+      ...match.entry,
+      event: attachOutput(match.entry.event, match.entry.output, update.status)
+    }
+    match.ids.add(id)
+  }
+}
+
+function mergeSpawnInto(match: TrackedEntry, event: Extract<UiSessionEvent, { kind: 'tool' }>, ids: string[]): void {
+  const next = makeSpawnToolEntry(event)
+  match.entry = {
+    ...match.entry,
+    title: pickSubagentTitle(next.title, match.entry.title),
+    output: next.output ?? match.entry.output,
+    loopLike: match.entry.loopLike || next.loopLike
+  }
+  if (match.kind !== 'subagent') {
+    match.entry = {
+      ...match.entry,
+      status: next.status,
+      statusLabel: next.statusLabel,
+      source: 'tool',
+      name: 'spawn_subagent',
+      kindLabel: KIND_LABELS.spawn_subagent,
+      event: next.event
+    }
+    match.kind = 'spawn'
+  } else {
+    match.entry = {
+      ...match.entry,
+      event: match.entry.event.kind === 'subagent'
+        ? { ...match.entry.event, description: match.entry.title, output: match.entry.output }
+        : match.entry.event
+    }
+  }
+  for (const id of ids) match.ids.add(id)
+}
+
+function mergeSubagentInto(match: TrackedEntry, event: Extract<UiSessionEvent, { kind: 'subagent' }>): void {
+  const title = pickSubagentTitle(match.entry.title, event.description)
+  const output = event.output ?? match.entry.output
+  match.entry = {
+    ...match.entry,
+    source: 'subagent',
+    name: 'spawn_subagent',
+    kindLabel: KIND_LABELS.subagent,
+    title,
+    status: normalizeActivityStatus(event.status),
+    statusLabel: activityStatusLabel(event.status),
+    output,
+    loopLike: match.entry.loopLike || /loop/i.test(event.description),
+    event: { ...event, description: title, output, status: event.status }
+  }
+  match.kind = 'subagent'
+  if (event.subagentId) match.ids.add(event.subagentId)
+}
+
 /**
  * Pulls background-tool tool_calls plus every subagent/task event out of a session's event
  * stream, in the same order they arrived (caller decides display order — the panel shows
  * most-recent-first). Control/query tool calls (scheduler_delete, scheduler_list,
  * get_command_or_subagent_output, kill_command_or_subagent) are intentionally excluded.
+ * Matching spawn_subagent + subagent lifecycle collapse to one card (subagent wins status;
+ * the tool keeps a better human title). TaskOutput updates that card instead of adding one.
  */
 export function deriveBackgroundActivity(events: UiSessionEvent[]): BackgroundActivityEntry[] {
-  const out: BackgroundActivityEntry[] = []
+  const tracked: TrackedEntry[] = []
   for (const event of events) {
-    if (event.kind === 'tool') pushToolEntry(out, event)
-    else if (event.kind === 'subagent') pushSubagentEntry(out, event)
-    else if (event.kind === 'task') pushTaskEntry(out, event)
+    if (event.kind === 'tool') {
+      if (event.toolName === 'get_command_or_subagent_output') {
+        applyTaskOutput(tracked, event)
+        continue
+      }
+      if (event.toolName === 'spawn_subagent') {
+        const ids = extractSpawnChildIds(event)
+        const match = ids.map((id) => findChildMatch(tracked, id)).find(Boolean)
+          ?? findTitleMatch(tracked, event.title)
+        if (match) mergeSpawnInto(match, event, ids)
+        else {
+          const bucket: BackgroundActivityEntry[] = []
+          pushToolEntry(bucket, event)
+          if (bucket[0]) tracked.push({ entry: bucket[0], ids: new Set(ids), kind: 'spawn' })
+        }
+        continue
+      }
+      const bucket: BackgroundActivityEntry[] = []
+      pushToolEntry(bucket, event)
+      if (bucket[0]) {
+        tracked.push({
+          entry: bucket[0],
+          ids: new Set(),
+          kind: event.toolName === 'scheduler_create' ? 'scheduler' : 'other-tool'
+        })
+      }
+    } else if (event.kind === 'subagent') {
+      const match = (event.subagentId ? findChildMatch(tracked, event.subagentId) : undefined)
+        ?? findTitleMatch(tracked, event.description)
+      if (match) mergeSubagentInto(match, event)
+      else {
+        const bucket: BackgroundActivityEntry[] = []
+        pushSubagentEntry(bucket, event)
+        if (bucket[0]) {
+          tracked.push({
+            entry: bucket[0],
+            ids: new Set(event.subagentId ? [event.subagentId] : []),
+            kind: 'subagent'
+          })
+        }
+      }
+    } else if (event.kind === 'task') {
+      const bucket: BackgroundActivityEntry[] = []
+      pushTaskEntry(bucket, event)
+      if (bucket[0]) tracked.push({ entry: bucket[0], ids: new Set(event.taskId ? [event.taskId] : []), kind: 'task' })
+    }
   }
-  return out
+  return tracked.map((item) => item.entry)
 }
 
 /**

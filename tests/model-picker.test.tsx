@@ -7,10 +7,10 @@ import { ModelPicker } from '../src/renderer/src/components/ModelPicker'
 import type { ModelState } from '../src/shared/types'
 
 const models: ModelState = {
-  currentModelId: 'grok-4.5',
+  currentModelId: 'grok-4.6',
   availableModels: [
-    { modelId: 'grok-4.5', name: 'Grok 4.5', description: 'Deep reasoning model', totalContextTokens: 500000, currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'high', value: 'high', label: 'High', default: true }] },
-    { modelId: 'grok-composer', name: 'Composer Fast', description: 'Fast coding model', totalContextTokens: 200000, reasoningEfforts: [] }
+    { modelId: 'grok-4.6', name: 'Grok 4.6', description: "SpaceXAI's latest frontier model", totalContextTokens: 500000, currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'xhigh', value: 'xhigh', label: 'Extra High', default: true }, { id: 'high', value: 'high', label: 'High', default: true }] },
+    { modelId: 'grok-4.5', name: 'Grok 4.5', description: 'Previous frontier model', totalContextTokens: 500000, currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'high', value: 'high', label: 'High', default: true }] }
   ]
 }
 
@@ -22,13 +22,13 @@ describe('ModelPicker', () => {
     const user = userEvent.setup()
     render(<ModelPicker models={models} onModelChange={onModelChange} onEffortChange={vi.fn()} />)
 
-    const trigger = screen.getByRole('button', { name: /模型：Grok 4.5/ })
+    const trigger = screen.getByRole('button', { name: /模型：Grok 4.6/ })
     trigger.focus()
     await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
 
-    expect(screen.getByText('Fast coding model')).toBeInTheDocument()
-    expect(screen.getByText('200k context')).toBeInTheDocument()
-    expect(onModelChange).toHaveBeenCalledWith('grok-composer')
+    expect(screen.getByText('Previous frontier model')).toBeInTheDocument()
+    expect(screen.getByText('500k context')).toBeInTheDocument()
+    expect(onModelChange).toHaveBeenCalledWith('grok-4.5')
   })
 
   it('exposes reasoning effort as an accessible choice', async () => {

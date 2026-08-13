@@ -24,18 +24,19 @@ const holder: { c: RemoteController | null } = { c: null }
 const push = (event: UiSessionEvent): void => holder.c!.pushEvent(event)
 const caps = {
   modelState: {
-    currentModelId: 'grok-4.5',
+    currentModelId: 'grok-4.6',
     availableModels: [
       {
-        modelId: 'grok-4.5',
-        name: 'Grok 4.5',
+        modelId: 'grok-4.6',
+        name: 'Grok 4.6',
         currentReasoningEffort: 'high',
         reasoningEfforts: [
+          { id: 'xhigh', value: 'xhigh', label: 'Extra High' },
           { id: 'high', value: 'high', label: 'High' },
           { id: 'low', value: 'low', label: 'Low' }
         ]
       },
-      { modelId: 'grok-composer-2.5-fast', name: 'Grok Composer', reasoningEfforts: [] }
+      { modelId: 'grok-4.5', name: 'Grok 4.5', currentReasoningEffort: 'high', reasoningEfforts: [{ id: 'high', value: 'high', label: 'High' }] }
     ]
   },
   modes: [{ id: 'build', name: 'Build' }, { id: 'chat', name: 'Chat' }],

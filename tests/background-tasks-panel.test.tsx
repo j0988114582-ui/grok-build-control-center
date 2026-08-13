@@ -72,10 +72,27 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof BackgroundTa
   return { onClose, onCreateLoop, onLaunchCommand, onStop }
 }
 
+function openDetails(heading: string): void {
+  const headingEl = screen.getByRole('heading', { name: heading })
+  const details = headingEl.closest('details')
+  if (!details) throw new Error(`missing details for ${heading}`)
+  details.open = true
+}
+
 describe('BackgroundTasksPanel', () => {
   it('shows an empty state when there is no background activity', () => {
     renderPanel({ entries: [] })
     expect(screen.getByText(/目前沒有偵測到背景任務/)).toBeInTheDocument()
+  })
+
+  it('places the activity heading and list before the loop form in DOM order', () => {
+    renderPanel({ entries: [baseEntry()] })
+    const activity = screen.getByRole('heading', { name: /背景活動/ })
+    const loop = screen.getByRole('heading', { name: '建立定時任務' })
+    expect(activity.compareDocumentPosition(loop) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByTestId('bgtasks-item').compareDocumentPosition(loop) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(loop.closest('details')?.open).toBe(false)
+    expect(screen.getByRole('heading', { name: '自主任務' }).closest('details')?.open).toBe(false)
   })
 
   it('lists entries with title and status label, most-recent first', () => {
@@ -183,6 +200,7 @@ describe('BackgroundTasksPanel', () => {
   it('previews and submits the formatted /loop command, then clears the prompt field on success', async () => {
     const user = userEvent.setup()
     const { onCreateLoop } = renderPanel()
+    openDetails('建立定時任務')
 
     await user.type(screen.getByLabelText('間隔（選填）'), '5m')
     await user.type(screen.getByLabelText('提示內容'), 'watch the build')
@@ -198,6 +216,7 @@ describe('BackgroundTasksPanel', () => {
     const user = userEvent.setup()
     const onCreateLoop = vi.fn().mockRejectedValue(new Error('回合執行中，請待完成後再試'))
     renderPanel({ onCreateLoop })
+    openDetails('建立定時任務')
     await user.type(screen.getByLabelText('提示內容'), 'watch the build')
     await user.click(screen.getByRole('button', { name: /建立定時任務/ }))
     expect(await screen.findByTestId('bgtasks-loop-error')).toHaveTextContent('回合執行中，請待完成後再試')
@@ -207,6 +226,7 @@ describe('BackgroundTasksPanel', () => {
   it('omits the interval when left blank', async () => {
     const user = userEvent.setup()
     const { onCreateLoop } = renderPanel()
+    openDetails('建立定時任務')
     await user.type(screen.getByLabelText('提示內容'), 'watch the build')
     await user.click(screen.getByRole('button', { name: /建立定時任務/ }))
     expect(onCreateLoop).toHaveBeenCalledWith('/loop watch the build')
@@ -214,11 +234,13 @@ describe('BackgroundTasksPanel', () => {
 
   it('keeps the create button disabled with an empty prompt', () => {
     renderPanel()
+    openDetails('建立定時任務')
     expect(screen.getByRole('button', { name: /建立定時任務/ })).toBeDisabled()
   })
 
   it('disables the whole loop form and explains why when the session is not ready', () => {
     renderPanel({ ready: false })
+    openDetails('建立定時任務')
     expect(screen.getByLabelText('間隔（選填）')).toBeDisabled()
     expect(screen.getByLabelText('提示內容')).toBeDisabled()
     expect(screen.getByText('此對話尚未就緒，無法建立')).toBeInTheDocument()
@@ -226,6 +248,7 @@ describe('BackgroundTasksPanel', () => {
 
   it('disables loop creation AND the Stop button while a turn is running (M1: scheduler_delete needs an idle turn)', () => {
     renderPanel({ ready: true, running: true, entries: [schedulerEntry()] })
+    openDetails('建立定時任務')
     expect(screen.getByText('回合執行中，請待完成後再建立（或於主要輸入框插話）')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /停止/ })).toBeDisabled()
   })
@@ -233,6 +256,7 @@ describe('BackgroundTasksPanel', () => {
   it('R2 rework: capability-gates /loop — disables the form and explains when availableCommands lacks loop', () => {
     renderPanel({ loopCommandAvailable: false })
     expect(screen.getByTestId('bgtasks-loop-unavailable')).toHaveTextContent('未廣播 /loop 命令')
+    openDetails('建立定時任務')
     expect(screen.getByLabelText('間隔（選填）')).toBeDisabled()
     expect(screen.getByLabelText('提示內容')).toBeDisabled()
   })
@@ -267,6 +291,7 @@ describe('BackgroundTasksPanel', () => {
     it('previews and submits exact /workflow, /goal (with budget), and /deep-research commands via onLaunchCommand', async () => {
       const user = userEvent.setup()
       const { onLaunchCommand } = renderPanel()
+      openDetails('自主任務')
 
       await user.type(screen.getByLabelText('工作流名稱'), 'review-changes')
       await user.type(screen.getByLabelText('參數（選填）'), '--budget 10')
@@ -291,6 +316,7 @@ describe('BackgroundTasksPanel', () => {
     it('management buttons send exact subcommands', async () => {
       const user = userEvent.setup()
       const { onLaunchCommand } = renderPanel()
+      openDetails('自主任務')
       await user.click(screen.getByRole('button', { name: '送出 /workflow pause' }))
       expect(onLaunchCommand).toHaveBeenCalledWith('/workflow pause')
       await user.click(screen.getByRole('button', { name: '送出 /workflow resume' }))
@@ -310,6 +336,7 @@ describe('BackgroundTasksPanel', () => {
 
     it('disables a capability-absent form and shows an explanation note', () => {
       renderPanel({ workflowAvailable: false, goalAvailable: false, deepResearchAvailable: false })
+      openDetails('自主任務')
       expect(screen.getByTestId('bgtasks-workflow-unavailable')).toHaveTextContent('未廣播 /workflow 命令')
       expect(screen.getByLabelText('工作流名稱')).toBeDisabled()
       expect(screen.getByRole('button', { name: '啟動 Workflow' })).toBeDisabled()
@@ -326,6 +353,7 @@ describe('BackgroundTasksPanel', () => {
 
     it('disables launch submit and management buttons while a turn is running', () => {
       renderPanel({ ready: true, running: true })
+      openDetails('自主任務')
       expect(screen.getByRole('button', { name: '啟動 Workflow' })).toBeDisabled()
       expect(screen.getByRole('button', { name: '啟動 Goal' })).toBeDisabled()
       expect(screen.getByRole('button', { name: '啟動深度研究' })).toBeDisabled()
@@ -339,6 +367,7 @@ describe('BackgroundTasksPanel', () => {
       const user = userEvent.setup()
       const onLaunchCommand = vi.fn().mockRejectedValue(new Error('回合執行中，請待完成後再試'))
       renderPanel({ onLaunchCommand })
+      openDetails('自主任務')
       await user.type(screen.getByLabelText('目標內容'), 'ship it')
       await user.click(screen.getByRole('button', { name: '啟動 Goal' }))
       expect(await screen.findByTestId('bgtasks-goal-error')).toHaveTextContent('回合執行中，請待完成後再試')

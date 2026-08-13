@@ -7,6 +7,7 @@ import type { PromptBlock, SessionSummary, UiSessionEvent } from '../../../share
 import { sessionDisplayTitle } from './session-groups'
 import { fitTextareaHeight, teamComposerMaxPx, TEAM_COMPOSER_MIN_PX } from '../../../shared/composer-autogrow'
 
+import { isTranscriptVisibleEvent } from '../../../shared/event-adapter'
 import { PROMPT_TEMPLATES } from '../../../shared/prompt-templates'
 
 type Props = {
@@ -46,6 +47,7 @@ export function SessionTeamPane({
   EventCard
 }: Props): React.JSX.Element {
   const title = titleOverride || sessionDisplayTitle(session, {})
+  const visibleEvents = events.filter(isTranscriptVisibleEvent)
   const paneRef = useRef<HTMLElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -93,7 +95,7 @@ export function SessionTeamPane({
       </header>
       <div className="team-pane-transcript">
         <Virtuoso
-          data={events}
+          data={visibleEvents}
           computeItemKey={(_i, event) => event.id}
           followOutput="auto"
           itemContent={(_i, event) => (

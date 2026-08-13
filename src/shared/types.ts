@@ -1,5 +1,8 @@
 export type SessionRole = 'user' | 'assistant'
 
+/** How a user `message` entered the transcript. Prompt chunks omit this. */
+export type MessageOrigin = 'prompt' | 'interject'
+
 export type PlanEntry = {
   content: string
   status: string
@@ -7,7 +10,15 @@ export type PlanEntry = {
 }
 
 export type UiSessionEvent =
-  | { id: string; sessionId: string; kind: 'message'; role: SessionRole; text: string }
+  | {
+      id: string
+      sessionId: string
+      kind: 'message'
+      role: SessionRole
+      text: string
+      origin?: MessageOrigin
+      interjectionId?: string
+    }
   | { id: string; sessionId: string; kind: 'thought'; text: string }
   | {
       id: string

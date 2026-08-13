@@ -75,4 +75,29 @@ describe('sessionReducer', () => {
       rawInput: { variant: 'SchedulerCreate', recurring: true }
     })
   })
+
+  it('does not concatenate an interject message onto the previous user prompt', () => {
+    let state = createSessionState('s1')
+    state = sessionReducer(state, { type: 'event', event: { id: '1', sessionId: 's1', kind: 'message', role: 'user', text: 'original prompt' } })
+    state = sessionReducer(state, { type: 'event', event: { id: '2', sessionId: 's1', kind: 'message', role: 'user', text: 'steer left', origin: 'interject', interjectionId: 'i-1' } })
+    expect(state.events).toHaveLength(2)
+    expect(state.events[0]).toMatchObject({ text: 'original prompt' })
+    expect(state.events[1]).toMatchObject({ text: 'steer left', origin: 'interject' })
+  })
+
+  it('dedups an official interjection echo against the optimistic message by interjectionId', () => {
+    let state = createSessionState('s1')
+    state = sessionReducer(state, { type: 'event', event: { id: 'opt', sessionId: 's1', kind: 'message', role: 'user', text: 'steer left', origin: 'interject', interjectionId: 'i-1' } })
+    state = sessionReducer(state, { type: 'event', event: { id: 'echo', sessionId: 's1', kind: 'message', role: 'user', text: 'steer left', origin: 'interject', interjectionId: 'i-1' } })
+    expect(state.events).toHaveLength(1)
+    expect(state.events[0]).toMatchObject({ id: 'opt', text: 'steer left', origin: 'interject' })
+  })
+
+  it('merges later subagent updates with the same subagentId', () => {
+    let state = createSessionState('s1')
+    state = sessionReducer(state, { type: 'event', event: { id: '1', sessionId: 's1', kind: 'subagent', subagentId: 'child-1', description: 'Review PR', status: 'running' } })
+    state = sessionReducer(state, { type: 'event', event: { id: '2', sessionId: 's1', kind: 'subagent', subagentId: 'child-1', description: 'Subagent', status: 'completed', output: 'lgtm' } })
+    expect(state.events).toHaveLength(1)
+    expect(state.events[0]).toMatchObject({ id: '1', subagentId: 'child-1', description: 'Review PR', status: 'completed', output: 'lgtm' })
+  })
 })
