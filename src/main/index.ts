@@ -26,6 +26,7 @@ import {
 import { listLocalSessions, readSessionUsage } from './session-index'
 import { createDefaultSettings, normalizeSettings } from '../shared/settings'
 import { normalizeBilling } from '../shared/billing'
+import { isPlanApprovalDecision } from '../shared/plan-approval'
 import {
   looksLikeImageBuffer,
   PASTE_IMAGE_DIR_NAME,
@@ -308,6 +309,8 @@ async function connectAcp(): Promise<GrokAcpClient> {
       remoteController.onPermissionRequest(request)
       send('grok:permission-request', request)
     },
+    // Desktop-only for now: the phone remote has no plan preview surface.
+    onPlanApproval: (request) => send('grok:plan-approval-request', request),
     onStderr: (text) => send('grok:status-update', { stderr: text.trim().slice(0, 500) }),
     onExit: (message) => {
       if (!acpConnection.release(client)) return
@@ -452,6 +455,11 @@ function registerIpc(): void {
     // Desktop answered — drop the phone-side pending card immediately (next poll reflects it).
     remoteController.clearPermission(requestId)
   }))
+  ipcMain.handle('grok:plan-approval', (_event, requestId: unknown, decision: unknown) =>
+    lifecycleOperation.runShared('Grok 計畫核准', async () => {
+      if (typeof requestId !== 'string' || !isPlanApprovalDecision(decision)) throw new Error('Invalid plan approval response')
+      acpConnection.current?.respondPlanApproval(requestId, decision)
+    }))
   ipcMain.handle('grok:permission-mode:get', () => agentPermissionMode)
   ipcMain.handle('grok:permission-mode:set', async (_event, mode: AgentPermissionMode) =>
     lifecycleOperation.runShared('Grok 權限模式', async () => applyAgentPermissionMode(mode)))

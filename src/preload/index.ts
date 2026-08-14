@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { CliStatusUpdate, GrokBridgeApi } from '../shared/bridge'
 import type { PermissionRequest, UiSessionEvent } from '../shared/types'
+import type { PlanApprovalRequest } from '../shared/plan-approval'
 
 const api: GrokBridgeApi = {
   getStatus: () => ipcRenderer.invoke('grok:status'),
@@ -21,6 +22,7 @@ const api: GrokBridgeApi = {
   setMode: (sessionId, modeId) => ipcRenderer.invoke('grok:mode', sessionId, modeId),
   setModel: (sessionId, modelId, reasoningEffort) => ipcRenderer.invoke('grok:model', sessionId, modelId, reasoningEffort),
   respondPermission: (requestId, optionId) => ipcRenderer.invoke('grok:permission', requestId, optionId),
+  respondPlanApproval: (requestId, decision) => ipcRenderer.invoke('grok:plan-approval', requestId, decision),
   getPermissionMode: () => ipcRenderer.invoke('grok:permission-mode:get'),
   setPermissionMode: (mode) => ipcRenderer.invoke('grok:permission-mode:set', mode),
   chooseDirectory: () => ipcRenderer.invoke('dialog:directory'),
@@ -54,6 +56,11 @@ const api: GrokBridgeApi = {
     const listener = (_event: Electron.IpcRendererEvent, value: PermissionRequest): void => callback(value)
     ipcRenderer.on('grok:permission-request', listener)
     return () => ipcRenderer.removeListener('grok:permission-request', listener)
+  },
+  onPlanApproval: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: PlanApprovalRequest): void => callback(value)
+    ipcRenderer.on('grok:plan-approval-request', listener)
+    return () => ipcRenderer.removeListener('grok:plan-approval-request', listener)
   },
   onPermissionResolved: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, value: { requestId: string }): void => callback(value)

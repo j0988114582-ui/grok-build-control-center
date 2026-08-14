@@ -68,7 +68,7 @@ describe('GrokAcpClient interject extension', () => {
     const request = vi.fn().mockResolvedValue({ status: 'queued' })
     const notify = vi.fn()
     const client = new GrokAcpClient('grok.exe', {
-      onEvent: vi.fn(), onPermission: vi.fn(), onStderr: vi.fn(), onExit: vi.fn()
+      onEvent: vi.fn(), onPermission: vi.fn(), onPlanApproval: vi.fn(), onStderr: vi.fn(), onExit: vi.fn()
     })
     ;(client as unknown as { context: { request: typeof request; notify: typeof notify } }).context = { request, notify }
 
@@ -85,7 +85,7 @@ describe('GrokAcpClient interject extension', () => {
     const request = vi.fn().mockResolvedValue({ result: { status: 'queued' } })
     const notify = vi.fn()
     const client = new GrokAcpClient('grok.exe', {
-      onEvent: vi.fn(), onPermission: vi.fn(), onStderr: vi.fn(), onExit: vi.fn()
+      onEvent: vi.fn(), onPermission: vi.fn(), onPlanApproval: vi.fn(), onStderr: vi.fn(), onExit: vi.fn()
     })
     ;(client as unknown as { context: { request: typeof request; notify: typeof notify } }).context = { request, notify }
 
@@ -101,7 +101,7 @@ describe('GrokAcpClient interject extension', () => {
     const request = vi.fn().mockRejectedValue(new Error('Method not found'))
     const notify = vi.fn()
     const client = new GrokAcpClient('grok.exe', {
-      onEvent: vi.fn(), onPermission: vi.fn(), onStderr: vi.fn(), onExit: vi.fn()
+      onEvent: vi.fn(), onPermission: vi.fn(), onPlanApproval: vi.fn(), onStderr: vi.fn(), onExit: vi.fn()
     })
     ;(client as unknown as { context: { request: typeof request; notify: typeof notify } }).context = { request, notify }
 

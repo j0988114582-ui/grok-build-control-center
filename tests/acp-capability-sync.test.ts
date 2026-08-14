@@ -5,7 +5,7 @@ import type { AgentCapabilities } from '../src/shared/types'
 // start() is idempotent on a live connection and replies with cached capabilities,
 // so the cache must follow every session/new, session/load, setMode and setModel.
 
-const callbacks = { onEvent: vi.fn(), onPermission: vi.fn(), onStderr: vi.fn(), onExit: vi.fn() }
+const callbacks = { onEvent: vi.fn(), onPermission: vi.fn(), onPlanApproval: vi.fn(), onStderr: vi.fn(), onExit: vi.fn() }
 
 type Internals = { context: { request: ReturnType<typeof vi.fn> }; capabilities: AgentCapabilities }
 

@@ -21,6 +21,15 @@ import {
 import { buildAgentArgs } from './grok-cli'
 import { killProcessTree } from './process-tree'
 import { selectPermissionOutcome } from './permissions'
+import {
+  buildExitPlanModeResponse,
+  EXIT_PLAN_MODE_METHOD,
+  parseExitPlanModeParams,
+  PLAN_APPROVAL_FALLBACK,
+  type ExitPlanModeResponse,
+  type PlanApprovalDecision,
+  type PlanApprovalRequest
+} from '../shared/plan-approval'
 
 /** Env passed to the grok agent child so official telemetry can identify this host. */
 export function buildGrokSpawnEnv(clientVersion: string, baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -69,11 +78,17 @@ type PendingPermission = {
   resolve: (value: RequestPermissionResponse) => void
 }
 
+type PendingPlanApproval = {
+  sessionId: string
+  resolve: (value: ExitPlanModeResponse) => void
+}
+
 const START_TIMEOUT_MS = 15_000
 
 export type AcpClientCallbacks = {
   onEvent: (event: UiSessionEvent) => void
   onPermission: (request: PermissionRequest) => void
+  onPlanApproval: (request: PlanApprovalRequest) => void
   onStderr: (text: string) => void
   onExit: (message: string) => void
 }
@@ -84,6 +99,7 @@ export class GrokAcpClient {
   private context?: acp.ClientContext
   private capabilities: AgentCapabilities = normalizeCapabilities(undefined)
   private permissions = new Map<string, PendingPermission>()
+  private planApprovals = new Map<string, PendingPlanApproval>()
   private requestSequence = 0
   private lastStderr = ''
   private exitNotified = false
@@ -126,6 +142,14 @@ export class GrokAcpClient {
 
     const app = acp.client({ name: 'Grok Build GUI' })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) => this.queuePermission(params))
+      // Plan approval is an x.ai extension, not a core ACP method. Leaving it
+      // unregistered makes the SDK answer -32601, which the CLI reports as
+      // "client disconnected mid-approval" and cancels the turn.
+      .onRequest(
+        EXIT_PLAN_MODE_METHOD,
+        (params: unknown) => params,
+        ({ params }) => this.queuePlanApproval(params)
+      )
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         const event = normalizeAcpUpdate(params.sessionId, params.update as unknown as Record<string, unknown>)
         if (event) this.callbacks.onEvent(event)
@@ -211,6 +235,7 @@ export class GrokAcpClient {
 
   async cancel(sessionId: string): Promise<void> {
     this.cancelPermissions(sessionId)
+    this.cancelPlanApprovals(sessionId)
     await this.requireContext().notify(acp.methods.agent.session.cancel, { sessionId })
   }
 
@@ -269,6 +294,7 @@ export class GrokAcpClient {
    */
   async stop(): Promise<void> {
     this.cancelPermissions()
+    this.cancelPlanApprovals()
     this.connection?.close()
     const pid = this.child?.pid
     this.child = undefined
@@ -280,6 +306,36 @@ export class GrokAcpClient {
   private requireContext(): acp.ClientContext {
     if (!this.context) throw new Error('Grok ACP is not connected')
     return this.context
+  }
+
+  /**
+   * Answer the agent's plan approval. Unknown ids are ignored rather than
+   * thrown: the turn may already have been cancelled, and a late click must not
+   * surface an error to the user.
+   */
+  respondPlanApproval(requestId: string, decision: PlanApprovalDecision): void {
+    const pending = this.planApprovals.get(requestId)
+    if (!pending) return
+    this.planApprovals.delete(requestId)
+    pending.resolve(buildExitPlanModeResponse(decision))
+  }
+
+  private queuePlanApproval(params: unknown): Promise<ExitPlanModeResponse> {
+    const parsed = parseExitPlanModeParams(params)
+    // No session to route to — decline rather than approve something unattributable.
+    if (!parsed) return Promise.resolve(buildExitPlanModeResponse(PLAN_APPROVAL_FALLBACK))
+    const requestId = `plan:${++this.requestSequence}`
+    this.callbacks.onPlanApproval({ requestId, ...parsed })
+    return new Promise((resolve) => this.planApprovals.set(requestId, { sessionId: parsed.sessionId, resolve }))
+  }
+
+  /** Resolve outstanding plan dialogs without ever approving on the user's behalf. */
+  private cancelPlanApprovals(sessionId?: string): void {
+    for (const [requestId, pending] of this.planApprovals) {
+      if (sessionId !== undefined && pending.sessionId !== sessionId) continue
+      pending.resolve(buildExitPlanModeResponse(PLAN_APPROVAL_FALLBACK))
+      this.planApprovals.delete(requestId)
+    }
   }
 
   private queuePermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
@@ -299,6 +355,7 @@ export class GrokAcpClient {
 
   private teardown(message: string): void {
     this.cancelPermissions()
+    this.cancelPlanApprovals()
     this.connection = undefined
     this.context = undefined
     if (this.exitNotified) return

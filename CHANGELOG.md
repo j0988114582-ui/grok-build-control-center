@@ -9,6 +9,7 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 ### Added
 
 - **側欄「僅顯示活躍的對話」**：資料夾篩選下方新增核取方塊，只列出最後活動在 N 天內的對話（**N 預設 4 天**，設定頁「側欄對話」區可調 1–30 天）。**預設關閉**，開關與天數都寫進 `settings.json`，重開程式仍記得。就算超過天數，**目前開啟的對話、已釘選、Agents Team 槽一律保留**，不會發生「篩選把自己正在看的對話藏起來」。搜尋、資料夾篩選與多選刪除都作用在篩完之後的清單；標題列數字改成 `31 · 活躍 4 天`（未開啟時維持原本的純數字），資料夾下拉的「全部資料夾」也跟著算篩選後的數量，不會出現「全部資料夾（245）」配「31」的落差。這是**檢視**功能，不會刪除任何對話——「建議清理」名單仍看全部 session、仍用既有的 10 天規則，兩個數字互不影響。
+- **規劃模式（Plan mode）核准**：Grok 規劃完成時，GUI 會顯示計畫內容並讓你選「核准，開始實作」／「請它修改」／「放棄這個計畫」。在此之前 GUI 沒有實作代理端請求 `_x.ai/exit_plan_mode`，SDK 只回 `-32601`，CLI 因此判定 `client disconnected mid-approval`、把回合以 `cancelled` 收掉並讓規劃模式卡在 Active——**畫面上什麼都不會出現**。連線中斷、切換權限模式或關閉程式時一律回覆「未核准」，絕不會因為連線掉了就當成同意開工。回應格式 `{ approved, abandoned }` 由 `work/plan_mode_acp_probe.mjs` 對 grok 1.0.3 實測確認。
 
 ### Changed
 

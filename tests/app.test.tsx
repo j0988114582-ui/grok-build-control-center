@@ -67,6 +67,8 @@ const createApiMock = (): GrokBridgeApi => ({
   previewChooseFile: vi.fn().mockResolvedValue(null),
   revealPath: vi.fn().mockResolvedValue(true),
   openPath: vi.fn().mockResolvedValue(''),
+  onPlanApproval: vi.fn().mockReturnValue(() => {}),
+  respondPlanApproval: vi.fn().mockResolvedValue(undefined),
   onEvent: vi.fn().mockReturnValue(() => {}), onPermission: vi.fn().mockReturnValue(() => {}), onStatus: vi.fn().mockReturnValue(() => {})
 } as unknown as GrokBridgeApi)
 
@@ -1367,6 +1369,58 @@ describe('App', () => {
     ]))
     expect(api.cancel).not.toHaveBeenCalled()
     expect(await within(panel).findByTestId('bgtasks-stop-requested')).toBeInTheDocument()
+  })
+
+  describe('plan approval (_x.ai/exit_plan_mode)', () => {
+    const renderWithPlanHook = async (): Promise<{
+      api: GrokBridgeApi
+      fire: (request: { requestId: string; sessionId: string; toolCallId: string; planContent: string }) => void
+    }> => {
+      const api = createApiMock()
+      let onPlan: ((request: never) => void) | undefined
+      api.onPlanApproval = vi.fn((callback) => { onPlan = callback as never; return () => {} })
+      window.grokApi = api
+      render(<App />)
+      expect(await screen.findByText('Fix tests')).toBeInTheDocument()
+      return { api, fire: (request) => act(() => { onPlan?.(request as never) }) }
+    }
+
+    it('shows the plan and answers approve with { approved: true }', async () => {
+      const { api, fire } = await renderWithPlanHook()
+      expect(screen.queryByTestId('plan-approval-modal')).not.toBeInTheDocument()
+
+      fire({ requestId: 'plan:1', sessionId: 's1', toolCallId: 'call-1', planContent: '# 計畫\n先加測試再改程式' })
+
+      expect(await screen.findByTestId('plan-approval-modal')).toBeInTheDocument()
+      expect(screen.getByTestId('plan-approval-content')).toHaveTextContent('先加測試再改程式')
+
+      await userEvent.setup().click(screen.getByTestId('plan-approve'))
+      await waitFor(() => expect(api.respondPlanApproval).toHaveBeenCalledWith('plan:1', 'approve'))
+      expect(screen.queryByTestId('plan-approval-modal')).not.toBeInTheDocument()
+    })
+
+    it('offers request-changes and abandon without approving', async () => {
+      const { api, fire } = await renderWithPlanHook()
+      fire({ requestId: 'plan:2', sessionId: 's1', toolCallId: 'call-2', planContent: '計畫內容' })
+      await screen.findByTestId('plan-approval-modal')
+
+      await userEvent.setup().click(screen.getByTestId('plan-request-changes'))
+      await waitFor(() => expect(api.respondPlanApproval).toHaveBeenCalledWith('plan:2', 'request-changes'))
+
+      fire({ requestId: 'plan:3', sessionId: 's1', toolCallId: 'call-3', planContent: '計畫內容' })
+      await screen.findByTestId('plan-approval-modal')
+      await userEvent.setup().click(screen.getByTestId('plan-abandon'))
+      await waitFor(() => expect(api.respondPlanApproval).toHaveBeenCalledWith('plan:3', 'abandon'))
+
+      expect(api.respondPlanApproval).not.toHaveBeenCalledWith(expect.anything(), 'approve')
+    })
+
+    it('still offers a decision when the agent exited plan mode without writing a plan', async () => {
+      const { fire } = await renderWithPlanHook()
+      fire({ requestId: 'plan:4', sessionId: 's1', toolCallId: 'call-4', planContent: '   ' })
+      expect(await screen.findByTestId('plan-approval-empty')).toBeInTheDocument()
+      expect(screen.getByTestId('plan-approve')).toBeInTheDocument()
+    })
   })
 
   describe('sidebar active-only filter', () => {

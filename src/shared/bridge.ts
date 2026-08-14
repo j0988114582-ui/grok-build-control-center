@@ -2,6 +2,7 @@ import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock, SessionSummary, SessionUsage, UiSessionEvent
 } from './types'
 import type { PreviewReadTextResult, PreviewRegisterResult } from './preview-types'
+import type { PlanApprovalDecision, PlanApprovalRequest } from './plan-approval'
 
 export type CliStatusUpdate = Partial<CliStatus> & { message?: string; stderr?: string }
 
@@ -35,6 +36,8 @@ export interface GrokBridgeApi {
   setMode(sessionId: string, modeId: string): Promise<void>
   setModel(sessionId: string, modelId: string, reasoningEffort?: string): Promise<void>
   respondPermission(requestId: string, optionId: string): Promise<void>
+  /** Answer the agent's `_x.ai/exit_plan_mode` plan approval. */
+  respondPlanApproval(requestId: string, decision: PlanApprovalDecision): Promise<void>
   getPermissionMode(): Promise<AgentPermissionMode>
   setPermissionMode(mode: AgentPermissionMode): Promise<AgentPermissionMode>
   chooseDirectory(): Promise<string | null>
@@ -70,6 +73,8 @@ export interface GrokBridgeApi {
   openPath(filePath: string): Promise<string>
   onEvent(callback: (event: UiSessionEvent) => void): () => void
   onPermission(callback: (request: PermissionRequest) => void): () => void
+  /** The agent finished planning and is waiting for approve / changes / abandon. */
+  onPlanApproval(callback: (request: PlanApprovalRequest) => void): () => void
   /** A permission request was answered elsewhere (phone remote) — close matching desktop UI. */
   onPermissionResolved(callback: (payload: { requestId: string }) => void): () => void
   onStatus(callback: (status: CliStatusUpdate) => void): () => void

@@ -750,6 +750,21 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .toggle-row span { display: grid; gap: 2px; }
 .toggle-row strong { color: inherit; font-size: 10px; }
 .toggle-row small { font-size: 8px; }
+.plan-approval-modal { max-width: 720px; }
+.plan-approval-content {
+  max-height: 42vh;
+  overflow: auto;
+  margin: 4px 0 14px;
+  padding: 12px 14px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.plan-approval-content > :first-child { margin-top: 0; }
+.plan-approval-content > :last-child { margin-bottom: 0; }
 .settings-fine-print { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .settings-fine-print strong { color: inherit; font-weight: 700; }
 .toggle-row input { width: 32px; height: 17px; accent-color: var(--accent); }
@@ -903,6 +918,8 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .setup-modal > code { display: block; margin-top: 15px; padding: 10px 12px; overflow-wrap: anywhere; border: 1px solid var(--line); background: var(--bg); color: #9fc9e4; font-size: 11px; }
 .setup-modal > div:last-child button.primary { background: var(--metal-gold); color: #252016; border-color: var(--gold-deep); }
 .setup-modal > div:last-child button.primary svg, .setup-modal > div:last-child button.primary small { color: #4f4028; }
+/* --muted on the gold fill is unreadable; match the setup modal's dark-on-gold. */
+.plan-approval-modal button.primary svg, .plan-approval-modal button.primary small { color: #4f4028; }
 .setup-modal > div:last-child button:disabled { cursor: wait; opacity: .62; }
 .rename-modal > label { display: grid; gap: 7px; margin-top: 18px; color: var(--muted); font-size: 10px; }
 .rename-modal > label input { width: 100%; padding: 10px; color: inherit; background: var(--bg); border: 1px solid var(--line); outline: none; }
