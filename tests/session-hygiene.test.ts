@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifySessions,
+  filterSessionsByActiveWindow,
   filterSessionsByCwd,
   isEmptySession,
   listSessionCwds,
+  SESSION_ACTIVE_DAYS,
   SESSION_KEEP_PER_CWD,
   suggestedCleanupSessions
 } from '../src/shared/session-hygiene'
@@ -92,5 +94,78 @@ describe('session-hygiene (P-CLEAN / P-FOLDER)', () => {
     expect(listSessionCwds(sessions)).toEqual(['C:\\alpha\\proj', 'C:\\beta\\proj'])
     expect(filterSessionsByCwd(sessions, 'C:\\alpha\\proj').map((item) => item.id)).toEqual(['a', 'c'])
     expect(filterSessionsByCwd(sessions, 'all')).toHaveLength(3)
+  })
+})
+
+describe('filterSessionsByActiveWindow (sidebar active-only view)', () => {
+  it('keeps sessions inside the window and drops the rest', () => {
+    const sessions = [
+      s({ id: 'today', updatedAt: new Date(now - 2 * 3_600_000).toISOString() }),
+      s({ id: 'edge', updatedAt: new Date(now - 4 * day).toISOString() }),
+      s({ id: 'stale', updatedAt: new Date(now - 5 * day).toISOString() })
+    ]
+    const kept = filterSessionsByActiveWindow(sessions, { nowMs: now, pinnedIds: [] }, 4)
+    expect(kept.map((item) => item.id)).toEqual(['today', 'edge'])
+  })
+
+  it('never hides the open session, pinned sessions, or Agents Team slots', () => {
+    const sessions = [
+      s({ id: 'open', updatedAt: new Date(now - 90 * day).toISOString() }),
+      s({ id: 'pin', updatedAt: new Date(now - 90 * day).toISOString() }),
+      s({ id: 'team', updatedAt: new Date(now - 90 * day).toISOString() }),
+      s({ id: 'stale', updatedAt: new Date(now - 90 * day).toISOString() })
+    ]
+    const kept = filterSessionsByActiveWindow(sessions, {
+      nowMs: now,
+      pinnedIds: ['pin'],
+      activeSessionId: 'open',
+      teamSessionIds: ['team']
+    }, 4)
+    expect(kept.map((item) => item.id)).toEqual(['open', 'pin', 'team'])
+  })
+
+  it('falls back to createdAt, and hides sessions with no usable timestamp', () => {
+    const sessions = [
+      s({ id: 'created-recently', createdAt: new Date(now - 1 * day).toISOString() }),
+      s({ id: 'created-long-ago', createdAt: new Date(now - 40 * day).toISOString() }),
+      s({ id: 'no-dates' }),
+      s({ id: 'garbage-date', updatedAt: 'not-a-date' })
+    ]
+    const kept = filterSessionsByActiveWindow(sessions, { nowMs: now, pinnedIds: [] }, 4)
+    expect(kept.map((item) => item.id)).toEqual(['created-recently'])
+  })
+
+  it('a dateless session still shows when pinned', () => {
+    const sessions = [s({ id: 'no-dates' })]
+    expect(filterSessionsByActiveWindow(sessions, { nowMs: now, pinnedIds: ['no-dates'] }, 4)).toHaveLength(1)
+  })
+
+  it('preserves input order and returns a new array', () => {
+    const sessions = [
+      s({ id: 'a', updatedAt: new Date(now - 3 * day).toISOString() }),
+      s({ id: 'b', updatedAt: new Date(now - 1 * day).toISOString() })
+    ]
+    const kept = filterSessionsByActiveWindow(sessions, { nowMs: now, pinnedIds: [] }, 4)
+    expect(kept.map((item) => item.id)).toEqual(['a', 'b'])
+    expect(kept).not.toBe(sessions)
+  })
+
+  /**
+   * Guard rail: the sidebar view window and the 10-day cleanup rule are two
+   * different numbers. A 6-day-old session is hidden by a 4-day view but must
+   * still classify as 'active' — i.e. it is never a cleanup suggestion.
+   */
+  it('is independent of the 10-day cleanup rule', () => {
+    expect(SESSION_ACTIVE_DAYS).toBe(10)
+    const sessions = [s({ id: 'six-days', updatedAt: new Date(now - 6 * day).toISOString(), messageCount: 3 })]
+    expect(filterSessionsByActiveWindow(sessions, { nowMs: now, pinnedIds: [] }, 4)).toHaveLength(0)
+    expect(classifySessions(sessions, { nowMs: now, pinnedIds: [] }).get('six-days')).toBe('active')
+    expect(suggestedCleanupSessions(sessions, { nowMs: now, pinnedIds: [] })).toHaveLength(0)
+  })
+
+  it('honours the widest supported window', () => {
+    const sessions = [s({ id: 'old', updatedAt: new Date(now - 29 * day).toISOString() })]
+    expect(filterSessionsByActiveWindow(sessions, { nowMs: now, pinnedIds: [] }, 30)).toHaveLength(1)
+    expect(filterSessionsByActiveWindow(sessions, { nowMs: now, pinnedIds: [] }, 1)).toHaveLength(0)
   })
 })

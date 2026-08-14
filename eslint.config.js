@@ -3,7 +3,9 @@ import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 
 export default tseslint.config(
-  { ignores: ['node_modules', 'out', 'outputs/installer', 'work', 'resources/remote-web'] },
+  // .claude/worktrees holds full checkouts of this repo (agent worktrees); linting
+  // them double-reports every finding against a copy nobody edits.
+  { ignores: ['node_modules', 'out', 'outputs/installer', 'work', 'resources/remote-web', '.claude'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

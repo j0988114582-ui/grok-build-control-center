@@ -121,6 +121,31 @@ export function filterSessionsByCwd(
   return sessions.filter((session) => session.cwd.replace(/[\\/]+$/, '') === target)
 }
 
+/**
+ * Sidebar view filter: keep sessions whose last activity is within `days`, plus
+ * the ones that must never vanish from under the user — the open session,
+ * pinned sessions, and Agents Team slots.
+ *
+ * View only; it never deletes. `days` is required on purpose so this cannot
+ * silently inherit SESSION_ACTIVE_DAYS — the 10-day cleanup rule and the
+ * sidebar's active window are two different numbers.
+ */
+export function filterSessionsByActiveWindow(
+  sessions: readonly SessionSummary[],
+  ctx: SessionHygieneContext,
+  days: number
+): SessionSummary[] {
+  const pinned = toSet(ctx.pinnedIds)
+  const team = toSet(ctx.teamSessionIds)
+  const activeId = ctx.activeSessionId ?? null
+  return sessions.filter((session) =>
+    pinned.has(session.id)
+    || session.id === activeId
+    || team.has(session.id)
+    || isWithinActiveWindow(session, ctx.nowMs, days)
+  )
+}
+
 export function cwdDisplayName(cwd: string): string {
   const normalized = cwd.replace(/[\\/]+$/, '')
   return normalized.split(/[\\/]/).pop() || normalized

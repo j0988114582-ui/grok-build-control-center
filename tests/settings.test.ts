@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { createDefaultSettings, normalizeSettings } from '../src/shared/settings'
+import {
+  createDefaultSettings,
+  normalizeSettings,
+  SIDEBAR_ACTIVE_DAYS_DEFAULT,
+  SIDEBAR_ACTIVE_DAYS_MAX,
+  SIDEBAR_ACTIVE_DAYS_MIN
+} from '../src/shared/settings'
 
 describe('settings', () => {
   it('uses the verified local Grok executable by default', () => {
@@ -106,5 +112,33 @@ describe('settings', () => {
     expect(normalized.shortcuts.find((item) => item.command === 'searchSessions')?.accelerator).toBe('Ctrl+K')
     expect(normalized.shortcuts.find((item) => item.command === 'commandPalette')?.accelerator).toBe('Ctrl+Alt+P')
     expect(normalized.shortcuts.find((item) => item.command === 'searchTranscript')?.accelerator).toBe('Ctrl+F')
+  })
+
+  it('defaults the sidebar active-only filter to off with a 4-day window', () => {
+    expect(createDefaultSettings('C:\\Users\\demo')).toMatchObject({
+      sidebarActiveOnly: false,
+      sidebarActiveDays: SIDEBAR_ACTIVE_DAYS_DEFAULT
+    })
+    expect(SIDEBAR_ACTIVE_DAYS_DEFAULT).toBe(4)
+  })
+
+  it('clamps the sidebar active window to 1-30 whole days', () => {
+    const days = (value: unknown): number =>
+      normalizeSettings({ sidebarActiveDays: value } as never, 'C:\\Users\\demo').sidebarActiveDays
+    expect(days(0)).toBe(SIDEBAR_ACTIVE_DAYS_MIN)
+    expect(days(-12)).toBe(SIDEBAR_ACTIVE_DAYS_MIN)
+    expect(days(99)).toBe(SIDEBAR_ACTIVE_DAYS_MAX)
+    expect(days(7)).toBe(7)
+    expect(days(4.6)).toBe(5)
+    expect(days('lots')).toBe(SIDEBAR_ACTIVE_DAYS_DEFAULT)
+    expect(days(undefined)).toBe(SIDEBAR_ACTIVE_DAYS_DEFAULT)
+    expect(days(Number.NaN)).toBe(SIDEBAR_ACTIVE_DAYS_DEFAULT)
+  })
+
+  it('round-trips the sidebar filter toggle so it survives a restart', () => {
+    expect(normalizeSettings({ sidebarActiveOnly: true }, 'C:\\Users\\demo').sidebarActiveOnly).toBe(true)
+    expect(normalizeSettings({ sidebarActiveOnly: false }, 'C:\\Users\\demo').sidebarActiveOnly).toBe(false)
+    // Non-boolean junk falls back to off, not on — an upgrade must never look like a purge.
+    expect(normalizeSettings({ sidebarActiveOnly: 'yes' } as never, 'C:\\Users\\demo').sidebarActiveOnly).toBe(false)
   })
 })

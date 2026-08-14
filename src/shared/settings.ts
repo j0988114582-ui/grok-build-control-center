@@ -10,6 +10,11 @@ import {
   PREVIEW_MIN_WIDTH
 } from './preview-types'
 
+/** Sidebar active-window filter (view only — distinct from SESSION_ACTIVE_DAYS cleanup). */
+export const SIDEBAR_ACTIVE_DAYS_DEFAULT = 4
+export const SIDEBAR_ACTIVE_DAYS_MIN = 1
+export const SIDEBAR_ACTIVE_DAYS_MAX = 30
+
 const windowsJoin = (...parts: string[]): string => parts.map((part, index) => index === 0 ? part.replace(/[\\/]+$/, '') : part.replace(/^[\\/]+|[\\/]+$/g, '')).join('\\')
 
 export const createDefaultSettings = (homeDir: string): AppSettings => ({
@@ -25,7 +30,9 @@ export const createDefaultSettings = (homeDir: string): AppSettings => ({
   lineHeight: 1.65,
   contentWidth: 920,
   shortcuts: DEFAULT_SHORTCUTS.map((binding) => ({ ...binding })),
-  preview: { ...DEFAULT_PREVIEW_SETTINGS, recentBySession: {} }
+  preview: { ...DEFAULT_PREVIEW_SETTINGS, recentBySession: {} },
+  sidebarActiveOnly: false,
+  sidebarActiveDays: SIDEBAR_ACTIVE_DAYS_DEFAULT
 })
 
 const clamp = (value: unknown, min: number, max: number, fallback: number): number =>
@@ -153,6 +160,9 @@ export function normalizeSettings(value: Partial<AppSettings> | undefined, homeD
     lineHeight: clamp(value?.lineHeight, 1.2, 2.1, defaults.lineHeight),
     contentWidth: clamp(value?.contentWidth, 640, 1400, defaults.contentWidth),
     shortcuts: normalizeShortcuts(value?.shortcuts),
-    preview: normalizePreview(value?.preview)
+    preview: normalizePreview(value?.preview),
+    sidebarActiveOnly: typeof value?.sidebarActiveOnly === 'boolean' ? value.sidebarActiveOnly : defaults.sidebarActiveOnly,
+    // Whole days only — a stored 4.5 would make the caption read "活躍 4.5 天".
+    sidebarActiveDays: Math.round(clamp(value?.sidebarActiveDays, SIDEBAR_ACTIVE_DAYS_MIN, SIDEBAR_ACTIVE_DAYS_MAX, defaults.sidebarActiveDays))
   }
 }

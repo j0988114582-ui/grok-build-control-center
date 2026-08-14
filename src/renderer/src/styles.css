@@ -210,6 +210,7 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .workspace.sidebar-collapsed .sidebar-actions .primary,
 .workspace.sidebar-collapsed .searchbox,
 .workspace.sidebar-collapsed .session-caption,
+.workspace.sidebar-collapsed .active-only-filter,
 .workspace.sidebar-collapsed .session-list,
 .workspace.sidebar-collapsed .sidebar-footer,
 .workspace.sidebar-collapsed .sidebar-select-bar { display: none; }
@@ -252,6 +253,19 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
   text-transform: none;
   letter-spacing: 0;
 }
+.active-only-filter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 14px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.active-only-filter input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.active-only-filter span { color: inherit; }
+.active-only-filter:hover span { color: var(--accent); }
+.active-only-filter small { margin-left: auto; font-size: 9px; letter-spacing: .06em; color: var(--muted); opacity: .8; }
 .cleanup-suggest-bar { padding: 0 10px 10px; }
 .cleanup-suggest-button {
   width: auto;
@@ -714,6 +728,10 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .settings-section input, .shortcut-row input { width: 100%; padding: 8px; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; transition: border-color .16s ease, box-shadow .16s ease; }
 /* v0.10 unified input focus — gold hairline + faint glow (keyboard outline still applies). */
 .settings-section input:focus, .shortcut-row input:focus, .folder-filter select:focus, .session-tools select:focus, .setup-modal input:focus { border-color: var(--line-gold); box-shadow: var(--glow-gold); }
+/* Sliders are not text fields: undo the boxed input look and keep the gold accent
+   the .settings-grid sliders already use. */
+.settings-section input[type='range'] { padding: 0; border: none; background: none; accent-color: var(--accent); cursor: pointer; }
+.settings-section output { color: var(--accent); }
 .settings-grid { display: grid; gap: 14px; padding: 18px 0; border-top: 1px solid var(--line); }
 .settings-grid label { display: grid; grid-template-columns: 1fr auto; color: var(--muted); font-size: 11px; }
 .settings-grid input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
@@ -732,6 +750,8 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .toggle-row span { display: grid; gap: 2px; }
 .toggle-row strong { color: inherit; font-size: 10px; }
 .toggle-row small { font-size: 8px; }
+.settings-fine-print { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.settings-fine-print strong { color: inherit; font-weight: 700; }
 .toggle-row input { width: 32px; height: 17px; accent-color: var(--accent); }
 .density-row { grid-template-columns: 1fr auto !important; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
 .density-row select { color: inherit; background: var(--bg); border: 1px solid var(--line); padding: 5px 8px; }

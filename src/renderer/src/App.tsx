@@ -9,7 +9,7 @@ import {
   Settings, Smartphone, Square, Sun, TerminalSquare, Trash2, UserRound, Wrench, X, Zap
 } from 'lucide-react'
 import type { SelectedFile } from '../../shared/bridge'
-import { createDefaultSettings } from '../../shared/settings'
+import { createDefaultSettings, SIDEBAR_ACTIVE_DAYS_MAX, SIDEBAR_ACTIVE_DAYS_MIN } from '../../shared/settings'
 import { selectedFilesToPrompt } from '../../shared/attachments'
 import { DEFAULT_SHORTCUTS, commandForEvent, findShortcutConflicts } from '../../shared/shortcuts'
 import { sessionReducer } from '../../shared/session-state'
@@ -156,6 +156,7 @@ import {
 } from '../../shared/scroll-anchor'
 import {
   cwdDisplayName,
+  filterSessionsByActiveWindow,
   filterSessionsByCwd,
   listSessionCwds,
   suggestedCleanupSessions
@@ -328,6 +329,11 @@ function SettingsPanel({
     {onOpenRemote && <div className="settings-section"><div className="section-title"><h3>手機 QR 遙控</h3><small>設定放在「功能矩陣」面板</small></div>
       <button type="button" className="secondary wide" data-testid="settings-open-remote" onClick={onOpenRemote}><Smartphone />前往手機遙控設定</button>
     </div>}
+    <div className="settings-section sidebar-sessions-settings" data-testid="sidebar-sessions-settings"><div className="section-title"><h3>側欄對話</h3><small>只影響清單顯示</small></div>
+      <label className="toggle-row"><span><strong>僅顯示活躍對話</strong><small>只列最近有活動的對話（預設關）</small></span><input type="checkbox" data-testid="settings-active-only" checked={draft.sidebarActiveOnly} onChange={(event) => update({ ...draft, sidebarActiveOnly: event.target.checked })} /></label>
+      <label>活躍天數 <output data-testid="settings-active-days-output">{draft.sidebarActiveDays} 天</output><input type="range" data-testid="settings-active-days" min={SIDEBAR_ACTIVE_DAYS_MIN} max={SIDEBAR_ACTIVE_DAYS_MAX} value={draft.sidebarActiveDays} onChange={(event) => update({ ...draft, sidebarActiveDays: Number(event.target.value) })} /></label>
+      <p className="settings-fine-print" data-testid="sidebar-sessions-fine-print">這只改變側欄清單顯示什麼，<strong>不會刪除任何對話</strong>；關掉就全部回來。目前開啟、已釘選與 Agents Team 的對話一律保留。「建議清理」仍用 10 天規則，不受這裡影響。</p>
+    </div>
     <div className="settings-section cockpit-settings"><div className="section-title"><h3>銀河座艙</h3><small>深色與亮色各有專屬星空</small></div>
       <div className="immersion-choice"><button type="button" className={draft.immersion === 'focus' ? 'active' : ''} onClick={() => update({ ...draft, immersion: 'focus' })}><strong>閱讀優先</strong><small>紙感對話區</small></button><button type="button" className={draft.immersion === 'deep' ? 'active' : ''} onClick={() => update({ ...draft, immersion: 'deep' })}><strong>全沉浸</strong><small>深色玻璃對話區</small></button></div>
       <label className="toggle-row"><span><strong>曲速星空</strong><small>執行狀態聯動與 Canvas 降級</small></span><input type="checkbox" checked={draft.effects.galaxy} onChange={(event) => update({ ...draft, effects: { ...draft.effects, galaxy: event.target.checked } })} /></label>
@@ -1105,9 +1111,20 @@ export function App(): React.JSX.Element {
     return buildSessionSearchIndex(sessions, { titleOverrides: settings.sessionTitles, drafts })
   }, [sessions, settings.sessionTitles, drafts])
 
+  // Sidebar view pipeline: active window → search → folder. Search, folder and
+  // multi-select delete all operate on what is left after the active filter.
+  const activeWindowSessions = useMemo(() => {
+    if (!settings.sidebarActiveOnly) return sessions
+    return filterSessionsByActiveWindow(sessions, {
+      nowMs: Date.now(),
+      pinnedIds: settings.pinnedSessions,
+      activeSessionId: active?.id,
+      teamSessionIds: team.slots
+    }, settings.sidebarActiveDays)
+  }, [sessions, settings.sidebarActiveOnly, settings.sidebarActiveDays, settings.pinnedSessions, active?.id, team.slots])
   const searchFilteredSessions = useMemo(() => {
-    return filterSessionsBySearch(sessions, sessionSearchIndex, sessionQuery)
-  }, [sessions, sessionSearchIndex, sessionQuery])
+    return filterSessionsBySearch(activeWindowSessions, sessionSearchIndex, sessionQuery)
+  }, [activeWindowSessions, sessionSearchIndex, sessionQuery])
   const folderOptions = useMemo(() => listSessionCwds(sessions), [sessions])
   const filteredSessions = useMemo(
     () => filterSessionsByCwd(searchFilteredSessions, folderFilter),
@@ -1171,6 +1188,12 @@ export function App(): React.JSX.Element {
     onRename={rowRename}
     onDelete={rowDelete}
   />
+  /** Sidebar filter is a persisted preference — the checkbox writes straight through. */
+  const persistSidebarFilter = (patch: Partial<Pick<AppSettings, 'sidebarActiveOnly' | 'sidebarActiveDays'>>): void => {
+    const next = { ...settings, ...patch }
+    setSettings(next)
+    void window.grokApi.saveSettings(next).then(setSettings).catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+  }
   const togglePinned = (session: SessionSummary): void => {
     const next = { ...settings, pinnedSessions: togglePinnedSession(settings.pinnedSessions, session.id) }
     setSettings(next)
@@ -2495,7 +2518,9 @@ export function App(): React.JSX.Element {
             value={folderFilter}
             onChange={(event) => setFolderFilter(event.target.value as string | 'all')}
           >
-            <option value="all">全部資料夾（{sessions.length}）</option>
+            {/* Counts the pool the folder picker actually chooses from, so it cannot
+                contradict the caption once the active-only filter is on. */}
+            <option value="all">全部資料夾（{activeWindowSessions.length}）</option>
             {folderOptions.map((cwd) => (
               <option key={cwd} value={cwd} title={cwd}>
                 {cwdDisplayName(cwd)} — {cwd}
@@ -2503,9 +2528,19 @@ export function App(): React.JSX.Element {
             ))}
           </select>
         </label>
+        <label className="active-only-filter" data-testid="active-only-filter" title={`只列出最近 ${settings.sidebarActiveDays} 天內有活動的對話。不會刪除任何東西；目前開啟、已釘選與 Agents Team 的對話一律保留。`}>
+          <input
+            type="checkbox"
+            data-testid="active-only-toggle"
+            checked={settings.sidebarActiveOnly}
+            onChange={(event) => persistSidebarFilter({ sidebarActiveOnly: event.target.checked })}
+          />
+          <span>僅顯示活躍的對話</span>
+          <small>{settings.sidebarActiveDays} 天內</small>
+        </label>
         <div className="session-caption">
           <span>{teamEnabled ? 'AGENTS · SESSIONS' : 'RECENT SESSIONS'}</span>
-          <em>{filteredSessions.length}{folderFilter !== 'all' ? ' · 已篩選' : ''}</em>
+          <em data-testid="session-caption-count">{filteredSessions.length}{settings.sidebarActiveOnly ? ` · 活躍 ${settings.sidebarActiveDays} 天` : ''}{folderFilter !== 'all' ? ' · 已篩選' : ''}</em>
         </div>
         <div className="sidebar-select-bar">
           {!selectMode && <button type="button" className="multi-select-entry" data-testid="multi-select-entry" onClick={() => setSelectMode(true)} title="可跨資料夾勾選後批次刪除">多選</button>}
@@ -2567,7 +2602,7 @@ export function App(): React.JSX.Element {
             )}
           </div>
         )}
-        <nav className="session-list">
+        <nav className="session-list" data-testid="session-list">
           {pinned.length > 0 && <section className="session-group pinned" key="pinned-group">
             <header><span>已釘選</span><em>{pinned.length}</em></header>
             {pinned.map(renderSessionRow)}
@@ -2757,7 +2792,9 @@ export function App(): React.JSX.Element {
           contentWidth: next.contentWidth,
           grokExecutable: next.grokExecutable,
           shortcuts: next.shortcuts,
-          preview: next.preview
+          preview: next.preview,
+          sidebarActiveOnly: next.sidebarActiveOnly,
+          sidebarActiveDays: next.sidebarActiveDays
         }))}
         onSave={(next) => void window.grokApi.saveSettings({ ...next, drafts, sessionTitles: settings.sessionTitles }).then((saved) => { setSettings(saved); setPanel('none'); setNotice('設定已儲存') })}
       />}

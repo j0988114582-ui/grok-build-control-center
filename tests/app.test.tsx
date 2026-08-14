@@ -1368,4 +1368,139 @@ describe('App', () => {
     expect(api.cancel).not.toHaveBeenCalled()
     expect(await within(panel).findByTestId('bgtasks-stop-requested')).toBeInTheDocument()
   })
+
+  describe('sidebar active-only filter', () => {
+    const daysAgo = (days: number): string => new Date(Date.now() - days * 86_400_000).toISOString()
+    const withSessions = (): GrokBridgeApi => {
+      const api = createApiMock()
+      api.listSessions = vi.fn().mockResolvedValue([
+        { id: 'fresh', cwd: 'C:\\repo', title: '今天在跑的', updatedAt: daysAgo(0.5) },
+        { id: 'stale', cwd: 'C:\\repo', title: '兩週沒動的', updatedAt: daysAgo(14) },
+        { id: 'pinned-stale', cwd: 'C:\\repo', title: '釘選但很舊', updatedAt: daysAgo(40) }
+      ])
+      api.getSettings = vi.fn().mockResolvedValue({
+        ...createDefaultSettings('C:\\Users\\demo'),
+        pinnedSessions: ['pinned-stale']
+      })
+      api.loadSession = vi.fn().mockImplementation(async (sessionId: string) => ({ sessionId }))
+      return api
+    }
+
+    it('is off by default so an upgrade never looks like conversations were deleted', async () => {
+      window.grokApi = withSessions()
+      render(<App />)
+      expect(await screen.findByText('兩週沒動的')).toBeInTheDocument()
+      expect(screen.getByText('今天在跑的')).toBeInTheDocument()
+      expect(screen.getByTestId('active-only-toggle')).not.toBeChecked()
+      expect(screen.getByTestId('session-caption-count')).toHaveTextContent('3')
+    })
+
+    it('hides stale sessions, keeps pinned ones, and persists the choice', async () => {
+      const api = withSessions()
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      expect(await screen.findByText('兩週沒動的')).toBeInTheDocument()
+
+      await user.click(screen.getByTestId('active-only-toggle'))
+
+      await waitFor(() => expect(screen.queryByText('兩週沒動的')).not.toBeInTheDocument())
+      expect(screen.getByText('今天在跑的')).toBeInTheDocument()
+      expect(screen.getByText('釘選但很舊')).toBeInTheDocument()
+      expect(screen.getByTestId('session-caption-count')).toHaveTextContent('2 · 活躍 4 天')
+      expect(api.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ sidebarActiveOnly: true, sidebarActiveDays: 4 })
+      )
+
+      await user.click(screen.getByTestId('active-only-toggle'))
+      expect(await screen.findByText('兩週沒動的')).toBeInTheDocument()
+      expect(screen.getByTestId('session-caption-count')).toHaveTextContent('3')
+    })
+
+    it('never hides the conversation the user currently has open', async () => {
+      const api = withSessions()
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+
+      await user.click(await screen.findByText('兩週沒動的'))
+      await waitFor(() => expect(api.loadSession).toHaveBeenCalledWith('stale', 'C:\\repo'))
+
+      await user.click(screen.getByTestId('active-only-toggle'))
+
+      await waitFor(() => expect(screen.getByTestId('active-only-toggle')).toBeChecked())
+      // Scoped to the sidebar: the open session's title also renders in the main pane.
+      expect(within(screen.getByTestId('session-list')).getByText('兩週沒動的')).toBeInTheDocument()
+    })
+
+    it('restores a saved on-state with its saved window on next launch', async () => {
+      const api = withSessions()
+      api.getSettings = vi.fn().mockResolvedValue({
+        ...createDefaultSettings('C:\\Users\\demo'),
+        sidebarActiveOnly: true,
+        sidebarActiveDays: 20
+      })
+      window.grokApi = api
+      render(<App />)
+
+      expect(await screen.findByText('今天在跑的')).toBeInTheDocument()
+      expect(screen.getByTestId('active-only-toggle')).toBeChecked()
+      // 14 days old is inside a 20-day window; 40 days old is not.
+      expect(screen.getByText('兩週沒動的')).toBeInTheDocument()
+      expect(screen.queryByText('釘選但很舊')).not.toBeInTheDocument()
+      expect(screen.getByTestId('session-caption-count')).toHaveTextContent('2 · 活躍 20 天')
+    })
+
+    it('folder dropdown counts the filtered pool, not the whole machine', async () => {
+      const api = withSessions()
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      expect(await screen.findByText('兩週沒動的')).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: /全部資料夾（3）/ })).toBeInTheDocument()
+
+      await user.click(screen.getByTestId('active-only-toggle'))
+
+      // Must agree with the caption — 3 vs 2 side by side is what the shop owner flagged.
+      await waitFor(() => expect(screen.getByRole('option', { name: /全部資料夾（2）/ })).toBeInTheDocument())
+      expect(screen.getByTestId('session-caption-count')).toHaveTextContent('2 · 活躍 4 天')
+    })
+
+    it('leaves the 10-day cleanup suggestions alone when the filter is on', async () => {
+      const api = withSessions()
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      expect(await screen.findByText('兩週沒動的')).toBeInTheDocument()
+      const before = screen.getByTestId('cleanup-suggest-button').textContent
+
+      await user.click(screen.getByTestId('active-only-toggle'))
+
+      await waitFor(() => expect(screen.queryByText('兩週沒動的')).not.toBeInTheDocument())
+      expect(screen.getByTestId('cleanup-suggest-button')).toHaveTextContent(before ?? '')
+    })
+
+    it('settings panel exposes the same toggle plus a day slider and says what it does not do', async () => {
+      const api = withSessions()
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      expect(await screen.findByText('今天在跑的')).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: /設定/ }))
+      const section = await screen.findByTestId('sidebar-sessions-settings')
+      expect(within(section).getByTestId('settings-active-days-output')).toHaveTextContent('4 天')
+      expect(screen.getByTestId('sidebar-sessions-fine-print')).toHaveTextContent(/不會刪除任何對話/)
+      expect(screen.getByTestId('sidebar-sessions-fine-print')).toHaveTextContent(/10 天規則/)
+
+      // Live preview: the sidebar reacts before 儲存設定 is pressed.
+      await user.click(screen.getByTestId('settings-active-only'))
+      await waitFor(() => expect(screen.queryByText('兩週沒動的')).not.toBeInTheDocument())
+
+      fireEvent.change(screen.getByTestId('settings-active-days'), { target: { value: '20' } })
+      await waitFor(() => expect(screen.getByText('兩週沒動的')).toBeInTheDocument())
+      expect(within(section).getByTestId('settings-active-days-output')).toHaveTextContent('20 天')
+      expect(screen.getByTestId('session-caption-count')).toHaveTextContent('活躍 20 天')
+    })
+  })
 })

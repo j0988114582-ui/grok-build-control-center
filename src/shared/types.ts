@@ -181,6 +181,15 @@ export type AppSettings = {
   shortcuts: ShortcutBinding[]
   /** Preview Dock preferences (0.7.0+). */
   preview: PreviewSettings
+  /**
+   * Sidebar view filter: list only sessions whose last activity is within
+   * `sidebarActiveDays`. View only — never deletes, and unrelated to the
+   * 10-day SESSION_ACTIVE_DAYS rule behind "建議清理".
+   * Defaults off so an upgrade never looks like conversations vanished.
+   */
+  sidebarActiveOnly: boolean
+  /** Active window for the sidebar filter, in days (1–30). */
+  sidebarActiveDays: number
 }
 
 export type ShortcutBinding = {
