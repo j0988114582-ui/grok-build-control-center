@@ -30,6 +30,11 @@ import {
   type PlanApprovalDecision,
   type PlanApprovalRequest
 } from '../shared/plan-approval'
+import {
+  parseRunningSubagents,
+  SUBAGENT_LIST_RUNNING_METHOD,
+  type RunningSubagent
+} from '../shared/subagent-roster'
 
 /** Env passed to the grok agent child so official telemetry can identify this host. */
 export function buildGrokSpawnEnv(clientVersion: string, baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -273,6 +278,20 @@ export class GrokAcpClient {
     const params = buildInterjectParams(sessionId, text, { ...options, interjectionId })
     const response = await this.requireContext().request(INTERJECT_METHOD, params)
     return parseInterjectResult(response)
+  }
+
+  /**
+   * Official roster of this session's running children. Read-only.
+   * Returns null when the agent cannot answer (older CLI, transport error) so
+   * the caller falls back to the tee/tool inference instead of showing nothing.
+   */
+  async listRunningSubagents(sessionId: string): Promise<RunningSubagent[] | null> {
+    try {
+      const response = await this.requireContext().request(SUBAGENT_LIST_RUNNING_METHOD, { sessionId })
+      return parseRunningSubagents(response)
+    } catch {
+      return null
+    }
   }
 
   /** Read-only view of the capability cache (models/modes/commands) for remote snapshot. */

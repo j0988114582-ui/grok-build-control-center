@@ -460,6 +460,13 @@ function registerIpc(): void {
       if (typeof requestId !== 'string' || !isPlanApprovalDecision(decision)) throw new Error('Invalid plan approval response')
       acpConnection.current?.respondPlanApproval(requestId, decision)
     }))
+  // Read-only poll; never connects on its own, so an idle GUI cannot spawn a CLI.
+  ipcMain.handle('grok:subagent:list-running', async (_event, sessionId: unknown) => {
+    if (typeof sessionId !== 'string' || !sessionId) return null
+    const client = acpConnection.current
+    if (!client) return null
+    return client.listRunningSubagents(sessionId)
+  })
   ipcMain.handle('grok:permission-mode:get', () => agentPermissionMode)
   ipcMain.handle('grok:permission-mode:set', async (_event, mode: AgentPermissionMode) =>
     lifecycleOperation.runShared('Grok 權限模式', async () => applyAgentPermissionMode(mode)))

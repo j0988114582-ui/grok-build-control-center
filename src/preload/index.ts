@@ -23,6 +23,7 @@ const api: GrokBridgeApi = {
   setModel: (sessionId, modelId, reasoningEffort) => ipcRenderer.invoke('grok:model', sessionId, modelId, reasoningEffort),
   respondPermission: (requestId, optionId) => ipcRenderer.invoke('grok:permission', requestId, optionId),
   respondPlanApproval: (requestId, decision) => ipcRenderer.invoke('grok:plan-approval', requestId, decision),
+  listRunningSubagents: (sessionId) => ipcRenderer.invoke('grok:subagent:list-running', sessionId),
   getPermissionMode: () => ipcRenderer.invoke('grok:permission-mode:get'),
   setPermissionMode: (mode) => ipcRenderer.invoke('grok:permission-mode:set', mode),
   chooseDirectory: () => ipcRenderer.invoke('dialog:directory'),

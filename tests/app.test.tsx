@@ -1371,6 +1371,68 @@ describe('App', () => {
     expect(await within(panel).findByTestId('bgtasks-stop-requested')).toBeInTheDocument()
   })
 
+  describe('official subagent roster', () => {
+    const LIVE = {
+      subagentId: 'child-1',
+      parentSessionId: 's1',
+      childSessionId: 'child-1',
+      subagentType: 'general-purpose',
+      description: '撰寫版本控制短文',
+      startedAtEpochMs: 1786676836587,
+      durationMs: 1352,
+      turnCount: 1,
+      toolCallCount: 0,
+      tokensUsed: 2007,
+      contextUsagePct: 0,
+      toolsUsed: [],
+      errorCount: 0
+    }
+
+    it('shows a card for a running child the event stream never mentioned', async () => {
+      const api = createApiMock()
+      api.listRunningSubagents = vi.fn().mockResolvedValue([LIVE])
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await user.click(await screen.findByText('Fix tests'))
+      await user.click(await screen.findByTitle('背景任務／Loop'))
+
+      const panel = await screen.findByTestId('background-tasks-panel')
+      await waitFor(() => expect(api.listRunningSubagents).toHaveBeenCalledWith('s1'))
+      expect(await within(panel).findByText('撰寫版本控制短文')).toBeInTheDocument()
+      expect(within(panel).getByText(/執行中（官方回報）/)).toBeInTheDocument()
+      expect(within(panel).getByText(/general-purpose/)).toBeInTheDocument()
+    })
+
+    it('falls back to inference when the CLI cannot answer', async () => {
+      const api = createApiMock()
+      api.listRunningSubagents = vi.fn().mockResolvedValue(null)
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await user.click(await screen.findByText('Fix tests'))
+      await user.click(await screen.findByTitle('背景任務／Loop'))
+
+      const panel = await screen.findByTestId('background-tasks-panel')
+      await waitFor(() => expect(api.listRunningSubagents).toHaveBeenCalled())
+      expect(within(panel).queryByText(/官方回報/)).not.toBeInTheDocument()
+    })
+
+    it('offers no cancel control for roster cards', async () => {
+      const api = createApiMock()
+      api.listRunningSubagents = vi.fn().mockResolvedValue([LIVE])
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await user.click(await screen.findByText('Fix tests'))
+      await user.click(await screen.findByTitle('背景任務／Loop'))
+
+      const panel = await screen.findByTestId('background-tasks-panel')
+      expect(await within(panel).findByText('撰寫版本控制短文')).toBeInTheDocument()
+      expect(within(panel).queryByRole('button', { name: /停止|取消子代理/ })).not.toBeInTheDocument()
+    })
+  })
+
   describe('plan approval (_x.ai/exit_plan_mode)', () => {
     const renderWithPlanHook = async (): Promise<{
       api: GrokBridgeApi

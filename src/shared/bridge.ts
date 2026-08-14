@@ -3,6 +3,7 @@ import type {
 } from './types'
 import type { PreviewReadTextResult, PreviewRegisterResult } from './preview-types'
 import type { PlanApprovalDecision, PlanApprovalRequest } from './plan-approval'
+import type { RunningSubagent } from './subagent-roster'
 
 export type CliStatusUpdate = Partial<CliStatus> & { message?: string; stderr?: string }
 
@@ -38,6 +39,8 @@ export interface GrokBridgeApi {
   respondPermission(requestId: string, optionId: string): Promise<void>
   /** Answer the agent's `_x.ai/exit_plan_mode` plan approval. */
   respondPlanApproval(requestId: string, decision: PlanApprovalDecision): Promise<void>
+  /** Official running-children roster; null when the agent cannot answer. */
+  listRunningSubagents(sessionId: string): Promise<RunningSubagent[] | null>
   getPermissionMode(): Promise<AgentPermissionMode>
   setPermissionMode(mode: AgentPermissionMode): Promise<AgentPermissionMode>
   chooseDirectory(): Promise<string | null>

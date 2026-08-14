@@ -47,6 +47,7 @@ import { PreviewDock, type PreviewLoadState } from './components/PreviewDock/Pre
 import { AgentsTeamToolbar, SessionTeamPane } from './components/SessionTeamPane'
 import { BackgroundTasksPanel } from './components/BackgroundTasksPanel'
 import { deriveBackgroundActivity, formatSchedulerDeletePrompt, type BackgroundActivityEntry } from '../../shared/background-activity'
+import { mergeRunningSubagents, SUBAGENT_POLL_MS, type RunningSubagent } from '../../shared/subagent-roster'
 import {
   discoverPreviewCandidates,
   isMediaPreviewItem
@@ -389,6 +390,8 @@ export function App(): React.JSX.Element {
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
   /** Agent finished planning and is blocked on `_x.ai/exit_plan_mode`. */
   const [planApprovals, setPlanApprovals] = useState<PlanApprovalRequest[]>([])
+  /** Official `_x.ai/subagent/list_running` roster; null = no answer, keep inference. */
+  const [runningSubagents, setRunningSubagents] = useState<RunningSubagent[] | null>(null)
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('ask')
   const [remoteControlActive, setRemoteControlActive] = useState(false)
   const [remoteState, setRemoteState] = useState<RemoteDesktopState | null>(null)
@@ -1111,7 +1114,28 @@ export function App(): React.JSX.Element {
   const transcriptEvents = useMemo(() => activeEvents.filter(isTranscriptVisibleEvent), [activeEvents])
   const searchHits = useMemo(() => transcriptQuery ? transcriptEvents.filter((event) => eventText(event).toLocaleLowerCase().includes(transcriptQuery.toLocaleLowerCase())).length : 0, [transcriptEvents, transcriptQuery])
   /** R2: background tasks / loop panel — aggregated from the same event stream, no new ACP call. */
-  const backgroundActivity = useMemo<BackgroundActivityEntry[]>(() => deriveBackgroundActivity(activeEvents), [activeEvents])
+  const backgroundActivity = useMemo<BackgroundActivityEntry[]>(
+    () => mergeRunningSubagents(deriveBackgroundActivity(activeEvents), runningSubagents, active?.id ?? ''),
+    [activeEvents, runningSubagents, active?.id]
+  )
+  // Official subagent roster. Polls only while a turn is in flight or the panel
+  // is open — an idle window must not keep pinging the CLI. Read-only: there is
+  // no cancel path here on purpose.
+  useEffect(() => {
+    const sessionId = active?.id
+    if (!sessionId || !status.connected || !(running || panel === 'background')) {
+      setRunningSubagents(null)
+      return
+    }
+    let cancelled = false
+    const tick = async (): Promise<void> => {
+      const list = await window.grokApi.listRunningSubagents?.(sessionId).catch(() => null) ?? null
+      if (!cancelled) setRunningSubagents(list)
+    }
+    void tick()
+    const timer = window.setInterval(() => { void tick() }, SUBAGENT_POLL_MS)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [active?.id, status.connected, running, panel])
   /** R2 rework (Codex fix #7): only offer "建立定時任務" when the CLI actually advertised /loop. */
   const loopCommandAvailable = caps.commands.some((command) => command.name === 'loop')
   /** R3: capability-gate autonomous slash commands from the same availableCommands list. */
