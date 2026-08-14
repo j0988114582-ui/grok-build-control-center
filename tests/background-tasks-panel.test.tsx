@@ -38,11 +38,11 @@ const schedulerEntry = (over: Partial<BackgroundActivityEntry> = {}): Background
   title: 'Create scheduled task (every 60s)',
   status: 'running',
   statusLabel: '執行中（every 1 minute）',
-  detail: '排程 ID：019fc84ace8a',
-  stopAction: { kind: 'scheduler_delete', schedulerId: '019fc84ace8a' },
+  detail: '排程 ID：019f00000001',
+  stopAction: { kind: 'scheduler_delete', schedulerId: '019f00000001' },
   event: {
     id: 'sched-1', sessionId: 's1', kind: 'tool', toolCallId: 'call-0', title: 'Create scheduled task (every 60s)',
-    status: 'completed', toolName: 'scheduler_create', rawOutput: { type: 'SchedulerCreate', id: '019fc84ace8a', humanSchedule: 'every 1 minute' }
+    status: 'completed', toolName: 'scheduler_create', rawOutput: { type: 'SchedulerCreate', id: '019f00000001', humanSchedule: 'every 1 minute' }
   },
   ...over
 })
@@ -113,7 +113,7 @@ describe('BackgroundTasksPanel', () => {
 
   it('shows a scheduler entry\'s detail (id + schedule) at a glance, without expanding', () => {
     renderPanel({ entries: [schedulerEntry()] })
-    expect(screen.getByText(/排程 ID：019fc84ace8a/)).toBeInTheDocument()
+    expect(screen.getByText(/排程 ID：019f00000001/)).toBeInTheDocument()
     expect(screen.getByText('執行中（every 1 minute）')).toBeInTheDocument()
   })
 

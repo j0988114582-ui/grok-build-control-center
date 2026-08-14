@@ -19,12 +19,12 @@ const schedulerCreateRunningEvent: UiSessionEvent = {
   id: 'e1',
   sessionId: 's1',
   kind: 'tool',
-  toolCallId: 'call-0dd47cf8-9112-45b5-b7bb-00b3ee434628-0',
+  toolCallId: 'call-00000000-0000-4000-8000-000000000003-0',
   title: 'Create scheduled task (every 60s)',
   status: 'completed',
   toolName: 'scheduler_create',
   rawInput: { variant: 'SchedulerCreate', interval: '60s', recurring: true, fire_immediately: true },
-  rawOutput: { type: 'SchedulerCreate', id: '019fc84ace8a', humanSchedule: 'every 1 minute', updated: false }
+  rawOutput: { type: 'SchedulerCreate', id: '019f00000001', humanSchedule: 'every 1 minute', updated: false }
 }
 
 /** get_command_or_subagent_output — a real control/query call captured checking on the loop's
@@ -33,12 +33,12 @@ const getOutputControlEvent: UiSessionEvent = {
   id: 'e2',
   sessionId: 's1',
   kind: 'tool',
-  toolCallId: 'call-3d8becd4-d14b-4848-b90e-77b7aa9a1428-1',
+  toolCallId: 'call-00000000-0000-4000-8000-000000000004-1',
   title: '[subagent:general-purpose] loop: You are a detached loop probe… (every 1 minute) (019fc84a)',
   status: 'completed',
   toolName: 'get_command_or_subagent_output',
-  rawInput: { variant: 'TaskOutput', task_ids: ['019fc84a-ce8b-7690-b590-a440ec43d6c2'] },
-  rawOutput: { type: 'TaskOutput', Result: { task_id: '019fc84a-ce8b-7690-b590-a440ec43d6c2', status: 'completed' } }
+  rawInput: { variant: 'TaskOutput', task_ids: ['019f0000-0000-7000-8000-000000000005'] },
+  rawOutput: { type: 'TaskOutput', Result: { task_id: '019f0000-0000-7000-8000-000000000005', status: 'completed' } }
 }
 
 describe('deriveBackgroundActivity — real scheduler_create capture', () => {
@@ -75,8 +75,8 @@ describe('deriveBackgroundActivity — real scheduler_create capture', () => {
 
   it('a running scheduler_create carries a scheduler_delete stopAction with the real id', () => {
     const [entry] = deriveBackgroundActivity([schedulerCreateRunningEvent])
-    expect(entry.stopAction).toEqual({ kind: 'scheduler_delete', schedulerId: '019fc84ace8a' })
-    expect(entry.detail).toContain('019fc84ace8a')
+    expect(entry.stopAction).toEqual({ kind: 'scheduler_delete', schedulerId: '019f00000001' })
+    expect(entry.detail).toContain('019f00000001')
   })
 
   it('a scheduler_create still pending (no rawOutput yet) is running but not stoppable (no id to delete)', () => {
@@ -326,9 +326,9 @@ describe('formatDeepResearchCommand (R3)', () => {
 
 describe('formatSchedulerDeletePrompt', () => {
   it('builds a natural-language instruction naming the exact scheduler id (agent tool, not a slash command)', () => {
-    const text = formatSchedulerDeletePrompt('019fc84ace8a')
+    const text = formatSchedulerDeletePrompt('019f00000001')
     expect(text).toContain('scheduler_delete')
-    expect(text).toContain('019fc84ace8a')
+    expect(text).toContain('019f00000001')
     expect(text.startsWith('/')).toBe(false)
   })
 })

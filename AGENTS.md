@@ -24,7 +24,7 @@ P0 側欄主頁無法重開、composer 固定高度；P1 專案標題層級、�
 - **審查結論**：grok-lifecycle 模組（安裝/OAuth/互斥閘）、SingleLifecycleOperation、QuotaRings 固定三產品列、focus trap、notices 產生器、README/SHARE-MESSAGE 誠實揭露——全部通過。外部事實已實測：`https://x.ai/cli/install.ps1` HTTP 200（text/plain 12KB）、`grok login --oauth` 為 0.2.93 真實旗標。
 - **終審修正 4 項**（commit 隨附）：
   1. `acp-client` 快取 capabilities 即時同步（`setModel`/`setMode`/`session new+load` 回寫 modelState、currentModeId）。原因：`start()` 對活連線是冪等回快取，renderer 又改成全量替換（GPT 為了「空清單要能取代舊值」），已連線時再點 Connected 藥丸會把 UI 模型顯示重設回 initialize 預設值。主程序當唯一真相源，兩邊需求同時滿足；新增 `tests/acp-capability-sync.test.ts` 鎖行為。
-  2. 公開庫隱私：tests 與 work/ui_smoke.py 的本機使用者個人路徑（`C:\Users\<user>`、WORDPRESS-Workspace）全數改中性 demo 路徑。此規則同樣適用 docs/plans 評審文件與 agent-run telemetry（2026-07-19 起 telemetry 一律 gitignore，不入公開庫）。
+  2. 公開庫隱私：tests 與 work/ui_smoke.py 的本機使用者個人路徑（`C:\Users\<user>`、`<workspace>` 等私人工作區名稱）全數改中性 demo 路徑。此規則同樣適用 docs/plans 評審文件與 agent-run telemetry（2026-07-19 起 telemetry 一律 gitignore，不入公開庫）。
   3. `settings:save` 換執行檔時改走 `disconnectAcp()`（原內聯版漏掉 `acpConnecting = null`），並補發 connected:false 通知讓 UI 立即反映。
   4. a11y：`.event-head em`/`.event-content li small` 亮色主題 contrast 3.0→4.7（#89867d→#6b6759），deep 模式補上原本缺的淺色覆寫——此違規在 axe 是間歇出現（取決於稽核時卡片是否渲染），別當 flaky 忽略。
 - **發布動作**：重打 0.3.2 installer（NotSigned 不變）、SHA256SUMS/SBOM/VERIFICATION/SHARE-MESSAGE 同步新雜湊；GitHub repo + Release 上傳 exe＋SHA256SUMS＋SBOM。雜湊以 `outputs/release/SHA256SUMS.txt` 為準，文件不寫死舊值。

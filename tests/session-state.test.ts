@@ -65,13 +65,13 @@ describe('sessionReducer', () => {
     let state = createSessionState('s1')
     state = sessionReducer(state, { type: 'event', event: { id: '1', sessionId: 's1', kind: 'tool', toolCallId: 't-0', title: 'scheduler_create', status: 'pending', toolName: 'scheduler_create', rawInput: { interval: '60s' } } })
     state = sessionReducer(state, { type: 'event', event: { id: '2', sessionId: 's1', kind: 'tool', toolCallId: 't-0', title: 'Create scheduled task (every 60s)', status: 'running', toolName: 'scheduler_create', rawInput: { variant: 'SchedulerCreate', recurring: true } } })
-    state = sessionReducer(state, { type: 'event', event: { id: '3', sessionId: 's1', kind: 'tool', toolCallId: 't-0', title: 'Tool call', status: 'completed', rawOutput: { type: 'SchedulerCreate', id: '019fc84ace8a', humanSchedule: 'every 1 minute' } } })
+    state = sessionReducer(state, { type: 'event', event: { id: '3', sessionId: 's1', kind: 'tool', toolCallId: 't-0', title: 'Tool call', status: 'completed', rawOutput: { type: 'SchedulerCreate', id: '019f00000001', humanSchedule: 'every 1 minute' } } })
     expect(state.events).toHaveLength(1)
     expect(state.events[0]).toMatchObject({
       title: 'Create scheduled task (every 60s)',
       status: 'completed',
       toolName: 'scheduler_create',
-      rawOutput: { id: '019fc84ace8a', humanSchedule: 'every 1 minute' },
+      rawOutput: { id: '019f00000001', humanSchedule: 'every 1 minute' },
       rawInput: { variant: 'SchedulerCreate', recurring: true }
     })
   })

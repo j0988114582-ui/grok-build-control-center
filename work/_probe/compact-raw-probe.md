@@ -3,7 +3,7 @@
 **Date:** 2026-07-17  
 **CLI:** `C:\Users\demo\.grok\bin\grok.exe` (0.2.101)  
 **Probe:** `work/_probe/compact-raw-probe.mjs` (JSON-RPC NDJSON **without** SDK closed-union parse)  
-**SessionId:** `019f6bc5-67b9-7312-b285-ff55a382e537`  
+**SessionId:** `019f0000-0000-7000-8000-000000000006`  
 **Artifacts:** `work/_probe/compact-raw-lines.jsonl` (63 lines)
 
 ## Method
@@ -41,7 +41,7 @@ Live capture (verbatim):
   "jsonrpc": "2.0",
   "method": "_x.ai/session_notification",
   "params": {
-    "sessionId": "019f6bc5-67b9-7312-b285-ff55a382e537",
+    "sessionId": "019f0000-0000-7000-8000-000000000006",
     "update": {
       "sessionUpdate": "auto_compact_completed",
       "tokens_before": 15967,
@@ -49,7 +49,7 @@ Live capture (verbatim):
       "summary_preview": null
     },
     "_meta": {
-      "eventId": "019f6bc5-67b9-7312-b285-ff55a382e537-29",
+      "eventId": "019f0000-0000-7000-8000-000000000006-29",
       "agentTimestampMs": 1784219532340
     }
   }

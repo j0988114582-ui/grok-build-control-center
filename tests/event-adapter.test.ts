@@ -76,7 +76,7 @@ describe('normalizeAcpUpdate', () => {
  * ever sees the `update` object, never that outer envelope).
  */
 describe('normalizeAcpUpdate — real scheduler_create capture', () => {
-  const toolCallId = 'call-0dd47cf8-9112-45b5-b7bb-00b3ee434628-0'
+  const toolCallId = 'call-00000000-0000-4000-8000-000000000003-0'
   const prompt = 'You are a detached loop probe. One fire only — do not poll or wait.'
 
   it('update 1/3 (tool_call, Pending): carries toolName + rawInput even before any status', () => {
@@ -120,14 +120,14 @@ describe('normalizeAcpUpdate — real scheduler_create capture', () => {
     const event = normalizeAcpUpdate('s', {
       toolCallId,
       status: 'completed',
-      rawOutput: { type: 'SchedulerCreate', id: '019fc84ace8a', humanSchedule: 'every 1 minute', updated: false },
+      rawOutput: { type: 'SchedulerCreate', id: '019f00000001', humanSchedule: 'every 1 minute', updated: false },
       sessionUpdate: 'tool_call_update'
     })
     expect(event).toMatchObject({
       kind: 'tool',
       toolCallId,
       status: 'completed',
-      rawOutput: { type: 'SchedulerCreate', id: '019fc84ace8a', humanSchedule: 'every 1 minute' }
+      rawOutput: { type: 'SchedulerCreate', id: '019f00000001', humanSchedule: 'every 1 minute' }
     })
     // Real capture: the completed update omits _meta entirely — the adapter must not invent one.
     expect((event as { toolName?: string }).toolName).toBeUndefined()
@@ -135,9 +135,9 @@ describe('normalizeAcpUpdate — real scheduler_create capture', () => {
 
   it('a control/query call (get_command_or_subagent_output) gets the same exact toolName treatment', () => {
     const event = normalizeAcpUpdate('s', {
-      toolCallId: 'call-3d8becd4-d14b-4848-b90e-77b7aa9a1428-1',
+      toolCallId: 'call-00000000-0000-4000-8000-000000000004-1',
       title: 'get_command_or_subagent_output',
-      rawInput: { task_ids: ['019fc84a-ce8b-7690-b590-a440ec43d6c2'] },
+      rawInput: { task_ids: ['019f0000-0000-7000-8000-000000000005'] },
       _meta: { 'x.ai/tool': { version: 1, name: 'get_command_or_subagent_output', kind: 'background_task_action', namespace: 'grok_build', label: 'Background Task', read_only: true } },
       sessionUpdate: 'tool_call'
     })

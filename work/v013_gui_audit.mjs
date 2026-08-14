@@ -1,7 +1,7 @@
 // v0.13.0 real Electron GUI audit: version, surfaces, interject, subagent panel.
 import { _electron as electron } from 'playwright'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 
 const outDir = path.resolve('output', 'playwright', 'v013-gui-audit')
@@ -9,8 +9,9 @@ const scratchDir = await mkdtemp(path.join(tmpdir(), 'grok-gui-v013-audit-'))
 const profileDir = await mkdtemp(path.join(tmpdir(), 'grok-gui-v013-audit-profile-'))
 await mkdir(outDir, { recursive: true })
 
+// Derived from the running user's home so this never hard-codes a local path.
 const executablePath = process.env.GROK_GUI_EXE?.trim()
-  || 'C:\\Users\\111\\AppData\\Local\\Programs\\Grok Build Control Center\\Grok Build Control Center.exe'
+  || path.join(homedir(), 'AppData', 'Local', 'Programs', 'Grok Build Control Center', 'Grok Build Control Center.exe')
 
 const checks = []
 const notes = []

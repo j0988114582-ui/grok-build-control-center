@@ -10,9 +10,9 @@ import type { BackgroundActivityEntry } from '../src/shared/background-activity'
 
 /** Verbatim entry captured from grok 1.0.3 by work/subagent_list_probe.mjs. */
 const LIVE_ENTRY = {
-  subagentId: '00000000-0000-7000-8000-00000000child',
-  parentSessionId: '00000000-0000-7000-8000-0000000parent',
-  childSessionId: '00000000-0000-7000-8000-00000000child',
+  subagentId: '019f0000-0000-7000-8000-00000000c0de',
+  parentSessionId: '019f0000-0000-7000-8000-00000000a000',
+  childSessionId: '019f0000-0000-7000-8000-00000000c0de',
   subagentType: 'general-purpose',
   description: '撰寫版本控制短文',
   startedAtEpochMs: 1786676836587,

@@ -1352,20 +1352,20 @@ describe('App', () => {
     // session-state have their own dedicated tests for the raw ACP -> merged-event pipeline).
     act(() => {
       onEvent?.({
-        id: 'sched-1', sessionId: 's1', kind: 'tool', toolCallId: 'call-0dd47cf8-9112-45b5-b7bb-00b3ee434628-0',
+        id: 'sched-1', sessionId: 's1', kind: 'tool', toolCallId: 'call-00000000-0000-4000-8000-000000000003-0',
         title: 'Create scheduled task (every 60s)', status: 'completed', toolName: 'scheduler_create',
-        rawOutput: { type: 'SchedulerCreate', id: '019fc84ace8a', humanSchedule: 'every 1 minute', updated: false }
+        rawOutput: { type: 'SchedulerCreate', id: '019f00000001', humanSchedule: 'every 1 minute', updated: false }
       })
     })
 
     await user.click(await screen.findByTitle('背景任務／Loop'))
     const panel = await screen.findByTestId('background-tasks-panel')
-    expect(within(panel).getByText(/排程 ID：019fc84ace8a/)).toBeInTheDocument()
+    expect(within(panel).getByText(/排程 ID：019f00000001/)).toBeInTheDocument()
     expect(within(panel).getByText('執行中（every 1 minute）')).toBeInTheDocument()
 
     await user.click(within(panel).getByRole('button', { name: /停止/ }))
     await waitFor(() => expect(api.sendPrompt).toHaveBeenCalledWith('s1', [
-      { type: 'text', text: '請使用 scheduler_delete 工具刪除排程 ID「019fc84ace8a」，停止這個定時任務。' }
+      { type: 'text', text: '請使用 scheduler_delete 工具刪除排程 ID「019f00000001」，停止這個定時任務。' }
     ]))
     expect(api.cancel).not.toHaveBeenCalled()
     expect(await within(panel).findByTestId('bgtasks-stop-requested')).toBeInTheDocument()

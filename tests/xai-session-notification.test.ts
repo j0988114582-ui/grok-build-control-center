@@ -14,7 +14,7 @@ describe('xAI session_notification raw parse (Scheme A)', () => {
     jsonrpc: '2.0',
     method: XAI_SESSION_NOTIFICATION_METHOD,
     params: {
-      sessionId: '019f6bc5-67b9-7312-b285-ff55a382e537',
+      sessionId: '019f0000-0000-7000-8000-000000000006',
       update: {
         sessionUpdate: 'auto_compact_completed',
         tokens_before: 15967,
@@ -22,7 +22,7 @@ describe('xAI session_notification raw parse (Scheme A)', () => {
         summary_preview: null
       },
       _meta: {
-        eventId: '019f6bc5-67b9-7312-b285-ff55a382e537-29',
+        eventId: '019f0000-0000-7000-8000-000000000006-29',
         agentTimestampMs: 1784219532340
       }
     }
@@ -31,7 +31,7 @@ describe('xAI session_notification raw parse (Scheme A)', () => {
   it('parses live /compact wire shape from probe', () => {
     const parsed = parseXaiSessionNotificationLine(liveCompactLine)
     expect(parsed).toEqual({
-      sessionId: '019f6bc5-67b9-7312-b285-ff55a382e537',
+      sessionId: '019f0000-0000-7000-8000-000000000006',
       update: {
         sessionUpdate: 'auto_compact_completed',
         tokens_before: 15967,
@@ -45,7 +45,7 @@ describe('xAI session_notification raw parse (Scheme A)', () => {
   it('maps raw NDJSON line → kind compact with official source (does not rely on SDK path)', () => {
     const event = mapRawAcpLineToEvent(liveCompactLine)
     expect(event).toMatchObject({
-      sessionId: '019f6bc5-67b9-7312-b285-ff55a382e537',
+      sessionId: '019f0000-0000-7000-8000-000000000006',
       kind: 'compact',
       before: 15967,
       after: 15967,
