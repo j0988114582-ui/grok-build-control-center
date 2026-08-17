@@ -425,6 +425,7 @@ export function App(): React.JSX.Element {
   /** Latest main-owned focus id — stale phone align must not overwrite. */
   const remoteMainFocusRef = useRef<string | null>(null)
   const [runningMap, setRunningMap] = useState<Record<string, boolean>>({})
+  const runningMapRef = useRef<Record<string, boolean>>({})
   const [yoloConfirm, setYoloConfirm] = useState(false)
   const [yoloBusy, setYoloBusy] = useState(false)
   const [loadingSessionIds, setLoadingSessionIds] = useState<string[]>([])
@@ -520,8 +521,8 @@ export function App(): React.JSX.Element {
     hydratedGenRef.current[sessionId] = capturedGen
     return true
   }
-  const finalizeHydratedSession = (sessionId: string, alreadyRunning: boolean): void => {
-    if (alreadyRunning || inflightPromptsRef.current.has(sessionId)) return
+  const finalizeHydratedSession = (sessionId: string): void => {
+    if (runningMapRef.current[sessionId] === true || inflightPromptsRef.current.has(sessionId)) return
     setEvents((current) => ({
       ...current,
       [sessionId]: finalizeHydrationEvents(current[sessionId] ?? [])
@@ -577,7 +578,7 @@ export function App(): React.JSX.Element {
     const capturedGen = remoteLoadGenRef.current || connectionGenerationRef.current
     if (rememberHydratedSession(sessionId, capturedGen)) {
       setSessionReady((current) => markSessionReadyIfCurrent(current, sessionId, capturedGen, connectionGenerationRef.current))
-      finalizeHydratedSession(sessionId, inflightPromptsRef.current.has(sessionId))
+      finalizeHydratedSession(sessionId)
     }
     endSessionLoadLock(sessionId)
     remoteLoadLockRef.current = null
@@ -591,6 +592,7 @@ export function App(): React.JSX.Element {
   setRemoteFocusLoadRef.current = setRemoteFocusLoad
   followTailRef.current = followTail
   activeIdRef.current = active?.id ?? null
+  runningMapRef.current = runningMap
   eventsRef.current = events
   sessionsRef.current = sessions
   remoteControlActiveRef.current = remoteControlActive
@@ -1538,7 +1540,7 @@ export function App(): React.JSX.Element {
               const response = await window.grokApi.loadSession(session.id, session.cwd)
               loadedData[session.id] = { models: response.models, modes: response.modes }
               setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, gen, connectionGenerationRef.current))
-              if (rememberHydratedSession(session.id, gen)) finalizeHydratedSession(session.id, inflightPromptsRef.current.has(session.id))
+              if (rememberHydratedSession(session.id, gen)) finalizeHydratedSession(session.id)
               window.setTimeout(() => { void refreshUsageRef.current(session.id) }, 0)
               return true
             } catch {
@@ -1753,7 +1755,6 @@ export function App(): React.JSX.Element {
       const previousActive = active
       const previousUsage = usage
       const previousEvents = eventsRef.current[session.id]
-      const wasAlreadyRunning = runningMap[session.id] === true
       applyOpenedSessionChrome(session)
       setEvents((current) => ({ ...current, [session.id]: [] }))
       try {
@@ -1766,7 +1767,7 @@ export function App(): React.JSX.Element {
         hydratingUntilRef.current[session.id] = Date.now() + 800
         window.setTimeout(() => {
           if (!isCurrentLoadOp(session.id, loadOp)) return
-          finalizeHydratedSession(session.id, wasAlreadyRunning)
+          finalizeHydratedSession(session.id)
           stickAfterReplay(session.id)
           if (activeIdRef.current === session.id && !manualScrollPauseRef.current) setUnread(0)
         }, 800)

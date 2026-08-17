@@ -269,7 +269,7 @@ a:focus-visible, [role='button']:focus-visible, [tabindex]:not([tabindex='-1']):
 .active-only-filter input { width: 13px; height: 13px; margin: 0; flex: none; accent-color: var(--accent); cursor: pointer; }
 .active-only-filter span { color: inherit; min-width: 0; flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .active-only-filter:hover span { color: var(--accent); }
-.active-only-filter small { flex: none; font-size: 9px; letter-spacing: .06em; color: var(--muted); opacity: .8; white-space: nowrap; }
+.active-only-filter small { flex: none; font-size: 9px; letter-spacing: .06em; color: var(--muted); white-space: nowrap; }
 .cleanup-suggest-bar { padding: 0 10px 10px; }
 .cleanup-suggest-button {
   width: auto;
