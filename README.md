@@ -43,12 +43,16 @@ Grok Build Control Center 把 Grok Build 的結構化 ACP 介面變成一般人�
 
 貼上剪貼簿圖片時：若本機 Grok ACP 未宣告內嵌圖片支援，程式會把圖存到 Windows 暫存目錄並把**絕對路徑**插入草稿（不會自動加提示句）。
 
-## 目前版本內容（v0.13.1）
+## 目前版本內容（v0.14.0）
 
+- **切換對話不再重播整段歷史**：同一連線裡已打開過的 Session 切走再切回時沿用快取，Context 用量立即還原，不再堆一排「Grok 正在工作」或跳出「跳到最新 N」；舊載入失敗不能蓋掉較新的成功載入，remote 焦點、斷線重連與延遲到達的過期載入訊號也走同一套防護。
+- **專案列＋／影音路徑晶片**：側欄每個專案群組標題旁有「＋」，直接在那個資料夾開新對話；檔案總管拖入影片／音訊會變成路徑晶片（跟圖片一樣）。不做「不在專案底下工作」——Grok ACP 一定要工作目錄。
+- **規劃／權限收口**：Esc、停止回合或回合結束會清掉規劃核准窗；權限回覆失敗不再關窗；`/always-approve` 改走 YOLO 確認，不會當普通指令送進 CLI。
+- **畫面誠實度**：功能矩陣 Plan／Todos 拆開且誠實標註（未接上的就寫未接上）；抽屜不透明、收合側欄不再漏出控制項、窄窗保留預覽欄。
 - **規劃模式核准**：Grok 規劃完成時，GUI 會顯示計畫內容並讓你選「核准，開始實作」／「請它修改」／「放棄這個計畫」。先前 GUI 沒有實作代理端的 `_x.ai/exit_plan_mode` 請求，回合會靜默取消、規劃模式卡住，而且畫面上毫無提示。連線中斷或關閉程式時一律回覆「未核准」，不會因為連線掉了就當成同意開工。
 - **側欄「僅顯示活躍的對話」**：只列出最後活動在 N 天內的對話（預設 4 天，設定頁可調 1–30）。**預設關閉**；目前開啟、已釘選與 Agents Team 的對話一律保留。這是檢視功能，不會刪除任何對話——「建議清理」仍沿用既有的 10 天規則，兩個數字互不影響。
 - **子代理官方執行清單（只讀）**：背景活動面板會輪詢 `_x.ai/subagent/list_running`，把 CLI 官方回報的執行中子代理合進清單，一個子代理一張卡，附類型／輪數／工具次數／token 用量。CLI 答不出來時退回既有的推估，不會變空白。**不提供取消子代理的按鈕。**
-- **Grok 4.6**：已依 [xAI 官方公告](https://x.ai/news/grok-4-6)與[官方模型規格](https://docs.x.ai/developers/grok-4-6)，用 Grok Build CLI `1.0.3` 的真實 ACP 清單驗證；模型選單會顯示帳號實際可用的 Grok 4.6／4.5 與各自推理強度，並可在不送出 prompt 的情況下切換後再切回 4.6。
+- **Grok 4.6**：已依 [xAI 官方公告](https://x.ai/news/grok-4-6)與[官方模型規格](https://docs.x.ai/developers/grok-4-6)，用 Grok Build CLI `1.0.4` 的真實 ACP 清單驗證；模型選單會顯示帳號實際可用的 Grok 4.6／4.5 與各自推理強度，並可在不送出 prompt 的情況下切換後再切回 4.6。
 - **閱讀位置不再被「正在思考」拉走**：只要使用者往上滾動、觸控回看、拖曳捲軸或用鍵盤回看，GUI 會立即暫停自動跟隨；串流思考造成的瞬間「到底部」訊號不會把畫面搶回去。往下回到底部或按「跳到最新」才恢復跟隨。
 - **背景任務／Loop 面板**：彙整這個對話的排程迴圈、監視器、子代理與背景指令，可一鍵建立定時任務（`/loop`）；排程迴圈以送出 `scheduler_delete` 指示停止（`session/cancel` 停不掉已分離的迴圈）。順帶顯示 Context／回合數／工具呼叫用量。
 - **自主任務入口**：Workflow（`/workflow`）、Goal（`/goal`，可帶 `--budget`）、深度研究（`/deep-research`）三個一等入口卡，含指令預覽、管理指令與能力偵測；面板送出的指令不會動到主輸入框草稿。
@@ -124,7 +128,7 @@ GitHub Actions 會在 Pull Request 自動執行測試、lint、typecheck、build
 
 Grok Build Control Center turns Grok Build's structured ACP interface into a readable Windows app. Choose a project folder, describe a task in plain language, and review permissions inside the app.
 
-Version 0.13.1 adds plan-mode approval (the GUI previously left the agent's `_x.ai/exit_plan_mode` request unanswered, which silently cancelled the turn), an opt-in sidebar filter for recently active conversations, and a read-only official subagent roster. Verified against the official Grok Build CLI 1.0.3 model catalog, including Grok 4.6. Manual upward scrolling now pauses tail-follow immediately so streaming reasoning cannot pull the reader back to the bottom.
+Version 0.14.0 hardens session switching: switching away and back no longer replays the whole history, restores Context instantly from cache, and fences stale desktop/remote loads so a late failure cannot wipe a newer transcript. It also adds a per-project "+" to start a session in that folder, video/audio drag-in as path chips, fail-closed plan-approval and permission fixes, and an honest feature matrix. Verified against Grok Build CLI 1.0.4. Earlier additions — plan-mode approval, the active-conversation sidebar filter, and the read-only subagent roster — remain.
 
 This project is not affiliated with or endorsed by xAI. Grok and Grok Build are trademarks of their respective owner.
 

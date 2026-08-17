@@ -14,7 +14,7 @@
 | Platform | Windows 10/11 x64 |
 | Artifact to sign | NSIS installer：`Grok-Build-Control-Center-Setup-<version>.exe` |
 | Build system | GitHub Actions（`windows-build.yml` 於乾淨環境重建並驗證） |
-| Latest release | v0.10.0 https://github.com/j0988114582-ui/grok-build-control-center/releases/latest |
+| Latest release | v0.14.0 https://github.com/j0988114582-ui/grok-build-control-center/releases/latest |
 
 ## 專案說明（英文，可直接貼）
 
@@ -33,7 +33,7 @@
 | 條件 | 本專案 |
 |---|---|
 | OSI 認可授權、無商業雙授權 | ✅ MIT |
-| 持續維護中 | ✅ 活躍開發，v0.3.2 → v0.10.0 |
+| 持續維護中 | ✅ 活躍開發，v0.3.2 → v0.14.0 |
 | 已有正式發行版本 | ✅ GitHub Releases，含 SHA256SUMS 與 SBOM |
 | 功能已於下載頁說明 | ✅ README 與每個 Release 說明頁 |
 | 由開發／維護團隊本人負責簽章 | ✅ 同一維護者 |

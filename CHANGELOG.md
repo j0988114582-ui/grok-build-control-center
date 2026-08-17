@@ -6,6 +6,10 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 
 ## [Unreleased]
 
+（尚無內容）
+
+## [0.14.0] - 2026-08-17
+
 > 以下內容已打包為 **0.14.0 測試安裝檔**（`outputs/installer/Grok-Build-Control-Center-Setup-0.14.0.exe`）供實機試用。
 > 這**不是正式發行**。0.14 品質收斂（規劃窗／權限／清理刪除／專案＋／影音路徑／切 Session 重播競態）已過 GPT 5.6 終審與 AGY 視覺複核。
 
@@ -367,7 +371,8 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Initial public Windows desktop GUI for Grok Build CLI.
 - ACP-native sessions, streaming messages, tool cards, permission confirmation, modes, models, local session indexing, Electron packaging, automated tests, and UI smoke coverage.
 
-[Unreleased]: https://github.com/j0988114582-ui/grok-build-control-center/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/j0988114582-ui/grok-build-control-center/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.14.0
 [0.4.0]: https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.4.0
 [0.3.2]: https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.3.2
 [0.3.1]: https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.3.1
