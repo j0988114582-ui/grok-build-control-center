@@ -5,7 +5,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/renderer/src/App'
 import { createDefaultSettings } from '../src/shared/settings'
-import type { GrokBridgeApi } from '../src/shared/bridge'
+import type { GrokBridgeApi, RemoteDesktopState, RemoteFocusChangedPayload } from '../src/shared/bridge'
+import type { SessionSummary } from '../src/shared/types'
 
 const createApiMock = (): GrokBridgeApi => ({
   getStatus: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '1.0.3', connected: false }),
@@ -171,7 +172,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: '切換 Grok 帳號' }))
     await user.click(screen.getByRole('button', { name: '開啟瀏覽器並重新登入' }))
 
-    expect(screen.getByRole('button', { name: /新 Session/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /選資料夾開始/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /Grok 1\.0\.3/ })).toBeDisabled()
   })
 
@@ -331,8 +332,8 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(await screen.findByRole('button', { name: /新 Session/ }))
-    expect(await screen.findByRole('heading', { name: 'New session' })).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: /選資料夾開始/ }))
+    expect(await screen.findByRole('heading', { name: '新對話' })).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '工作模式' })).not.toBeInTheDocument()
   })
 
@@ -380,6 +381,26 @@ describe('App', () => {
 
     expect(await screen.findByRole('button', { name: /Cancel/ })).toHaveFocus()
     expect(screen.getByRole('button', { name: /Allow once/ })).not.toHaveFocus()
+  })
+
+  it('keeps the permission dialog open when the reply fails', async () => {
+    const api = createApiMock()
+    let onPermission: ((request: Parameters<Parameters<GrokBridgeApi['onPermission']>[0]>[0]) => void) | undefined
+    api.onPermission = vi.fn((callback) => { onPermission = callback; return () => {} })
+    api.respondPermission = vi.fn().mockRejectedValue(new Error('Permission request is no longer active'))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByText('Fix tests')
+    act(() => { onPermission?.({
+      requestId: 'p-fail',
+      sessionId: 's1',
+      title: '允許修改檔案？',
+      options: [{ optionId: 'allow', name: 'Allow once', kind: 'allow_once' }]
+    }) })
+    await user.click(await screen.findByRole('button', { name: /Allow once/ }))
+    expect(await screen.findByRole('dialog', { name: '允許修改檔案？' })).toBeInTheDocument()
+    expect(api.respondPermission).toHaveBeenCalled()
   })
 
   it('focuses the safe reject option when a queued permission replaces the current request', async () => {
@@ -547,12 +568,12 @@ describe('App', () => {
       scrollHeight: { configurable: true, value: 1000 },
       scrollTop: { configurable: true, writable: true, value: 0 }
     })
-    fireEvent.scroll(scroller!)
+    fireEvent.wheel(scroller!, { deltaY: -160 })
     act(() => { onEvent?.({ id: 'away-event', sessionId: 's1', kind: 'message', role: 'assistant', text: 'new output' }) })
     expect(await screen.findByRole('button', { name: /跳到最新/ })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /新 Session/ }))
-    expect(await screen.findByRole('heading', { name: 'New session' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /選資料夾開始/ }))
+    expect(await screen.findByRole('heading', { name: '新對話' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /跳到最新/ })).not.toBeInTheDocument()
   })
 
@@ -1483,6 +1504,29 @@ describe('App', () => {
       expect(await screen.findByTestId('plan-approval-empty')).toBeInTheDocument()
       expect(screen.getByTestId('plan-approve')).toBeInTheDocument()
     })
+
+    it('closes the leftover plan dialog when the turn ends, and Escape answers request-changes', async () => {
+      const api = createApiMock()
+      let onPlan: ((request: never) => void) | undefined
+      let onEvent: ((event: { id: string; sessionId: string; kind: 'turn'; status: 'cancelled' }) => void) | undefined
+      api.onPlanApproval = vi.fn((callback) => { onPlan = callback as never; return () => {} })
+      api.onEvent = vi.fn((callback) => { onEvent = callback as never; return () => {} })
+      window.grokApi = api
+      render(<App />)
+      expect(await screen.findByText('Fix tests')).toBeInTheDocument()
+
+      act(() => { onPlan?.({ requestId: 'plan:esc', sessionId: 's1', toolCallId: 'c', planContent: '計畫' } as never) })
+      expect(await screen.findByTestId('plan-approval-modal')).toBeInTheDocument()
+      await userEvent.setup().keyboard('{Escape}')
+      await waitFor(() => expect(api.respondPlanApproval).toHaveBeenCalledWith('plan:esc', 'request-changes'))
+      expect(screen.queryByTestId('plan-approval-modal')).not.toBeInTheDocument()
+
+      act(() => { onPlan?.({ requestId: 'plan:turn', sessionId: 's1', toolCallId: 'c2', planContent: '計畫' } as never) })
+      expect(await screen.findByTestId('plan-approval-modal')).toBeInTheDocument()
+      act(() => { onEvent?.({ id: 't1', sessionId: 's1', kind: 'turn', status: 'cancelled' }) })
+      await waitFor(() => expect(screen.queryByTestId('plan-approval-modal')).not.toBeInTheDocument())
+      expect(api.respondPlanApproval).not.toHaveBeenCalledWith('plan:turn', expect.anything())
+    })
   })
 
   describe('sidebar active-only filter', () => {
@@ -1618,5 +1662,337 @@ describe('App', () => {
       expect(within(section).getByTestId('settings-active-days-output')).toHaveTextContent('20 天')
       expect(screen.getByTestId('session-caption-count')).toHaveTextContent('活躍 20 天')
     })
+
+    it('lets 建議清理 delete a session that the active filter has hidden', async () => {
+      const api = withSessions()
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      expect(await screen.findByText('兩週沒動的')).toBeInTheDocument()
+
+      await user.click(screen.getByTestId('active-only-toggle'))
+      await waitFor(() => expect(screen.queryByText('兩週沒動的')).not.toBeInTheDocument())
+
+      await user.click(screen.getByTestId('cleanup-suggest-button'))
+      const panel = await screen.findByTestId('cleanup-suggest-panel')
+      const stale = within(panel).getByText('兩週沒動的')
+      await user.click(stale.closest('label')!.querySelector('input')!)
+      await user.click(screen.getByTestId('cleanup-batch-delete'))
+
+      const confirm = await screen.findByRole('dialog', { name: '批次刪除確認' })
+      expect(confirm).toHaveTextContent('將刪除 1 則對話')
+    })
+  })
+
+  it('reuses a hydrated session instead of wiping the transcript and blanking Context', async () => {
+    const api = createApiMock()
+    api.listSessions = vi.fn().mockResolvedValue([
+      { id: 's1', cwd: 'C:\\repo-a', title: '長對話', updatedAt: '2026-08-17T00:00:00Z' },
+      { id: 's2', cwd: 'C:\\repo-b', title: '另一則', updatedAt: '2026-08-17T01:00:00Z' }
+    ])
+    const loadSession = vi.fn().mockImplementation(async (sessionId: string) => ({ sessionId }))
+    api.loadSession = loadSession
+    api.getUsage = vi.fn().mockImplementation(async (sessionId: string) => (
+      sessionId === 's1'
+        ? { sessionId, contextTokensUsed: 311_000, contextWindowTokens: 500_000, contextWindowUsage: 62 }
+        : { sessionId, contextTokensUsed: 10_000, contextWindowTokens: 500_000, contextWindowUsage: 2 }
+    ))
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    const eventTexts = (sessionId: string): string[] =>
+      (window.__grokSmoke?.getSessionEvents(sessionId) ?? [])
+        .flatMap((event) => event.kind === 'message' || event.kind === 'thought' ? [event.text] : [])
+
+    await user.click(await screen.findByText('長對話'))
+    await waitFor(() => expect(loadSession).toHaveBeenCalledWith('s1', 'C:\\repo-a'))
+    expect(await screen.findByRole('heading', { name: '長對話' })).toBeInTheDocument()
+    act(() => {
+      onEvent?.({ id: 's1-msg', sessionId: 's1', kind: 'message', role: 'assistant', text: '長回覆還在' })
+    })
+    await waitFor(() => expect(eventTexts('s1')).toContain('長回覆還在'))
+    await waitFor(() => expect(screen.getByLabelText('Context 視窗用量')).toHaveTextContent('62%'))
+
+    await user.click(screen.getByText('另一則'))
+    await waitFor(() => expect(loadSession).toHaveBeenCalledWith('s2', 'C:\\repo-b'))
+    await waitFor(() => expect(screen.getByLabelText('Context 視窗用量')).toHaveTextContent('2%'))
+
+    const loadsAfterFirstPass = loadSession.mock.calls.length
+    await user.click(screen.getByText('長對話'))
+    expect(await screen.findByRole('heading', { name: '長對話' })).toBeInTheDocument()
+    expect(eventTexts('s1')).toContain('長回覆還在')
+    expect(screen.getByLabelText('Context 視窗用量')).toHaveTextContent('62%')
+    expect(loadSession.mock.calls.length).toBe(loadsAfterFirstPass)
+  })
+
+  it('creates a session in the project folder from the group + button without asking for a folder', async () => {
+    const api = createApiMock()
+    api.createSession = vi.fn().mockResolvedValue({ sessionId: 's-from-plus' })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByText('Fix tests')).toBeInTheDocument()
+    await user.click(screen.getByTestId('session-group-add'))
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledWith('C:\\repo'))
+    expect(api.chooseDirectory).not.toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: '新對話' })).toBeInTheDocument()
+
+    const loadSession = vi.fn().mockImplementation(async (sessionId: string) => ({ sessionId }))
+    api.loadSession = loadSession
+    await user.click(screen.getByText('Fix tests'))
+    await waitFor(() => expect(loadSession).toHaveBeenCalledWith('s1', 'C:\\repo'))
+    const loadsAfterCreate = loadSession.mock.calls.length
+    await user.click(within(screen.getByTestId('session-list')).getByText('新對話'))
+    expect(await screen.findByRole('heading', { name: '新對話' })).toBeInTheDocument()
+    expect(loadSession.mock.calls.some((call) => call[0] === 's-from-plus')).toBe(false)
+    expect(loadSession.mock.calls.length).toBe(loadsAfterCreate)
+  })
+
+  it('surfaces a notice when project + create returns no session id', async () => {
+    const api = createApiMock()
+    api.createSession = vi.fn().mockResolvedValue({})
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByText('Fix tests')).toBeInTheDocument()
+    await user.click(screen.getByTestId('session-group-add'))
+    expect(await screen.findByText('建立對話失敗：未回傳 sessionId')).toBeInTheDocument()
+  })
+
+  it('surfaces a notice when project + create returns a blank session id', async () => {
+    const api = createApiMock()
+    api.createSession = vi.fn().mockResolvedValue({ sessionId: '   ' })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByText('Fix tests')).toBeInTheDocument()
+    await user.click(screen.getByTestId('session-group-add'))
+    expect(await screen.findByText('建立對話失敗：未回傳 sessionId')).toBeInTheDocument()
+  })
+
+  it('lists a created session when the connection generation went stale', async () => {
+    const api = createApiMock()
+    api.createSession = vi.fn().mockResolvedValue({ sessionId: 's-stale', connectionStale: true })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByText('Fix tests')).toBeInTheDocument()
+    await user.click(screen.getByTestId('session-group-add'))
+    expect(await screen.findByText('連線已更新，請再點一次剛建立的對話')).toBeInTheDocument()
+    expect(within(screen.getByTestId('session-list')).getByText('新對話')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '新對話' })).not.toBeInTheDocument()
+  })
+
+  it('does not let a stale load failure wipe a newer successful transcript', async () => {
+    const api = createApiMock()
+    let onStatus: ((next: { connected?: boolean }) => void) | undefined
+    api.onStatus = vi.fn((callback) => { onStatus = callback; return () => {} })
+    let rejectFirst: ((error: Error) => void) | undefined
+    let first = true
+    const loadSession = vi.fn().mockImplementation(async () => {
+      if (first) {
+        first = false
+        return new Promise((_resolve, reject) => { rejectFirst = reject })
+      }
+      return { sessionId: 's1' }
+    })
+    api.loadSession = loadSession
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    await waitFor(() => expect(loadSession).toHaveBeenCalledTimes(1))
+    act(() => { onStatus?.({ connected: false }) })
+    await user.click(within(screen.getByTestId('session-list')).getByText('Fix tests'))
+    await waitFor(() => expect(loadSession).toHaveBeenCalledTimes(2))
+    expect(await screen.findByRole('heading', { name: 'Fix tests' })).toBeInTheDocument()
+    act(() => {
+      onEvent?.({ id: 'kept', sessionId: 's1', kind: 'message', role: 'assistant', text: '新載入還在' })
+    })
+    await waitFor(() => {
+      const texts = (window.__grokSmoke?.getSessionEvents('s1') ?? [])
+        .flatMap((event) => event.kind === 'message' || event.kind === 'thought' ? [event.text] : [])
+      expect(texts).toContain('新載入還在')
+    })
+    act(() => { rejectFirst?.(new Error('舊載入失敗')) })
+    await waitFor(() => {
+      const texts = (window.__grokSmoke?.getSessionEvents('s1') ?? [])
+        .flatMap((event) => event.kind === 'message' || event.kind === 'thought' ? [event.text] : [])
+      expect(texts).toContain('新載入還在')
+    })
+    expect(screen.queryByText('舊載入失敗')).not.toBeInTheDocument()
+  })
+
+  it('does not let a stale desktop load failure wipe a newer remote-load transcript', async () => {
+    const api = createApiMock()
+    let onStatus: ((next: { connected?: boolean }) => void) | undefined
+    api.onStatus = vi.fn((callback) => { onStatus = callback; return () => {} })
+    let onRemoteState: ((state: RemoteDesktopState) => void) | undefined
+    api.onRemoteState = vi.fn((callback) => { onRemoteState = callback; return () => {} })
+    let rejectFirst: ((error: Error) => void) | undefined
+    const loadSession = vi.fn().mockImplementation(async () => new Promise((_resolve, reject) => { rejectFirst = reject }))
+    api.loadSession = loadSession
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    await waitFor(() => expect(loadSession).toHaveBeenCalledTimes(1))
+    act(() => { onStatus?.({ connected: false }) })
+    act(() => {
+      onRemoteState?.({
+        enabled: false, banner: 'off', pin: null, pairingSecret: null, expiresAt: null,
+        publicBaseUrl: null, allowPhonePermissions: false, experimentalTunnel: false,
+        focusSessionId: 's1', focusStatus: 'loading'
+      })
+    })
+    act(() => {
+      onRemoteState?.({
+        enabled: false, banner: 'off', pin: null, pairingSecret: null, expiresAt: null,
+        publicBaseUrl: null, allowPhonePermissions: false, experimentalTunnel: false,
+        focusSessionId: 's1', focusStatus: 'ready'
+      })
+    })
+    act(() => {
+      onEvent?.({ id: 'remote-kept', sessionId: 's1', kind: 'message', role: 'assistant', text: 'remote 載入還在' })
+    })
+    await waitFor(() => {
+      const texts = (window.__grokSmoke?.getSessionEvents('s1') ?? [])
+        .flatMap((event) => event.kind === 'message' || event.kind === 'thought' ? [event.text] : [])
+      expect(texts).toContain('remote 載入還在')
+    })
+    act(() => { rejectFirst?.(new Error('舊載入失敗')) })
+    await waitFor(() => {
+      const texts = (window.__grokSmoke?.getSessionEvents('s1') ?? [])
+        .flatMap((event) => event.kind === 'message' || event.kind === 'thought' ? [event.text] : [])
+      expect(texts).toContain('remote 載入還在')
+    })
+    expect(screen.queryByText('舊載入失敗')).not.toBeInTheDocument()
+  })
+
+  it('does not let a remote ready echo cancel an in-flight desktop load', async () => {
+    const api = createApiMock()
+    let onRemoteState: ((state: RemoteDesktopState) => void) | undefined
+    api.onRemoteState = vi.fn((callback) => { onRemoteState = callback; return () => {} })
+    let resolveFirst: ((value: { sessionId: string }) => void) | undefined
+    let first = true
+    const loadSession = vi.fn().mockImplementation(async () => {
+      if (first) {
+        first = false
+        return new Promise((resolve) => { resolveFirst = resolve })
+      }
+      return { sessionId: 's1' }
+    })
+    api.loadSession = loadSession
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    await waitFor(() => expect(loadSession).toHaveBeenCalledTimes(1))
+    act(() => {
+      onRemoteState?.({
+        enabled: false, banner: 'off', pin: null, pairingSecret: null, expiresAt: null,
+        publicBaseUrl: null, allowPhonePermissions: false, experimentalTunnel: false,
+        focusSessionId: 's1', focusStatus: 'ready'
+      })
+    })
+    act(() => { resolveFirst?.({ sessionId: 's1' }) })
+    await waitFor(() => expect(loadSession).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('heading', { name: 'Fix tests' })).toBeInTheDocument()
+    await user.click(within(screen.getByTestId('session-list')).getByText('Fix tests'))
+    expect(loadSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not re-apply a stale focus-changed loading after remote ready', async () => {
+    const api = createApiMock()
+    let onRemoteState: ((state: RemoteDesktopState) => void) | undefined
+    api.onRemoteState = vi.fn((callback) => { onRemoteState = callback; return () => {} })
+    let onFocusChanged: ((payload: RemoteFocusChangedPayload) => void) | undefined
+    api.onRemoteFocusChanged = vi.fn((callback) => { onFocusChanged = callback; return () => {} })
+    let listMode: 'empty' | 'pending' | 'ready' = 'empty'
+    let pendingList: Promise<SessionSummary[]> | null = null
+    let resolveList: ((list: SessionSummary[]) => void) | undefined
+    const sessionList = [{ id: 's1', cwd: 'C:\\repo', title: 'Fix tests', updatedAt: '2026-07-11T00:00:00Z' }]
+    api.listSessions = vi.fn().mockImplementation(async () => {
+      if (listMode === 'empty') return []
+      if (listMode === 'pending') {
+        if (!pendingList) pendingList = new Promise((resolve) => { resolveList = resolve })
+        return pendingList
+      }
+      return sessionList
+    })
+    window.grokApi = api
+    render(<App />)
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalled())
+
+    listMode = 'pending'
+    act(() => { onFocusChanged?.({ sessionId: 's1', focusStatus: 'loading' }) })
+    const remoteState = (focusStatus: 'loading' | 'ready'): RemoteDesktopState => ({
+      enabled: false, banner: 'off', pin: null, pairingSecret: null, expiresAt: null,
+      publicBaseUrl: null, allowPhonePermissions: false, experimentalTunnel: false,
+      focusSessionId: 's1', focusStatus
+    })
+    act(() => { onRemoteState?.(remoteState('loading')) })
+    act(() => { onRemoteState?.(remoteState('ready')) })
+    listMode = 'ready'
+    act(() => { resolveList?.(sessionList) })
+
+    expect(await screen.findByRole('heading', { name: 'Fix tests' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(document.querySelector('.composer-status-pill')?.className ?? '').not.toContain('is-busy')
+    })
+    expect(screen.queryByText('手機焦點對話載入中…')).not.toBeInTheDocument()
+  })
+
+  it('opens the YOLO confirm instead of queueing /always-approve as the next turn', async () => {
+    const api = createApiMock()
+    let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+    api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByText('Fix tests'))
+    act(() => { onEvent?.({ id: 'turn', sessionId: 's1', kind: 'turn', status: 'running' }) })
+    expect(await screen.findByRole('button', { name: '排隊下一輪' })).toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText(/回合進行中可插話|交給 Grok 一個任務/), '/always-approve')
+    await user.click(screen.getByRole('button', { name: '排隊下一輪' }))
+    expect(await screen.findByText(/回合執行中無法切換工具權限/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '啟用 YOLO 模式' })).not.toBeInTheDocument()
+    expect(api.sendPrompt).not.toHaveBeenCalled()
+    act(() => { onEvent?.({ id: 'turn-done', sessionId: 's1', kind: 'turn', status: 'completed' }) })
+    expect(api.sendPrompt).not.toHaveBeenCalled()
+  })
+
+  it('opens the YOLO confirm instead of inserting /always-approve into the draft', async () => {
+    const api = createApiMock()
+    api.connect = vi.fn().mockResolvedValue({
+      loadSession: true,
+      promptCapabilities: {},
+      sessionCapabilities: {},
+      modes: [],
+      commands: [{ name: 'always-approve', description: 'Toggle always-approve mode' }]
+    })
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByText(/Grok 1.0.3/))
+    await waitFor(() => expect(api.connect).toHaveBeenCalled())
+    await user.click(await screen.findByText('Fix tests'))
+    await user.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
+    const search = screen.getByRole('combobox', { name: '搜尋命令' })
+    await user.type(search, 'always-approve')
+    await user.keyboard('{Enter}')
+    expect(await screen.findByRole('dialog', { name: '啟用 YOLO 模式' })).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/交給 Grok 一個任務/)).toHaveValue('')
+    expect(api.sendPrompt).not.toHaveBeenCalled()
   })
 })

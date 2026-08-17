@@ -15,6 +15,8 @@ export type PathChip = {
 }
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
+const VIDEO_EXT = /\.(mp4|webm|mov|mkv|avi|m4v)$/i
+const AUDIO_EXT = /\.(mp3|wav|m4a|aac|flac|ogg|opus|wma)$/i
 
 export function isImageMime(mime: string | undefined | null): boolean {
   return Boolean(mime && mime.startsWith('image/'))
@@ -22,6 +24,22 @@ export function isImageMime(mime: string | undefined | null): boolean {
 
 export function isImagePath(filePath: string): boolean {
   return IMAGE_EXT.test(filePath)
+}
+
+export function isVideoPath(filePath: string): boolean {
+  return VIDEO_EXT.test(filePath)
+}
+
+export function isAudioPath(filePath: string): boolean {
+  return AUDIO_EXT.test(filePath)
+}
+
+export function isVideoMime(mime: string | undefined | null): boolean {
+  return Boolean(mime && mime.startsWith('video/'))
+}
+
+export function isAudioMime(mime: string | undefined | null): boolean {
+  return Boolean(mime && mime.startsWith('audio/'))
 }
 
 export function isAbsoluteLocalPath(value: string): boolean {

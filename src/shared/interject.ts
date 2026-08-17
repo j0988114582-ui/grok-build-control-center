@@ -32,7 +32,7 @@ export const INTERJECT_UNSUPPORTED_NOTICE =
 export const INTERJECT_MESSAGE_LABEL = 'YOU · 插話'
 
 export function formatUserMessageLabel(origin?: string): string {
-  return origin === 'interject' ? INTERJECT_MESSAGE_LABEL : 'YOU'
+  return origin === 'interject' ? INTERJECT_MESSAGE_LABEL : '你'
 }
 
 export function buildInterjectParams(

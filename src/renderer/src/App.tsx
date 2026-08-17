@@ -12,7 +12,7 @@ import type { SelectedFile } from '../../shared/bridge'
 import { createDefaultSettings, SIDEBAR_ACTIVE_DAYS_MAX, SIDEBAR_ACTIVE_DAYS_MIN } from '../../shared/settings'
 import { selectedFilesToPrompt } from '../../shared/attachments'
 import { DEFAULT_SHORTCUTS, commandForEvent, findShortcutConflicts } from '../../shared/shortcuts'
-import { sessionReducer } from '../../shared/session-state'
+import { finalizeHydrationEvents, sessionReducer } from '../../shared/session-state'
 import { quotaAlertStorageKey, selectCrossedQuotaThreshold } from '../../shared/billing'
 import {
   INTERJECT_QUEUED_NOTICE,
@@ -21,6 +21,7 @@ import {
   formatUserMessageLabel,
   isMethodNotFoundError,
   mintInterjectionId,
+  stripIpcErrorPrefix,
   type InterjectUiState
 } from '../../shared/interject'
 import {
@@ -35,7 +36,7 @@ import {
   type LocalQueuedPrompt
 } from '../../shared/local-queue'
 import { isTranscriptVisibleEvent } from '../../shared/event-adapter'
-import { buildSlashPaletteEntries } from '../../shared/palette-commands'
+import { buildSlashPaletteEntries, parseAlwaysApproveSlash } from '../../shared/palette-commands'
 import { localizeSessionModes, sessionModeControlTitle } from '../../shared/session-modes'
 import { QuotaRings } from './components/QuotaRings'
 import { ModelPicker } from './components/ModelPicker'
@@ -138,8 +139,12 @@ import {
 import {
   appendPathLines,
   isAbsoluteLocalPath,
+  isAudioMime,
+  isAudioPath,
   isImageMime,
   isImagePath,
+  isVideoMime,
+  isVideoPath,
   removePathLine,
   revokePathChipUrls,
   stripDuplicateImagePathLines,
@@ -209,8 +214,8 @@ const eventTitle = (event: Exclude<UiSessionEvent, { kind: 'message' } | { kind:
     case 'plan': return '計畫'
     case 'subagent': return event.description
     case 'task': return event.description
-    case 'recap': return 'Session recap'
-    case 'error': return 'Error'
+    case 'recap': return '對話摘要'
+    case 'error': return '錯誤'
     case 'commands': return 'Commands updated'
     case 'mode': return `Mode · ${event.modeId}`
     case 'usage': return 'Context usage'
@@ -256,14 +261,25 @@ function EventCard({ event, query, preview }: { event: UiSessionEvent; query: st
     <div className="message-rail">{event.role === 'assistant' ? <Bot size={17} /> : <UserRound size={17} />}</div>
     <div className="message-body"><div className="message-label">{event.role === 'assistant' ? 'GROK' : formatUserMessageLabel(event.origin)}</div><Markdown preview={preview}>{event.text}</Markdown></div>
   </article>
-  if (event.kind === 'turn') return <div className={`turn-marker ${event.status}`}><span />{event.status === 'running' ? 'Grok 正在工作' : `回合${event.status === 'completed' ? '完成' : event.status}`}</div>
+  if (event.kind === 'turn') {
+    const turnLabel = event.status === 'running'
+      ? 'Grok 正在工作'
+      : event.status === 'completed'
+        ? '回合完成'
+        : event.status === 'cancelled'
+          ? '回合已取消'
+          : event.status === 'error'
+            ? '回合錯誤'
+            : `回合${event.status}`
+    return <div className={`turn-marker ${event.status}`}><span />{turnLabel}</div>
+  }
   const icon = event.kind === 'tool' ? <Wrench size={16} /> : event.kind === 'thought' ? <Zap size={16} /> : event.kind === 'plan' ? <ListTodo size={16} /> : event.kind === 'subagent' ? <Bot size={16} /> : event.kind === 'task' ? <Activity size={16} /> : event.kind === 'compact' ? <Minimize2 size={16} /> : <CircleAlert size={16} />
   const title = eventTitle(event)
   return <article className={`event-card ${event.kind} ${matches ? 'search-hit' : ''}`}>
     <button className="event-head" onClick={() => setOpen(!open)}>{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{icon}<span>{title}</span>{'status' in event && <em>{event.status}</em>}</button>
     {open && <div className="event-content">
       {event.kind === 'thought' && <Markdown preview={preview}>{event.text}</Markdown>}
-      {event.kind === 'tool' && <><pre>{event.rawInput ? JSON.stringify(event.rawInput, null, 2) : 'No input details'}</pre>{event.output && <Markdown preview={preview}>{event.output}</Markdown>}</>}
+      {event.kind === 'tool' && <><pre>{event.rawInput ? JSON.stringify(event.rawInput, null, 2) : '沒有輸入細節'}</pre>{event.output && <Markdown preview={preview}>{event.output}</Markdown>}</>}
       {event.kind === 'plan' && <ol>{event.entries.map((entry, index) => <li key={index} data-status={entry.status}>{entry.content}<small>{entry.status}</small></li>)}</ol>}
       {event.kind === 'subagent' && <p>{event.output ?? `Subagent ${event.status}`}</p>}
       {event.kind === 'task' && <p>Background task · {event.status}</p>}
@@ -360,9 +376,10 @@ function SettingsPanel({
 
 const FEATURES = [
   ['聊天、串流、工具、權限', 'ACP 原生', 'native'], ['Session 新建／載入', 'ACP 原生', 'native'], ['模型與模式', '依 capability', 'conditional'],
-  ['Plan、Todos', '結構化事件', 'native'], ['Subagents', '部分原生（派出／完成可見，無 ACP 控制台）', 'conditional'],
+  ['Plan', '核准盒＋計畫事件', 'native'], ['Todos', '尚未接上', 'fallback'],
+  ['Subagents', '部分原生（派出／完成可見，無 ACP 控制台）', 'conditional'],
   ['Compact', '官方通知＋推斷卡片', 'native'], ['Rewind', 'ACP 可查詢，GUI 尚未接上', 'conditional'],
-  ['Plugins／MCP／Memory', '在 TUI 開啟', 'fallback'], ['Worktree／Fork', '依 capability', 'conditional'], ['Session 匯出', 'CLI 子命令', 'native']
+  ['Plugins／MCP／Memory', '在 TUI 開啟', 'fallback'], ['Worktree／Fork', '在 TUI 開啟', 'fallback'], ['Session 匯出', 'CLI 子命令', 'native']
 ]
 
 export function App(): React.JSX.Element {
@@ -487,14 +504,94 @@ export function App(): React.JSX.Element {
   const activeIdRef = useRef<string | null>(null)
   const billingRef = useRef<BillingInfo | null>(null)
   const loadingSessionsRef = useRef<Set<string>>(new Set())
+  const eventsRef = useRef<Record<string, UiSessionEvent[]>>({})
+  const hydratedGenRef = useRef<Record<string, number>>({})
+  const hydratingUntilRef = useRef<Record<string, number>>({})
+  const inflightPromptsRef = useRef<Set<string>>(new Set())
+  const isHydratingSession = (sessionId: string): boolean =>
+    loadingSessionsRef.current.has(sessionId) || Date.now() < (hydratingUntilRef.current[sessionId] ?? 0)
+  const clearHydrationCache = (): void => {
+    hydratedGenRef.current = {}
+    hydratingUntilRef.current = {}
+  }
+  const rememberHydratedSession = (sessionId: string, capturedGen: number): boolean => {
+    if (capturedGen < 1 || capturedGen !== connectionGenerationRef.current) return false
+    setEvents((current) => (Array.isArray(current[sessionId]) ? current : { ...current, [sessionId]: [] }))
+    hydratedGenRef.current[sessionId] = capturedGen
+    return true
+  }
+  const finalizeHydratedSession = (sessionId: string, alreadyRunning: boolean): void => {
+    if (alreadyRunning || inflightPromptsRef.current.has(sessionId)) return
+    setEvents((current) => ({
+      ...current,
+      [sessionId]: finalizeHydrationEvents(current[sessionId] ?? [])
+    }))
+    setRunningMap((current) => ({ ...current, [sessionId]: false }))
+  }
+  const beginSessionLoadLock = (sessionId: string): void => {
+    loadingSessionsRef.current.add(sessionId)
+    setLoadingSessionIds((current) => current.includes(sessionId) ? current : [...current, sessionId])
+  }
+  const endSessionLoadLock = (sessionId: string): void => {
+    loadingSessionsRef.current.delete(sessionId)
+    setLoadingSessionIds((current) => current.filter((id) => id !== sessionId))
+  }
+  const loadOpRef = useRef<Record<string, number>>({})
+  const nextLoadOp = useCallback((sessionId: string): number => {
+    const token = (loadOpRef.current[sessionId] ?? 0) + 1
+    loadOpRef.current[sessionId] = token
+    return token
+  }, [])
+  const isCurrentLoadOp = (sessionId: string, token: number): boolean =>
+    loadOpRef.current[sessionId] === token
+  const invalidateInflightLoadOps = useCallback((): void => {
+    for (const sessionId of loadingSessionsRef.current) nextLoadOp(sessionId)
+  }, [nextLoadOp])
+  const remoteLoadLockRef = useRef<string | null>(null)
+  const remoteLoadGenRef = useRef<number>(0)
+  const remoteStatusSeqRef = useRef(0)
+  const setRemoteFocusLoadRef = useRef<(sessionId: string | null, status?: 'loading' | 'ready' | 'error') => void>(() => {})
+  const setRemoteFocusLoad = (sessionId: string | null, status?: 'loading' | 'ready' | 'error'): void => {
+    const previous = remoteLoadLockRef.current
+    if (previous && previous !== sessionId) endSessionLoadLock(previous)
+    if (!sessionId || status === 'error') {
+      if (sessionId) endSessionLoadLock(sessionId)
+      else if (previous) endSessionLoadLock(previous)
+      remoteLoadLockRef.current = null
+      return
+    }
+    if (status === 'loading') {
+      // Remote load owns the newest operation for this session: any older
+      // desktop load still in flight must lose its rollback/finally rights.
+      nextLoadOp(sessionId)
+      remoteLoadLockRef.current = sessionId
+      remoteLoadGenRef.current = connectionGenerationRef.current
+      beginSessionLoadLock(sessionId)
+      return
+    }
+    // A standalone 'ready' (no matching remote 'loading' lock) is main's status
+    // echo for a session that was already ready; a real remote load always emits
+    // 'loading' first. The echo must not claim ownership, hydrate an empty
+    // transcript cache, or release a desktop load that is still in flight.
+    if (previous !== sessionId && loadingSessionsRef.current.has(sessionId)) return
+    const capturedGen = remoteLoadGenRef.current || connectionGenerationRef.current
+    if (rememberHydratedSession(sessionId, capturedGen)) {
+      setSessionReady((current) => markSessionReadyIfCurrent(current, sessionId, capturedGen, connectionGenerationRef.current))
+      finalizeHydratedSession(sessionId, inflightPromptsRef.current.has(sessionId))
+    }
+    endSessionLoadLock(sessionId)
+    remoteLoadLockRef.current = null
+  }
   const permissionReturnFocusRef = useRef<HTMLElement | null>(null)
   const setupReturnFocusRef = useRef<HTMLElement | null>(null)
   const deletingSessionsRef = useRef(false)
   const cancelActiveTurnRef = useRef<(sessionId: string) => Promise<void>>(async () => {})
   const sessionsRef = useRef<SessionSummary[]>([])
   const remoteControlActiveRef = useRef(false)
+  setRemoteFocusLoadRef.current = setRemoteFocusLoad
   followTailRef.current = followTail
   activeIdRef.current = active?.id ?? null
+  eventsRef.current = events
   sessionsRef.current = sessions
   remoteControlActiveRef.current = remoteControlActive
   const composerCollapsedRef = useRef(false)
@@ -562,6 +659,7 @@ export function App(): React.JSX.Element {
       setFollowTail(false)
       return
     }
+    if (activeIdRef.current && isHydratingSession(activeIdRef.current)) return
     atBottomLeaveTimerRef.current = window.setTimeout(() => {
       atBottomLeaveTimerRef.current = null
       followTailRef.current = false
@@ -620,6 +718,7 @@ export function App(): React.JSX.Element {
   const updateConnectionGeneration = (newGen: number): void => {
     connectionGenerationRef.current = newGen
     setConnectionGeneration(newGen)
+    clearHydrationCache()
   }
 
   const refreshUsage = async (sessionId: string): Promise<void> => {
@@ -703,10 +802,23 @@ export function App(): React.JSX.Element {
   const permission = permissions[0] ?? null
   const safePermissionOptionId = permission?.options.find((option) => option.kind.includes('reject'))?.optionId
   const planApproval = planApprovals[0] ?? null
+  const dismissPlanApprovalsForSession = (sessionId: string): void => {
+    setPlanApprovals((current) => current.filter((item) => item.sessionId !== sessionId))
+  }
   const answerPlanApproval = (requestId: string, decision: PlanApprovalDecision): void => {
     setPlanApprovals((current) => current.filter((item) => item.requestId !== requestId))
     void window.grokApi.respondPlanApproval(requestId, decision)
       .catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+  }
+  const answerPermission = (requestId: string, optionId: string): void => {
+    void window.grokApi.respondPermission(requestId, optionId)
+      .then(() => {
+        setPermissions((current) => current.filter((item) => item.requestId !== requestId))
+      })
+      .catch((error) => {
+        const raw = error instanceof Error ? error.message : String(error)
+        setNotice(stripIpcErrorPrefix(raw) || '權限回覆失敗')
+      })
   }
   const running = active ? runningMap[active.id] === true : false
   /** Any Team/active pane still running — permission reconnect must not tear down peers. */
@@ -762,9 +874,38 @@ export function App(): React.JSX.Element {
           )
           return { ...current, [event.sessionId]: next.events }
         })
+        if (event.kind === 'turn') {
+          setRunningMap((current) => ({ ...current, [event.sessionId]: event.status === 'running' }))
+          if (event.status !== 'running') dismissPlanApprovalsForSession(event.sessionId)
+        }
       },
       openPreviewPath: (filePath: string) => {
         openPreviewPathRef.current?.(filePath)
+      },
+      enqueuePlanApproval: (request: PlanApprovalRequest) => {
+        setPlanApprovals((current) => [...current, request])
+      },
+      enqueuePermission: (request: PermissionRequest) => {
+        setPermissions((current) => [...current, request])
+      },
+      seedSessions: (next: SessionSummary[]) => {
+        setSessions(next)
+      },
+      clearPermissions: () => setPermissions([]),
+      setCommands: (commands: AgentCapabilities['commands']) => {
+        setCaps((current) => ({ ...current, commands }))
+      },
+      dropLocalPaths: (sessionId: string, paths: string[]) => {
+        setDrafts((current) => ({ ...current, [sessionId]: appendPathLines(current[sessionId] ?? '', paths) }))
+        setPathChipsBySession((current) => ({
+          ...current,
+          [sessionId]: upsertPathChips(current[sessionId] ?? [], paths.map((filePath) => ({ path: filePath })))
+        }))
+      },
+      getActiveSessionId: () => activeIdRef.current,
+      getSessionEvents: (sessionId?: string) => {
+        const id = sessionId ?? activeIdRef.current
+        return id ? (eventsRef.current[id] ?? []) : []
       }
     }
     window.__grokSmoke = api
@@ -806,9 +947,17 @@ export function App(): React.JSX.Element {
       }
       if (event.kind === 'error') setErrorPulse((value) => value + 1)
       if (event.kind === 'turn') {
-        setRunningMap((current) => ({ ...current, [event.sessionId]: event.status === 'running' }))
+        // session/load replays historical turn:running before the RPC returns.
+        // Do not treat that as a live turn. Tests and real sends arrive after load.
+        const applyRunning = !loadingSessionsRef.current.has(event.sessionId)
+          || inflightPromptsRef.current.has(event.sessionId)
+        if (applyRunning) {
+          setRunningMap((current) => ({ ...current, [event.sessionId]: event.status === 'running' }))
+        }
         if (event.status !== 'running') {
+          inflightPromptsRef.current.delete(event.sessionId)
           setPermissions((current) => current.filter((item) => item.sessionId !== event.sessionId))
+          dismissPlanApprovalsForSession(event.sessionId)
           // P1-1: no drain evidence via SDK closed union — clear queued without claiming delivered.
           setInterjectState((current) =>
             current?.status === 'queued' && current.sessionId === event.sessionId ? null : current)
@@ -827,15 +976,19 @@ export function App(): React.JSX.Element {
               if (drained) {
                 localQueueRef.current = next
                 setLocalQueue(next)
-                const blocks: PromptBlock[] = [
-                  ...(drained.text ? [{ type: 'text' as const, text: drained.text }] : []),
-                  ...drained.attachments
-                ]
-                setRunningMap((current) => ({ ...current, [event.sessionId]: true }))
-                void window.grokApi.sendPrompt(event.sessionId, blocks).catch((error) => {
-                  setNotice(error instanceof Error ? error.message : String(error))
-                  setRunningMap((current) => ({ ...current, [event.sessionId]: false }))
-                })
+                if (parseAlwaysApproveSlash(drained.text ?? '')) {
+                  setNotice('/always-approve 不會送進下一輪，請用工具權限選單切換')
+                } else {
+                  const blocks: PromptBlock[] = [
+                    ...(drained.text ? [{ type: 'text' as const, text: drained.text }] : []),
+                    ...drained.attachments
+                  ]
+                  setRunningMap((current) => ({ ...current, [event.sessionId]: true }))
+                  void window.grokApi.sendPrompt(event.sessionId, blocks).catch((error) => {
+                    setNotice(error instanceof Error ? error.message : String(error))
+                    setRunningMap((current) => ({ ...current, [event.sessionId]: false }))
+                  })
+                }
               }
             }
           }
@@ -856,7 +1009,11 @@ export function App(): React.JSX.Element {
           window.setTimeout(() => { void refreshBillingRef.current() }, 800)
         }
       }
-      if (!followTailRef.current && event.sessionId === activeIdRef.current) setUnread((value) => value + 1)
+      if (
+        !followTailRef.current
+        && event.sessionId === activeIdRef.current
+        && (manualScrollPauseRef.current || !isHydratingSession(event.sessionId))
+      ) setUnread((value) => value + 1)
     })
     const offPermission = window.grokApi.onPermission((request) => setPermissions((current) => {
       if (current.length === 0 && document.activeElement instanceof HTMLElement) permissionReturnFocusRef.current = document.activeElement
@@ -883,13 +1040,19 @@ export function App(): React.JSX.Element {
         const nextGen = bumpConnectionGeneration(connectionGenerationRef.current)
         connectionGenerationRef.current = nextGen
         setConnectionGeneration(nextGen)
+        invalidateInflightLoadOps()
+        hydratedGenRef.current = {}
+        hydratingUntilRef.current = {}
+        loadingSessionsRef.current.clear()
+        remoteLoadLockRef.current = null
+        setLoadingSessionIds([])
         setSessionReady(invalidateAllReadiness())
       }
       if (next.stderr) console.warn('[grok stderr]', next.stderr)
       if (next.message) setNotice(next.message)
     })
     return () => { offEvent(); offPermission(); offPermissionResolved?.(); offPlanApproval?.(); offStatus() }
-  }, [])
+  }, [invalidateInflightLoadOps])
 
   useEffect(() => {
     if (!status.connected) return
@@ -922,12 +1085,12 @@ export function App(): React.JSX.Element {
         lastRemoteNoticeRef.current = notice
         setNotice(notice)
       }
-      // Mirror main focus readiness when load finishes (renderer does not re-load).
-      if (state.focusSessionId && state.focusStatus === 'ready') {
-        const id = state.focusSessionId
-        setSessionReady((current) =>
-          markSessionReadyIfCurrent(current, id, connectionGenerationRef.current, connectionGenerationRef.current)
-        )
+      if (state.focusStatus === 'loading' || state.focusStatus === 'ready' || state.focusStatus === 'error') {
+        remoteStatusSeqRef.current += 1
+        setRemoteFocusLoadRef.current(state.focusSessionId ?? null, state.focusStatus)
+      } else if (!state.focusSessionId) {
+        remoteStatusSeqRef.current += 1
+        setRemoteFocusLoadRef.current(null)
       }
     })
     return offState
@@ -937,10 +1100,14 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const off = window.grokApi.onRemoteFocusChanged((payload) => {
       const sessionId = payload.sessionId
-      if (!sessionId) return
+      if (!sessionId) {
+        setRemoteFocusLoadRef.current(null)
+        return
+      }
       // Trust main event immediately (state may lag behind focus-changed).
       remoteMainFocusRef.current = sessionId
       const seq = ++remoteFocusAlignSeqRef.current
+      const statusSeq = remoteStatusSeqRef.current
       void (async () => {
         aligningRemoteFocusRef.current = true
         try {
@@ -960,14 +1127,19 @@ export function App(): React.JSX.Element {
           setActive(session)
           activeIdRef.current = sessionId
           resumeTranscriptFollowing()
-          if (payload.focusStatus === 'ready') {
-            setSessionReady((current) =>
-              markSessionReadyIfCurrent(current, sessionId, connectionGenerationRef.current, connectionGenerationRef.current)
-            )
-          } else if (payload.focusStatus === 'loading') {
-            setNotice('手機焦點對話載入中…')
-          } else if (payload.focusStatus === 'error') {
-            setNotice('手機焦點對話載入失敗')
+          // The state stream owns status progression. If it already advanced past
+          // this payload while we awaited listSessions, re-applying the stale
+          // status would re-take a load lock that no later event will release.
+          if (statusSeq === remoteStatusSeqRef.current) {
+            if (payload.focusStatus === 'ready') {
+              setRemoteFocusLoadRef.current(sessionId, 'ready')
+            } else if (payload.focusStatus === 'loading') {
+              setRemoteFocusLoadRef.current(sessionId, 'loading')
+              setNotice('手機焦點對話載入中…')
+            } else if (payload.focusStatus === 'error') {
+              setRemoteFocusLoadRef.current(sessionId, 'error')
+              setNotice('手機焦點對話載入失敗')
+            }
           }
         } finally {
           if (seq === remoteFocusAlignSeqRef.current) {
@@ -1090,6 +1262,7 @@ export function App(): React.JSX.Element {
         if (deleteTarget) { event.preventDefault(); setDeleteTarget(null); return }
         if (selectMode) { event.preventDefault(); setSelectMode(false); setSelectedIds(new Set()); return }
         if (renameTarget) { event.preventDefault(); setRenameTarget(null); return }
+        if (planApproval) { event.preventDefault(); answerPlanApproval(planApproval.requestId, 'request-changes'); return }
         if (searchOpen) { event.preventDefault(); setSearchOpen(false); setTranscriptQuery(''); return }
         // Clear active Preview item (not dock collapse, not delete, not cancel turn)
         if (previewActiveId || previewLoad.status !== 'idle') {
@@ -1108,7 +1281,7 @@ export function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [running, active, panel, setupDialog, lifecycleBusy, batchDeleteTargets, yoloConfirm, deleteTarget, renameTarget, searchOpen, selectMode, sidebarOpen, settings.shortcuts, previewActiveId, previewLoad.status])
+  }, [running, active, panel, setupDialog, lifecycleBusy, batchDeleteTargets, yoloConfirm, deleteTarget, renameTarget, planApproval, searchOpen, selectMode, sidebarOpen, settings.shortcuts, previewActiveId, previewLoad.status])
 
   const activeEvents = useMemo(() => active ? events[active.id] ?? [] : [], [active, events])
   const transcriptEvents = useMemo(() => activeEvents.filter(isTranscriptVisibleEvent), [activeEvents])
@@ -1178,8 +1351,17 @@ export function App(): React.JSX.Element {
     activeSessionId: active?.id,
     teamSessionIds: team.slots
   }), [sessions, settings.pinnedSessions, active?.id, team.slots])
-  const selectedCount = selectedIds.size
   const selectedSessions = useMemo(() => sessions.filter((session) => selectedIds.has(session.id)), [sessions, selectedIds])
+  const visibleSelectedSessions = useMemo(
+    () => selectedSessions.filter((session) => filteredSessions.some((item) => item.id === session.id)),
+    [selectedSessions, filteredSessions]
+  )
+  const cleanupSelectedSessions = useMemo(
+    () => selectedSessions.filter((session) => cleanupCandidates.some((item) => item.id === session.id)),
+    [selectedSessions, cleanupCandidates]
+  )
+  const visibleSelectedCount = visibleSelectedSessions.length
+  const cleanupSelectedCount = cleanupSelectedSessions.length
   const showTeamBoard = teamEnabled && team.slots.length >= 2
   // L2 orb: global connection + any running turn (not sticky error — errorPulse drives starfield only).
   const orbMode: StatusOrbMode = !status.connected ? 'offline' : anyRunning || running ? 'running' : 'idle'
@@ -1217,7 +1399,7 @@ export function App(): React.JSX.Element {
     isCollapsing={collapsingSessionId === session.id}
     selectMode={selectMode}
     teamEnabled={teamEnabled}
-    disabled={lifecycleBusy || loadingSessionIds.includes(session.id)}
+    disabled={lifecycleBusy}
     onOpen={rowOpen}
     onToggleSelect={rowToggleSelect}
     onToggleTeam={rowToggleTeam}
@@ -1248,9 +1430,20 @@ export function App(): React.JSX.Element {
     setSelectedIds(new Set(filteredSessions.map((session) => session.id)))
   }
   const beginBatchDelete = (): void => {
-    const targets = selectedSessions.filter((session) => filteredSessions.some((item) => item.id === session.id))
-    if (!targets.length) return
-    setBatchDeleteTargets(targets)
+    if (!visibleSelectedSessions.length) {
+      if (selectedIds.size) {
+        setNotice('勾選的對話目前被篩選藏起來了，側欄刪除不會動到它們。請用「建議清理」刪，或先關掉活躍篩選。')
+      }
+      return
+    }
+    setBatchDeleteTargets(visibleSelectedSessions)
+  }
+  const beginCleanupDelete = (): void => {
+    if (!cleanupSelectedSessions.length) {
+      setNotice('建議清理名單裡沒有已勾選的對話')
+      return
+    }
+    setBatchDeleteTargets(cleanupSelectedSessions)
   }
   const clearSelection = (): void => {
     setSelectedIds(new Set())
@@ -1302,6 +1495,12 @@ export function App(): React.JSX.Element {
     }
     void setPermissionModeWithBackend('ask')
   }
+  const applyAlwaysApproveSlash = (raw: string | undefined): boolean => {
+    const parsed = parseAlwaysApproveSlash(raw ?? '')
+    if (!parsed) return false
+    requestPermissionMode(parsed === 'off' ? 'ask' : 'always-approve')
+    return true
+  }
   const setPermissionModeWithBackend = async (mode: AgentPermissionMode): Promise<void> => {
     if (mode === 'always-approve') {
       const yoloGate = canEnableYolo(remoteControlActive)
@@ -1333,21 +1532,20 @@ export function App(): React.JSX.Element {
           const loadedData: Record<string, { models: any; modes: any }> = {}
           const reloadSessionBackground = async (session: SessionSummary, gen: number): Promise<boolean> => {
             if (loadingSessionsRef.current.has(session.id)) return false
-            loadingSessionsRef.current.add(session.id)
-            setLoadingSessionIds((current) => current.includes(session.id) ? current : [...current, session.id])
+            beginSessionLoadLock(session.id)
             try {
               setEvents((current) => ({ ...current, [session.id]: [] }))
               const response = await window.grokApi.loadSession(session.id, session.cwd)
               loadedData[session.id] = { models: response.models, modes: response.modes }
               setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, gen, connectionGenerationRef.current))
+              if (rememberHydratedSession(session.id, gen)) finalizeHydratedSession(session.id, inflightPromptsRef.current.has(session.id))
               window.setTimeout(() => { void refreshUsageRef.current(session.id) }, 0)
               return true
             } catch {
               setSessionReady((current) => clearSessionReady(current, session.id))
               return false
             } finally {
-              loadingSessionsRef.current.delete(session.id)
-              setLoadingSessionIds((current) => current.filter((id) => id !== session.id))
+              endSessionLoadLock(session.id)
             }
           }
           const reloadPromises = slotsToReload.map(async (slotId) => {
@@ -1464,22 +1662,24 @@ export function App(): React.JSX.Element {
       return next
     })
   }
-  const createSession = async (): Promise<void> => {
-    if (lifecycleBusy) return
+  const createSessionInCwd = async (cwd: string): Promise<void> => {
+    if (lifecycleBusy || !cwd.trim()) return
     try {
-      const cwd = await window.grokApi.chooseDirectory()
-      if (!cwd) return
       const capsValue = await connect()
       if (!capsValue) return
+      const genAtCreate = connectionGenerationRef.current
       const response = await window.grokApi.createSession(cwd)
-      const newSessionId = response.sessionId
-      if (!newSessionId) return
+      const newSessionId = typeof response.sessionId === 'string' ? response.sessionId.trim() : ''
+      if (!newSessionId) throw new Error('建立對話失敗：未回傳 sessionId')
       setModels(response.models ?? capsValue.modelState)
       applySessionModes(response.modes)
-      const summary = { id: newSessionId, cwd, title: 'New session', updatedAt: new Date().toISOString() }
+      const summary = { id: newSessionId, cwd, title: '新對話', updatedAt: new Date().toISOString() }
       setSessions((current) => [summary, ...current])
+      if (response.connectionStale || genAtCreate !== connectionGenerationRef.current) {
+        setNotice('連線已更新，請再點一次剛建立的對話')
+        return
+      }
       setActive(summary)
-      const genAtCreate = connectionGenerationRef.current
       setSessionReady((current) => markSessionReadyIfCurrent(current, newSessionId, genAtCreate, connectionGenerationRef.current))
       if (teamEnabled) {
         setTeam((current) => {
@@ -1489,21 +1689,62 @@ export function App(): React.JSX.Element {
       }
       setUsage(null)
       resumeTranscriptFollowing()
+      rememberHydratedSession(newSessionId, genAtCreate)
       void refreshUsage(newSessionId)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error))
     }
   }
+  const createSession = async (): Promise<void> => {
+    if (lifecycleBusy) return
+    try {
+      const cwd = await window.grokApi.chooseDirectory()
+      if (!cwd) return
+      await createSessionInCwd(cwd)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+    }
+  }
+  const applyOpenedSessionChrome = (session: SessionSummary): void => {
+    setActive(session)
+    activeIdRef.current = session.id
+    if (teamEnabled) {
+      setTeam((current) => {
+        if (isInTeam(current, session.id)) return setTeamFocus(current, session.id)
+        return toggleTeamSlot(current, session.id)
+      })
+    }
+    const cachedUsage = usageSampleRef.current[session.id]
+    setUsage(cachedUsage ?? null)
+    resumeTranscriptFollowing()
+  }
   const loadSession = async (session: SessionSummary): Promise<void> => {
-    if (lifecycleBusy || loadingSessionsRef.current.has(session.id)) return
+    if (lifecycleBusy) return
+    if (loadingSessionsRef.current.has(session.id)) {
+      applyOpenedSessionChrome(session)
+      return
+    }
     // Invalidate in-flight phone focus UI align; desktop focus is last-writer for UI.
     remoteFocusAlignSeqRef.current += 1
     aligningRemoteFocusRef.current = false
     remoteMainFocusRef.current = session.id
-    loadingSessionsRef.current.add(session.id)
-    setLoadingSessionIds((current) => current.includes(session.id) ? current : [...current, session.id])
+    const liveGen = connectionGenerationRef.current
+    const cachedEvents = eventsRef.current[session.id]
+    const hydratedHere = liveGen >= 1
+      && hydratedGenRef.current[session.id] === liveGen
+      && Array.isArray(cachedEvents)
+    if (hydratedHere) {
+      applyOpenedSessionChrome(session)
+      setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, liveGen, liveGen))
+      stickAfterReplay(session.id)
+      void refreshUsageRef.current(session.id)
+      return
+    }
+    const loadOp = nextLoadOp(session.id)
+    beginSessionLoadLock(session.id)
     try {
       const capsValue = await connect()
+      if (!isCurrentLoadOp(session.id, loadOp)) return
       if (!capsValue) {
         setSessionReady((current) => clearSessionReady(current, session.id))
         return
@@ -1511,31 +1752,32 @@ export function App(): React.JSX.Element {
       const currentGen = connectionGenerationRef.current
       const previousActive = active
       const previousUsage = usage
-      const previousEvents = events[session.id]
-      setActive(session)
-      // Eagerly align the ref so post-await mode/model apply is not raced away by render timing.
-      activeIdRef.current = session.id
-      if (teamEnabled) {
-        setTeam((current) => {
-          if (isInTeam(current, session.id)) return setTeamFocus(current, session.id)
-          return toggleTeamSlot(current, session.id)
-        })
-      }
-      setUsage(null)
-      resumeTranscriptFollowing()
+      const previousEvents = eventsRef.current[session.id]
+      const wasAlreadyRunning = runningMap[session.id] === true
+      applyOpenedSessionChrome(session)
       setEvents((current) => ({ ...current, [session.id]: [] }))
       try {
         const response = await window.grokApi.loadSession(session.id, session.cwd)
+        if (!isCurrentLoadOp(session.id, loadOp)) return
         if (activeIdRef.current === session.id) {
           setModels((current) => response.models ?? current ?? capsValue.modelState)
           applySessionModes(response.modes)
         }
-        setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, currentGen, connectionGenerationRef.current))
+        hydratingUntilRef.current[session.id] = Date.now() + 800
+        window.setTimeout(() => {
+          if (!isCurrentLoadOp(session.id, loadOp)) return
+          finalizeHydratedSession(session.id, wasAlreadyRunning)
+          stickAfterReplay(session.id)
+          if (activeIdRef.current === session.id && !manualScrollPauseRef.current) setUnread(0)
+        }, 800)
+        if (rememberHydratedSession(session.id, currentGen)) {
+          setSessionReady((current) => markSessionReadyIfCurrent(current, session.id, currentGen, connectionGenerationRef.current))
+        }
         window.setTimeout(() => { void refreshUsageRef.current(session.id) }, 0)
-        // Entering a conversation must land on the newest message, not wherever the
-        // replay happened to stop.
         stickAfterReplay(session.id)
+        if (!manualScrollPauseRef.current) setUnread(0)
       } catch (error) {
+        if (!isCurrentLoadOp(session.id, loadOp)) return
         setSessionReady((current) => clearSessionReady(current, session.id))
         setActive((current) => current?.id === session.id ? previousActive : current)
         if (activeIdRef.current === session.id || activeIdRef.current === previousActive?.id) setUsage(previousUsage)
@@ -1550,11 +1792,11 @@ export function App(): React.JSX.Element {
         setNotice(error instanceof Error ? error.message : String(error))
       }
     } catch (err) {
+      if (!isCurrentLoadOp(session.id, loadOp)) return
       setSessionReady((current) => clearSessionReady(current, session.id))
       setNotice(err instanceof Error ? err.message : String(err))
     } finally {
-      loadingSessionsRef.current.delete(session.id)
-      setLoadingSessionIds((current) => current.filter((id) => id !== session.id))
+      if (isCurrentLoadOp(session.id, loadOp)) endSessionLoadLock(session.id)
     }
   }
   const deleteSession = async (): Promise<void> => {
@@ -1663,6 +1905,8 @@ export function App(): React.JSX.Element {
     }
     // Cancel discards any buffered interjection on the agent side; clear local "queued" claim.
     discardQueuedInterject(sessionId)
+    // Main already answers outstanding plan approvals as "request-changes".
+    dismissPlanApprovalsForSession(sessionId)
     await window.grokApi.cancel(sessionId)
   }
   cancelActiveTurnRef.current = cancelActiveTurn
@@ -1713,6 +1957,7 @@ export function App(): React.JSX.Element {
     const dedupePaths = imagePathDedupeBySession[sessionId] ?? []
     const rawDraft = drafts[sessionId] ?? ''
     const text = stripDuplicateImagePathLines(rawDraft, dedupePaths).trim()
+    if (applyAlwaysApproveSlash(text)) return
     if (!text && !pending.length) return
     setImagePathDedupeBySession((current) => {
       if (!current[sessionId]) return current
@@ -1728,6 +1973,7 @@ export function App(): React.JSX.Element {
       delete next[sessionId]
       return next
     })
+    inflightPromptsRef.current.add(sessionId)
     dispatchPrompt(sessionId, text || undefined, pending)
   }
 
@@ -1749,6 +1995,7 @@ export function App(): React.JSX.Element {
     if (!runningMap[sessionId] || interjectBusy) return
     const text = drafts[sessionId]?.trim()
     if (!text) return
+    if (applyAlwaysApproveSlash(text)) return
     setInterjectBusy(true)
     const interjectionId = mintInterjectionId()
     try {
@@ -1803,6 +2050,7 @@ export function App(): React.JSX.Element {
     const pendingAttachments = attachmentsBySession[sessionId] ?? []
     const dedupePaths = imagePathDedupeBySession[sessionId] ?? []
     const text = stripDuplicateImagePathLines(drafts[sessionId] ?? '', dedupePaths).trim()
+    if (applyAlwaysApproveSlash(text)) return
     if (!text && !pendingAttachments.length) return
     setInterjectBusy(true)
     discardQueuedInterject(sessionId)
@@ -1907,6 +2155,7 @@ export function App(): React.JSX.Element {
     const sessionId = active.id
     const text = drafts[sessionId]?.trim()
     if (!text && !attachments.length) return
+    if (applyAlwaysApproveSlash(text)) return
 
     // Remote on + text-only: main single-slot (E9).
     // If attachments exist, clear main first (await) then install one local queue so
@@ -2163,6 +2412,9 @@ export function App(): React.JSX.Element {
             } catch {
               failed += 1
             }
+          } else if (isVideoMime(file.type) || isAudioMime(file.type) || isVideoPath(file.name) || isAudioPath(file.name)) {
+            failed += 1
+            setNotice('請從檔案總管拖入影音檔，才能取得本機路徑。程式不會把大檔複製到暫存。')
           } else {
             failed += 1
           }
@@ -2511,6 +2763,10 @@ export function App(): React.JSX.Element {
       description: entry.description,
       keywords: entry.keywords,
       onRun: () => {
+        if (entry.id === 'slash:always-approve') {
+          requestPermissionMode('always-approve')
+          return
+        }
         if (!active) return
         setDrafts((current) => ({ ...current, [active.id]: entry.insertText }))
       }
@@ -2532,7 +2788,7 @@ export function App(): React.JSX.Element {
       <button className={`status-pill ${status.connected ? 'online' : ''}`} disabled={lifecycleBusy || anyRunning} onClick={() => { if (status.found) void connect(); else openSetupDialog('install') }}><span />{status.found ? `Grok ${status.version ?? ''}` : 'CLI not found'} · {status.connected ? 'Connected' : status.found ? 'Connect' : 'Setup'}</button></header>
     <div className={`workspace ${sidebarOpen ? '' : 'sidebar-collapsed'} ${previewOpen ? 'preview-open' : 'preview-rail'}`}>
       <aside className="sidebar">
-        <div className="sidebar-actions"><button className="primary" data-magnetic data-nova-tone="primary" disabled={lifecycleBusy} onClick={() => void createSession()}><FilePlus2 />新 Session</button><button className="icon-button sidebar-rail-expand" aria-label="展開側欄" onClick={() => setSidebarOpen(true)}><PanelLeft /></button><button className="icon-button" aria-label="收合側欄" onClick={() => setSidebarOpen(false)}><PanelLeftClose /></button></div>
+        <div className="sidebar-actions"><button className="primary" data-magnetic data-nova-tone="primary" data-testid="new-session-pick-folder" disabled={lifecycleBusy} onClick={() => void createSession()}><FilePlus2 />選資料夾開始</button><button className="icon-button sidebar-rail-expand" aria-label="展開側欄" onClick={() => setSidebarOpen(true)}><PanelLeft /></button><button className="icon-button" aria-label="收合側欄" onClick={() => setSidebarOpen(false)}><PanelLeftClose /></button></div>
         <div className="sidebar-team-bar">
           <AgentsTeamToolbar
             enabled={teamEnabled}
@@ -2576,7 +2832,7 @@ export function App(): React.JSX.Element {
           <small>{settings.sidebarActiveDays} 天內</small>
         </label>
         <div className="session-caption">
-          <span>{teamEnabled ? 'AGENTS · SESSIONS' : 'RECENT SESSIONS'}</span>
+          <span>{teamEnabled ? 'AGENTS · 對話' : '最近對話'}</span>
           <em data-testid="session-caption-count">{filteredSessions.length}{settings.sidebarActiveOnly ? ` · 活躍 ${settings.sidebarActiveDays} 天` : ''}{folderFilter !== 'all' ? ' · 已篩選' : ''}</em>
         </div>
         <div className="sidebar-select-bar">
@@ -2584,7 +2840,7 @@ export function App(): React.JSX.Element {
           {selectMode && <>
             <button type="button" onClick={() => { setSelectMode(false); clearSelection() }}>取消</button>
             <button type="button" onClick={() => selectAllVisibleSessions()}>全選可見</button>
-            <button type="button" className={selectedCount > 0 ? '' : undefined} onClick={beginBatchDelete} disabled={selectedCount === 0}><span className="danger-text">刪除所選({selectedCount})</span></button>
+            <button type="button" className={visibleSelectedCount > 0 ? '' : undefined} onClick={beginBatchDelete} disabled={visibleSelectedCount === 0} data-testid="sidebar-batch-delete"><span className="danger-text">刪除所選({visibleSelectedCount})</span></button>
           </>}
         </div>
         {cleanupCandidates.length > 0 && (
@@ -2630,9 +2886,9 @@ export function App(): React.JSX.Element {
                     )
                   })}
                 </ul>
-                {selectedCount > 0 && (
-                  <button type="button" className="cleanup-batch-delete" onClick={beginBatchDelete}>
-                    刪除所選（{selectedCount}）
+                {cleanupSelectedCount > 0 && (
+                  <button type="button" className="cleanup-batch-delete" data-testid="cleanup-batch-delete" onClick={beginCleanupDelete}>
+                    刪除所選（{cleanupSelectedCount}）
                   </button>
                 )}
               </div>
@@ -2644,7 +2900,27 @@ export function App(): React.JSX.Element {
             <header><span>已釘選</span><em>{pinned.length}</em></header>
             {pinned.map(renderSessionRow)}
           </section>}
-          {sessionGroups.map((group) => <section className="session-group" key={group.cwd}><header><span title={group.cwd}>{group.name}</span><em>{group.sessions.length}</em></header>{group.sessions.map(renderSessionRow)}</section>)}
+            {sessionGroups.map((group) => <section className="session-group" key={group.cwd}>
+            <header>
+              <span title={group.cwd}>{group.name}</span>
+              <button
+                type="button"
+                className="session-group-add"
+                data-testid="session-group-add"
+                data-cwd={group.cwd}
+                aria-label={`在「${group.name}」新增對話`}
+                title={`在「${group.name}」新增對話`}
+                disabled={lifecycleBusy}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  void createSessionInCwd(group.cwd)
+                }}
+              ><FilePlus2 /></button>
+              <em>{group.sessions.length}</em>
+            </header>
+            {group.sessions.map(renderSessionRow)}
+          </section>)}
         </nav>
         <div className="sidebar-footer"><button onClick={() => setPanel('features')}><Gauge />功能矩陣</button><button onClick={() => setPanel('settings')}><Settings />設定</button></div>
       </aside>
@@ -2932,7 +3208,7 @@ export function App(): React.JSX.Element {
         <button className="danger-option" data-testid="plan-abandon" onClick={() => answerPlanApproval(planApproval.requestId, 'abandon')}><X /><span><strong>放棄這個計畫</strong><small>關閉規劃模式，不會開始實作</small></span></button>
       </div>
     </section></div>}
-    {permission && <div className="modal-backdrop"><section key={permission.requestId} className="permission-modal" role="dialog" aria-modal="true" aria-label={permission.title} tabIndex={-1} autoFocus={!safePermissionOptionId} onKeyDown={containDialogFocus}><div className="permission-icon"><Wrench /></div><span className="eyebrow">ACTION REQUIRES APPROVAL{permissions.length > 1 ? ` · 還有 ${permissions.length - 1} 項待決` : ''}</span><h2>{permission.title}</h2><p>Grok 要求執行一項可能修改檔案或呼叫外部工具的操作。只可選擇代理提供的合法選項。</p><div>{permission.options.map((option) => <button key={option.optionId} autoFocus={option.optionId === safePermissionOptionId} className={option.kind.includes('reject') ? 'danger-option' : ''} onClick={() => void window.grokApi.respondPermission(permission.requestId, option.optionId).catch((error) => setNotice(error instanceof Error ? error.message : String(error))).then(() => setPermissions((current) => current.filter((item) => item.requestId !== permission.requestId)))}>{option.kind.includes('reject') ? <X /> : <Check />}<span><strong>{option.name}</strong><small>{option.kind}</small></span></button>)}</div></section></div>}
+    {permission && <div className="modal-backdrop"><section key={permission.requestId} className="permission-modal" role="dialog" aria-modal="true" aria-label={permission.title} tabIndex={-1} autoFocus={!safePermissionOptionId} onKeyDown={containDialogFocus}><div className="permission-icon"><Wrench /></div><span className="eyebrow">ACTION REQUIRES APPROVAL{permissions.length > 1 ? ` · 還有 ${permissions.length - 1} 項待決` : ''}</span><h2>{permission.title}</h2><p>Grok 要求執行一項可能修改檔案或呼叫外部工具的操作。只可選擇代理提供的合法選項。</p><div>{permission.options.map((option) => <button key={option.optionId} autoFocus={option.optionId === safePermissionOptionId} className={option.kind.includes('reject') ? 'danger-option' : ''} onClick={() => answerPermission(permission.requestId, option.optionId)}>{option.kind.includes('reject') ? <X /> : <Check />}<span><strong>{option.name}</strong><small>{option.kind}</small></span></button>)}</div></section></div>}
     {yoloConfirm && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="啟用 YOLO 模式"><div className="permission-icon danger"><CircleAlert /></div><span className="eyebrow">PERMISSION MODE</span><h2>啟用 YOLO 模式？</h2><p>開啟「一律核准」後，權限請求將預設通過，可能讓工具或檔案變更在未複核下執行。建議只在你信任工作目錄與腳本時使用。</p><div><button className="danger-option" disabled={yoloBusy || lifecycleBusy || running || sessionLoading} onClick={() => void confirmPermissionMode()}><CircleAlert /><span><strong>{yoloBusy ? '啟用中…' : '我了解風險，啟用 YOLO'}</strong><small>立即一律核准</small></span></button><button autoFocus disabled={yoloBusy} onClick={() => setYoloConfirm(false)}><X /><span><strong>取消</strong><small>維持每次詢問</small></span></button></div></section></div>}
     {deleteTarget && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="刪除對話確認"><div className="permission-icon danger"><Trash2 /></div><span className="eyebrow">DELETE SESSION</span><h2>刪除這則對話？</h2><p>「{sessionDisplayTitle(deleteTarget, settings.sessionTitles)}」（{deleteTarget.cwd}）將從本機 session 歷史永久刪除，無法復原。</p><div><button className="danger-option" onClick={() => void deleteSession()}><Trash2 /><span><strong>永久刪除</strong><small>grok sessions delete</small></span></button><button autoFocus onClick={() => setDeleteTarget(null)}><X /><span><strong>取消</strong><small>保留這則對話</small></span></button></div></section></div>}
     {batchDeleteTargets && <div className="modal-backdrop"><section className="permission-modal" role="dialog" aria-modal="true" aria-label="批次刪除確認"><div className="permission-icon danger"><Trash2 /></div><span className="eyebrow">DELETE SESSION</span><h2>刪除所選對話</h2><p>將刪除 {batchDeleteTargets.length} 則對話，請確認。這些資料將從本機 session 歷史永久移除，無法復原。</p><div><button className="danger-option" onClick={() => void deleteSessions(batchDeleteTargets)}><Trash2 /><span><strong>永久刪除</strong><small>grok sessions delete</small></span></button><button autoFocus onClick={() => setBatchDeleteTargets(null)}><X /><span><strong>取消</strong><small>保留全部對話</small></span></button></div></section></div>}

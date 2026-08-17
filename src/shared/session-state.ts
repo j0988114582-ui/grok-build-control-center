@@ -105,3 +105,19 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     unread: state.followTail ? state.unread : state.unread + 1
   }
 }
+
+/**
+ * After session/load replay, leftover "running" markers are historical, not live work.
+ * Only call this when this process did not already have a turn in flight for the session.
+ */
+export function finalizeHydrationEvents(events: UiSessionEvent[]): UiSessionEvent[] {
+  return events.map((event) => {
+    if (event.kind === 'turn' && event.status === 'running') {
+      return { ...event, status: 'completed' }
+    }
+    if (event.kind === 'tool' && (event.status === 'pending' || event.status === 'running')) {
+      return { ...event, status: 'completed' }
+    }
+    return event
+  })
+}

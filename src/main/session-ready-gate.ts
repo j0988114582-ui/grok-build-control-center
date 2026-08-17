@@ -5,7 +5,9 @@
 
 export class SessionReadyGate {
   private generation = 0
+  private loadSeq = 0
   private readonly ready = new Map<string, number>()
+  private readonly loadOps = new Map<string, number>()
 
   get currentGeneration(): number {
     return this.generation
@@ -29,7 +31,27 @@ export class SessionReadyGate {
     this.ready.set(sessionId, this.generation)
   }
 
+  /** Only mark ready if the connection generation has not moved since the RPC started. */
+  markReadyIfCurrent(sessionId: string, capturedGeneration: number): boolean {
+    if (!sessionId || this.generation < 1 || this.generation !== capturedGeneration) return false
+    this.ready.set(sessionId, this.generation)
+    return true
+  }
+
+  /** Monotonic per-session load token. Never reset on disconnect. */
+  beginLoad(sessionId: string): number {
+    this.loadSeq += 1
+    this.loadOps.set(sessionId, this.loadSeq)
+    return this.loadSeq
+  }
+
   clear(sessionId: string): void {
+    this.ready.delete(sessionId)
+  }
+
+  /** Ignore a stale load failure that finished after a newer load for the same id. */
+  clearIfCurrentLoad(sessionId: string, loadSeq: number): void {
+    if (!sessionId || this.loadOps.get(sessionId) !== loadSeq) return
     this.ready.delete(sessionId)
   }
 

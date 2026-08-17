@@ -8,7 +8,14 @@ import type { RunningSubagent } from './subagent-roster'
 export type CliStatusUpdate = Partial<CliStatus> & { message?: string; stderr?: string }
 
 export type SelectedFile = { path: string; name: string; mimeType?: string; data?: string }
-export type SessionFeatures = { sessionId?: string; modes?: unknown; configOptions?: unknown; models?: ModelState }
+export type SessionFeatures = {
+  sessionId?: string
+  modes?: unknown
+  configOptions?: unknown
+  models?: ModelState
+  /** Session exists, but this ACP generation must not mark it ready. */
+  connectionStale?: boolean
+}
 export type SavePasteImageRequest = { mimeType: string; data: string }
 export type SavePasteImageResult = { path: string }
 

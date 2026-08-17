@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   appendPathLines,
   isAbsoluteLocalPath,
+  isAudioMime,
+  isAudioPath,
   isImageMime,
   isImagePath,
+  isVideoMime,
+  isVideoPath,
   removePathLine,
   stripDuplicateImagePathLines,
   upsertPathChips
@@ -17,6 +21,11 @@ describe('drop-paths (P-DRAG)', () => {
     expect(isImagePath('C:\\a.txt')).toBe(false)
     expect(isImageMime('image/png')).toBe(true)
     expect(isImageMime('text/plain')).toBe(false)
+    expect(isVideoPath('D:\\clip.MP4')).toBe(true)
+    expect(isAudioPath('D:\\voice.wav')).toBe(true)
+    expect(isVideoMime('video/mp4')).toBe(true)
+    expect(isAudioMime('audio/mpeg')).toBe(true)
+    expect(isVideoPath('D:\\notes.txt')).toBe(false)
   })
 
   it('appends one absolute path per line', () => {

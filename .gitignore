@@ -14,6 +14,7 @@ docs/plans/*.stderr.txt
 docs/plans/*.run.lock
 .playwright-cli/
 output/playwright/
+output/reviews/
 work/*-result.json
 work/live-session-export-*.md
 # Live ACP probe raw dumps (session ids / local paths)

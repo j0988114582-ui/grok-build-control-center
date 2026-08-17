@@ -23,7 +23,7 @@ describe('interject helpers', () => {
     expect(INTERJECT_METHOD).toBe('_x.ai/interject')
     expect(INTERJECT_QUEUED_NOTICE).toBe('已排入，下一個安全點生效')
     expect(formatUserMessageLabel('interject')).toBe(INTERJECT_MESSAGE_LABEL)
-    expect(formatUserMessageLabel()).toBe('YOU')
+    expect(formatUserMessageLabel()).toBe('你')
   })
 
   it('rejects empty text and non-queued responses', () => {

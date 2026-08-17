@@ -1,6 +1,26 @@
 # Grok Build GUI — agent notes
 
-狀態（2026-07-12，v0.3.2 已發布）：官方 OAuth 重新登入、確認後一鍵安裝 Grok CLI、真實產品額度列已完成；第三輪終審後推上 GitHub（repo + Release，見下方終審紀錄）。全套測試、live CLI、UI/a11y smoke、打包實跑皆通過；installer 仍為未簽章測試版。
+狀態（2026-08-17，package.json **0.14.0**，0.14 品質收斂完成並已打包測試安裝檔）：現役目錄就是這裡。本機 CLI 實測 **grok 1.0.4**。0.14.0 測試安裝檔仍未簽章、非正式發行。
+
+**2026-08-17 本場已做（已改版本號 0.14.0、已打包測試安裝檔）：**
+- 規劃核准窗：Esc／回合結束／取消回合會清掉，不會留下假的「核准」按鈕。
+- 權限回覆失敗不再關窗；主程序對未知 request／未連線會丟錯。
+- 活躍篩選開著時，「建議清理」仍可刪被藏起來的對話；側欄刪除數字只算看得見的。
+- `/always-approve` 改走 YOLO 確認（送出／插話／排隊／立刻改做），不再當普通 slash 送進 CLI。
+- 專案群組標題有 **＋**，直接在該資料夾開新對話。頂部按鈕改「選資料夾開始」。
+- **不做**「不在專案底下工作」與歡迎頁「先不選專案」（Grok ACP 一定要 cwd）。
+- 檔案總管拖入影片／音訊＝路徑晶片（跟圖片一樣）。沒有 OS 路徑時不複製大檔到暫存。
+- 畫面：抽屜改不透明、收合側欄藏資料夾／Team／清理、窄窗保留預覽欄、功能矩陣 Plan／Todos 拆開且誠實。
+- **切 Session**：同一 ACP 連線裡已打開過的對話不再清空重播。切走再切回沿用快取、立刻還原該則 Context；第一次 `session/load` 結束後把歷史殘留的 running／pending 標完成。新建／重連／手機焦點也會登記快取；斷線清快取。載入中側欄仍可點回該則。專案＋缺 sessionId 會報錯。
+- **切 Session 競態收口**：renderer 每個 load 有單調 operation token，成功／失敗／finally 都驗所有權；main 的 `clearIfCurrentLoad` 只讓最新 load 清就緒。remote 焦點載入搶走最新 token、狀態回音不誤殺 desktop load、斷線失效進行中 load；延遲到達的過期 `loading` 不再卡死對話。create 連線代數對不上時照樣列出新對話並提示再點一次。
+
+驗證：`npm run build` 後跑四個 GUI 稽核（真 Electron 點擊＋截圖）：切換 10/10（Context 49%↔60% 不互抄、事件數 961↔961、無「正在工作」、無「跳到最新」洪水）、邏輯 6/6、側欄＋ 8/8、畫面 11/11。截圖由 AGY（Gemini 3.7 Flash）獨立視覺複核 6/6。GPT 5.6（gpt-5.6-sol、full-access）四輪複審終判 Approved。單元測試 524/524、lint、typecheck、build 全綠。
+
+下一場不要做：Rewind UI、子代理取消、不在專案底下、歡迎頁第二按鈕。**不要 resume** 本場接手前卡在孤兒佇列的那串 Grok 對話：訊息只排進佇列沒被處理，工作已由 Codex 接手完成。可做：剩餘英文（effort／GALAXY COCKPIT）、拆 App.tsx。
+
+---
+
+狀態（2026-07-12，v0.3.2 已發布，歷史）：官方 OAuth 重新登入、確認後一鍵安裝 Grok CLI、真實產品額度列已完成；第三輪終審後推上 GitHub（repo + Release，見下方終審紀錄）。全套測試、live CLI、UI/a11y smoke、打包實跑皆通過；installer 仍為未簽章測試版。
 
 狀態補充（2026-07-12）：啟動／連線競態、快捷鍵、Esc 優先序、prompt 失敗復原、額度提醒、task 合併與視窗導覽已完成審查加固。
 

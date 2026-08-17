@@ -67,6 +67,19 @@ export function localizeSlashDescription(name: string, official?: string): strin
   return SLASH_DESCRIPTION_ZH[name] ?? (official?.trim() ? official : undefined)
 }
 
+/**
+ * `/always-approve` is a GUI permission-mode switch, not a prompt.
+ * Only a lone command (optional on/off) is intercepted; extra words still go to the agent.
+ */
+export function parseAlwaysApproveSlash(text: string): 'on' | 'off' | 'toggle' | null {
+  const match = text.trim().match(/^\/always-approve(?:\s+(on|off))?\s*$/i)
+  if (!match) return null
+  const flag = match[1]?.toLowerCase()
+  if (flag === 'off') return 'off'
+  if (flag === 'on') return 'on'
+  return 'toggle'
+}
+
 /** Build palette rows for every available slash command. */
 export function buildSlashPaletteEntries(commands: AvailableSlashCommand[]): BuiltPaletteEntry[] {
   return commands.map((command) => {

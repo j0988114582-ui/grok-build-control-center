@@ -130,7 +130,8 @@ const remoteController = new RemoteController({
     await (await connectAcp()).cancel(sessionId)
   }),
   respondPermission: (requestId, optionId) => {
-    acpConnection.current?.respondPermission(requestId, optionId)
+    if (!acpConnection.current) throw new Error('Permission request is no longer active')
+    acpConnection.current.respondPermission(requestId, optionId)
     // Phone answered — close the desktop modal for the same request.
     send('grok:permission-resolved', { requestId })
   },
@@ -140,21 +141,28 @@ const remoteController = new RemoteController({
       throw new Error('Invalid session id')
     }
     const client = await connectAcp()
+    const gen = sessionReadyGate.currentGeneration
+    const loadSeq = sessionReadyGate.beginLoad(sessionId)
     try {
       await client.loadSession(sessionId, cwd)
-      sessionReadyGate.markReady(sessionId)
+      if (!sessionReadyGate.markReadyIfCurrent(sessionId, gen)) {
+        throw new Error('連線已更新，請重新開啟對話')
+      }
       if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
     } catch (error) {
-      sessionReadyGate.clear(sessionId)
+      sessionReadyGate.clearIfCurrentLoad(sessionId, loadSeq)
       throw error
     }
   }),
   createSession: async (cwd) => lifecycleOperation.runShared('Grok 對話操作', async () => {
     const client = await connectAcp()
+    const gen = sessionReadyGate.currentGeneration
     const result = await client.createSession(cwd)
-    const sessionId = typeof result?.sessionId === 'string' ? result.sessionId : undefined
-    if (!sessionId) throw new Error('建立對話失敗：未回傳 sessionId')
-    sessionReadyGate.markReady(sessionId)
+    const sessionId = typeof result?.sessionId === 'string' ? result.sessionId.trim() : ''
+    if (!SESSION_ID_PATTERN.test(sessionId)) throw new Error('建立對話失敗：未回傳 sessionId')
+    if (!sessionReadyGate.markReadyIfCurrent(sessionId, gen)) {
+      return { sessionId, cwd: typeof cwd === 'string' ? cwd : '', connectionStale: true }
+    }
     if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
     return { sessionId, cwd: typeof cwd === 'string' ? cwd : '' }
   }),
@@ -413,24 +421,30 @@ function registerIpc(): void {
   })
   ipcMain.handle('grok:session:create', async (_event, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => {
     const client = await connectAcp()
+    const gen = sessionReadyGate.currentGeneration
     const result = await client.createSession(cwd)
-    const sessionId = typeof result?.sessionId === 'string' ? result.sessionId : undefined
-    if (sessionId) {
-      sessionReadyGate.markReady(sessionId)
-      if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
+    const sessionId = typeof result?.sessionId === 'string' ? result.sessionId.trim() : ''
+    if (!SESSION_ID_PATTERN.test(sessionId)) throw new Error('建立對話失敗：未回傳 sessionId')
+    if (!sessionReadyGate.markReadyIfCurrent(sessionId, gen)) {
+      return { ...result, sessionId, connectionStale: true }
     }
+    if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
     return result
   }))
   ipcMain.handle('grok:session:load', async (_event, sessionId: string, cwd: string) => lifecycleOperation.runShared('Grok 對話操作', async () => {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) throw new Error('Invalid session id')
     const client = await connectAcp()
+    const gen = sessionReadyGate.currentGeneration
+    const loadSeq = sessionReadyGate.beginLoad(sessionId)
     try {
       const result = await client.loadSession(sessionId, cwd)
-      sessionReadyGate.markReady(sessionId)
+      if (!sessionReadyGate.markReadyIfCurrent(sessionId, gen)) {
+        throw new Error('連線已更新，請重新開啟對話')
+      }
       if (typeof cwd === 'string' && cwd.trim()) previewRoots.setSessionCwd(sessionId, cwd)
       return result
     } catch (error) {
-      sessionReadyGate.clear(sessionId)
+      sessionReadyGate.clearIfCurrentLoad(sessionId, loadSeq)
       throw error
     }
   }))
@@ -451,7 +465,8 @@ function registerIpc(): void {
   ipcMain.handle('grok:mode', async (_event, sessionId: string, modeId: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setMode(sessionId, modeId)))
   ipcMain.handle('grok:model', async (_event, sessionId: string, modelId: string, reasoningEffort?: string) => lifecycleOperation.runShared('Grok 設定', async () => (await connectAcp()).setModel(sessionId, modelId, reasoningEffort)))
   ipcMain.handle('grok:permission', (_event, requestId: string, optionId: string) => lifecycleOperation.runShared('Grok 權限回覆', async () => {
-    acpConnection.current?.respondPermission(requestId, optionId)
+    if (!acpConnection.current) throw new Error('Permission request is no longer active')
+    acpConnection.current.respondPermission(requestId, optionId)
     // Desktop answered — drop the phone-side pending card immediately (next poll reflects it).
     remoteController.clearPermission(requestId)
   }))

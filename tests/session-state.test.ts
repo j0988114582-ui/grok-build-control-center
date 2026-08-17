@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createSessionState, sessionReducer } from '../src/shared/session-state'
+import { createSessionState, finalizeHydrationEvents, sessionReducer } from '../src/shared/session-state'
 
 describe('sessionReducer', () => {
   it('merges adjacent streaming message chunks from the same role', () => {
@@ -74,6 +74,17 @@ describe('sessionReducer', () => {
       rawOutput: { id: '019f00000001', humanSchedule: 'every 1 minute' },
       rawInput: { variant: 'SchedulerCreate', recurring: true }
     })
+  })
+
+  it('treats leftover running markers from a session/load replay as finished', () => {
+    const finalized = finalizeHydrationEvents([
+      { id: '1', sessionId: 's1', kind: 'turn', status: 'running' },
+      { id: '2', sessionId: 's1', kind: 'tool', toolCallId: 't1', title: 'Read', status: 'pending' },
+      { id: '3', sessionId: 's1', kind: 'message', role: 'assistant', text: 'done' }
+    ])
+    expect(finalized[0]).toMatchObject({ kind: 'turn', status: 'completed' })
+    expect(finalized[1]).toMatchObject({ kind: 'tool', status: 'completed' })
+    expect(finalized[2]).toMatchObject({ kind: 'message', text: 'done' })
   })
 
   it('does not concatenate an interject message onto the previous user prompt', () => {

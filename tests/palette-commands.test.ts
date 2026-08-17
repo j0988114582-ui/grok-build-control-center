@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSlashPaletteEntries, normalizeAvailableCommands } from '../src/shared/palette-commands'
+import { buildSlashPaletteEntries, normalizeAvailableCommands, parseAlwaysApproveSlash } from '../src/shared/palette-commands'
 
 describe('availableCommands → palette (F-RT-5)', () => {
   it('normalizes, dedupes, and keeps inputHint', () => {
@@ -55,5 +55,13 @@ describe('availableCommands → palette (F-RT-5)', () => {
     expect(entries.find((item) => item.id === 'slash:plugins')?.description).toContain('外掛')
     expect(entries.find((item) => item.id === 'slash:reload-plugins')?.description).toContain('重新載入外掛')
     expect(entries.find((item) => item.id === 'slash:mystery-cmd')?.description).toBe('Official English leftover')
+  })
+
+  it('treats a lone /always-approve as a GUI permission switch, not a prompt', () => {
+    expect(parseAlwaysApproveSlash('/always-approve')).toBe('toggle')
+    expect(parseAlwaysApproveSlash('/always-approve on')).toBe('on')
+    expect(parseAlwaysApproveSlash('/always-approve off')).toBe('off')
+    expect(parseAlwaysApproveSlash('/always-approve on and also write a file')).toBeNull()
+    expect(parseAlwaysApproveSlash('/compact')).toBeNull()
   })
 })

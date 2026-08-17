@@ -13,4 +13,13 @@ describe('session-capabilities probe', () => {
     expect(probe.matrix.find((row) => row.id === 'fork')?.route).toBe('native')
     expect(probe.matrix.find((row) => row.id === 'list')?.route).toBe('tui')
   })
+
+  it('does not treat an empty capability object as available', () => {
+    const probe = probeSessionCapabilities({
+      loadSession: true,
+      sessionCapabilities: { list: {} }
+    })
+    expect(probe.bounded.list).not.toBe(true)
+    expect(probe.matrix.find((row) => row.id === 'list')?.route).toBe('tui')
+  })
 })

@@ -14,6 +14,31 @@ describe('SessionReadyGate (main)', () => {
     expect(() => gate.assertReady('s1')).toThrow(/就緒/)
   })
 
+  it('markReadyIfCurrent refuses a stale connection generation', () => {
+    const gate = new SessionReadyGate()
+    const gen = gate.beginConnection()
+    expect(gate.markReadyIfCurrent('s1', gen)).toBe(true)
+    expect(gate.isReady('s1')).toBe(true)
+    gate.invalidate()
+    expect(gate.markReadyIfCurrent('s2', gen)).toBe(false)
+    expect(gate.isReady('s2')).toBe(false)
+  })
+
+  it('stale load failure does not clear a newer successful ready mark', () => {
+    const gate = new SessionReadyGate()
+    gate.beginConnection()
+    const first = gate.beginLoad('s1')
+    gate.invalidate()
+    gate.beginConnection()
+    const second = gate.beginLoad('s1')
+    expect(gate.markReadyIfCurrent('s1', gate.currentGeneration)).toBe(true)
+    expect(gate.isReady('s1')).toBe(true)
+    gate.clearIfCurrentLoad('s1', first)
+    expect(gate.isReady('s1')).toBe(true)
+    gate.clearIfCurrentLoad('s1', second)
+    expect(gate.isReady('s1')).toBe(false)
+  })
+
   it('markSessionReadyIfCurrent drops stale generations', () => {
     let ready = markSessionReadyIfCurrent({}, 'a', 1, 1)
     expect(ready.a).toBe(1)

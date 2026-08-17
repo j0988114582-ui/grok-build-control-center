@@ -37,7 +37,7 @@ export function probeSessionCapabilities(
     const match = BOUNDED_KEYS.find((b) => b === lower || lower.includes(b))
     if (match) {
       const raw = sessionCapabilities[key]
-      bounded[match] = raw === true || raw === 'true' || (raw != null && raw !== false)
+      bounded[match] = raw === true || raw === 'true'
     } else {
       unknownKeys.push(key)
     }
