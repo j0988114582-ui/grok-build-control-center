@@ -43,3 +43,29 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
 export function findPromptTemplate(id: string): PromptTemplate | undefined {
   return PROMPT_TEMPLATES.find((item) => item.id === id)
 }
+
+export const RECENT_PROMPT_TEMPLATES_MAX = 8
+
+/** Most-recent-first, unique, known ids only. */
+export function rememberPromptTemplate(recent: readonly string[] | undefined, id: string): string[] {
+  const list = recent ?? []
+  if (!findPromptTemplate(id)) return [...new Set(list.filter((item) => findPromptTemplate(item)))].slice(0, RECENT_PROMPT_TEMPLATES_MAX)
+  return [id, ...list.filter((item) => item !== id && findPromptTemplate(item))].slice(0, RECENT_PROMPT_TEMPLATES_MAX)
+}
+
+/** Last-used templates first; remaining keep their built-in order. */
+export function orderPromptTemplates(recentIds: readonly string[] = []): PromptTemplate[] {
+  const seen = new Set<string>()
+  const ordered: PromptTemplate[] = []
+  for (const id of recentIds) {
+    const item = findPromptTemplate(id)
+    if (!item || seen.has(item.id)) continue
+    seen.add(item.id)
+    ordered.push(item)
+  }
+  for (const item of PROMPT_TEMPLATES) {
+    if (seen.has(item.id)) continue
+    ordered.push(item)
+  }
+  return ordered
+}

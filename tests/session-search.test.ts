@@ -27,4 +27,11 @@ describe('session-search', () => {
     const index = buildSessionSearchIndex(sessions)
     expect(filterSessionsBySearch(sessions, index, '  ')).toHaveLength(2)
   })
+
+  it('keeps caller order so a later sort or folder filter can compose', () => {
+    const index = buildSessionSearchIndex(sessions)
+    const hits = filterSessionsBySearch(sessions, index, 'e')
+    expect(hits.map((session) => session.id)).toEqual(['a', 'b'])
+    expect(hits).not.toBe(sessions)
+  })
 })

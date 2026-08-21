@@ -1,12 +1,21 @@
 // @vitest-environment jsdom
 import React from 'react'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/renderer/src/App'
 import { createDefaultSettings } from '../src/shared/settings'
+import { PERMISSION_ASK_ALREADY_NOTICE } from '../src/shared/remote-yolo-mutex'
 import type { GrokBridgeApi, RemoteDesktopState, RemoteFocusChangedPayload } from '../src/shared/bridge'
 import type { SessionSummary } from '../src/shared/types'
+
+const stylesCss = readFileSync(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/renderer/src/styles.css'),
+  'utf8'
+)
 
 const createApiMock = (): GrokBridgeApi => ({
   getStatus: vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '1.0.3', connected: false }),
@@ -65,6 +74,7 @@ const createApiMock = (): GrokBridgeApi => ({
   notify: vi.fn().mockResolvedValue(false),
   previewRegister: vi.fn().mockResolvedValue({ ok: false, reason: '找不到檔案，可能已被移動或刪除' }),
   previewReadText: vi.fn().mockResolvedValue({ ok: false, reason: '找不到檔案，可能已被移動或刪除' }),
+  previewAllowFolder: vi.fn().mockResolvedValue({ ok: false, reason: '找不到檔案，可能已被移動或刪除' }),
   previewChooseFile: vi.fn().mockResolvedValue(null),
   revealPath: vi.fn().mockResolvedValue(true),
   openPath: vi.fn().mockResolvedValue(''),
@@ -172,7 +182,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: '切換 Grok 帳號' }))
     await user.click(screen.getByRole('button', { name: '開啟瀏覽器並重新登入' }))
 
-    expect(screen.getByRole('button', { name: /選資料夾開始/ })).toBeDisabled()
+    expect(screen.getAllByRole('button', { name: /選資料夾開始/ }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true)
     expect(screen.getByRole('button', { name: /Grok 1\.0\.3/ })).toBeDisabled()
   })
 
@@ -182,7 +192,8 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
     await screen.findByText('Fix tests')
-    await user.click(screen.getByRole('button', { name: '刪除對話 Fix tests' }))
+    await user.click(screen.getByRole('button', { name: '更多動作 Fix tests' }))
+    await user.click(screen.getByRole('menuitem', { name: '刪除對話 Fix tests' }))
     expect(screen.getByText('刪除這則對話？')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /永久刪除/ }))
     expect(api.deleteSession).toHaveBeenCalledWith('s1')
@@ -201,7 +212,7 @@ describe('App', () => {
     await user.click(modelPicker)
     expect(screen.getByRole('option', { name: /Grok 4.5/ })).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: 'Extra High Effort' })).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: 'High Effort' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: '深想' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('loads real weekly subscription billing after ACP connects', async () => {
@@ -258,7 +269,8 @@ describe('App', () => {
     render(<App />)
 
     await user.click(await screen.findByText('Fix tests'))
-    await user.click(screen.getByRole('button', { name: '重新命名 Fix tests' }))
+    await user.click(screen.getByRole('button', { name: '更多動作 Fix tests' }))
+    await user.click(screen.getByRole('menuitem', { name: '重新命名 Fix tests' }))
     const name = screen.getByRole('textbox', { name: '對話名稱' })
     await user.clear(name)
     await user.type(name, '公開版準備')
@@ -309,7 +321,7 @@ describe('App', () => {
     await user.click(await screen.findByText('Fix tests'))
     expect(screen.getByRole('combobox', { name: '工作模式' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /Grok 1\.0\.3.*Connected/ }))
+    await user.click(screen.getByRole('button', { name: /Grok 1\.0\.3.*已連線/ }))
     await user.click(screen.getByTitle('命令'))
 
     expect(screen.queryByText('/legacy-command')).not.toBeInTheDocument()
@@ -332,7 +344,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(await screen.findByRole('button', { name: /選資料夾開始/ }))
+    await user.click(await screen.findByTestId('new-session-pick-folder'))
     expect(await screen.findByRole('heading', { name: '新對話' })).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '工作模式' })).not.toBeInTheDocument()
   })
@@ -381,6 +393,9 @@ describe('App', () => {
 
     expect(await screen.findByRole('button', { name: /Cancel/ })).toHaveFocus()
     expect(screen.getByRole('button', { name: /Allow once/ })).not.toHaveFocus()
+    expect(screen.queryByText(/allow_once|reject_once|allow_always|reject_always/)).not.toBeInTheDocument()
+    expect(screen.getByText('本次有效')).toBeInTheDocument()
+    expect(screen.getByText('本次拒絕')).toBeInTheDocument()
   })
 
   it('keeps the permission dialog open when the reply fails', async () => {
@@ -434,7 +449,7 @@ describe('App', () => {
     window.grokApi = api
     const user = userEvent.setup()
     render(<App />)
-    const sessionSearch = await screen.findByPlaceholderText(/搜尋 sessions/)
+    const sessionSearch = await screen.findByPlaceholderText('搜尋對話')
     await user.click(sessionSearch)
 
     act(() => { onPermission?.({
@@ -503,7 +518,7 @@ describe('App', () => {
     expect(screen.getByRole('dialog', { name: '快捷鍵一覽' })).toBeInTheDocument()
     await user.keyboard('{Escape}')
 
-    const sessionSearch = screen.getByPlaceholderText(/搜尋 sessions/)
+    const sessionSearch = screen.getByPlaceholderText('搜尋對話')
     await user.click(sessionSearch)
     await user.type(sessionSearch, '?')
     expect(screen.queryByRole('dialog', { name: '快捷鍵一覽' })).not.toBeInTheDocument()
@@ -526,7 +541,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(await screen.findByRole('button', { name: '選擇專案開始' }))
+    await user.click(await screen.findByTestId('new-session-pick-folder'))
     expect(await screen.findByText('資料夾視窗無法開啟')).toBeInTheDocument()
   })
 
@@ -691,7 +706,7 @@ describe('App', () => {
 
   // --- v0.4.1 regression locks (T1–T8) ---
 
-  it('T1 keeps the permission-mode select usable while busy and explains the refusal', async () => {
+  it('T1 keeps the permission-mode buttons usable while busy and explains the refusal', async () => {
     const api = createApiMock()
     let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
     let resolveLoad: ((value: { sessionId: string }) => void) | undefined
@@ -701,27 +716,33 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    const select = await screen.findByRole('combobox', { name: '權限模式' })
+    const group = await screen.findByRole('group', { name: '權限模式' })
+    const ask = screen.getByRole('button', { name: '先問我' })
+    const yolo = screen.getByRole('button', { name: '全部自動過' })
     // Never disabled: Chromium hides tooltips on disabled controls, so a locked
-    // select used to be a dead end. It stays clickable and says why instead.
-    expect(select).not.toBeDisabled()
-    expect(select).not.toHaveAttribute('data-locked')
+    // switch used to be a dead end. It stays clickable and says why instead.
+    expect(ask).not.toBeDisabled()
+    expect(yolo).not.toBeDisabled()
+    expect(screen.getByTestId('permission-mode')).not.toHaveAttribute('data-locked')
     expect(screen.getByText('工具權限')).toBeInTheDocument()
+    expect(screen.getByText(/改檔或跑指令前會先問你/)).toBeInTheDocument()
 
     await user.click(await screen.findByText('Fix tests'))
-    expect(select).toHaveAttribute('data-locked', 'true')
+    expect(screen.getByTestId('permission-mode')).toHaveAttribute('data-locked', 'true')
     act(() => { resolveLoad?.({ sessionId: 's1' }) })
-    await waitFor(() => expect(select).not.toHaveAttribute('data-locked'))
+    await waitFor(() => expect(screen.getByTestId('permission-mode')).not.toHaveAttribute('data-locked'))
 
     act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
-    expect(select).toHaveAttribute('data-locked', 'true')
-    await user.selectOptions(select, 'always-approve')
+    expect(screen.getByTestId('permission-mode')).toHaveAttribute('data-locked', 'true')
+    await user.click(yolo)
     expect(await screen.findByText(/回合執行中無法切換工具權限/)).toBeInTheDocument()
     expect(api.setPermissionMode).not.toHaveBeenCalled()
-    expect(select).toHaveValue('ask')
+    expect(ask).toHaveAttribute('aria-pressed', 'true')
+    expect(yolo).toHaveAttribute('aria-pressed', 'false')
+    expect(group).toBeInTheDocument()
 
     act(() => { onEvent?.({ id: 'turn-done', sessionId: 's1', kind: 'turn', status: 'completed' }) })
-    await waitFor(() => expect(select).not.toHaveAttribute('data-locked'))
+    await waitFor(() => expect(screen.getByTestId('permission-mode')).not.toHaveAttribute('data-locked'))
   })
 
   it('T2 guards YOLO confirm against double-click and shows the YOLO banner after success', async () => {
@@ -736,8 +757,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    const select = await screen.findByRole('combobox', { name: '權限模式' })
-    await user.selectOptions(select, 'always-approve')
+    await user.click(await screen.findByRole('button', { name: '全部自動過' }))
     const confirm = await screen.findByRole('button', { name: /我了解風險，啟用 YOLO/ })
     await user.click(confirm)
     expect(confirm).toBeDisabled()
@@ -754,12 +774,42 @@ describe('App', () => {
     const api = createApiMock()
     api.getPermissionMode = vi.fn().mockResolvedValue('ask' as const)
     window.grokApi = api
+    const user = userEvent.setup()
     render(<App />)
 
-    const select = await screen.findByRole('combobox', { name: '權限模式' })
-    expect(select).toHaveValue('ask')
+    const ask = await screen.findByRole('button', { name: '先問我' })
+    expect(ask).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '全部自動過' })).toHaveAttribute('aria-pressed', 'false')
     expect(api.getPermissionMode).toHaveBeenCalled()
     expect(screen.queryByText(/YOLO 模式：已啟用一律核准/)).not.toBeInTheDocument()
+    await user.click(ask)
+    expect(await screen.findByText(PERMISSION_ASK_ALREADY_NOTICE)).toBeInTheDocument()
+  })
+
+  it('marks titlebar permission controls as no-drag so they stay clickable', () => {
+    expect(stylesCss).toMatch(/\.titlebar select[^{]*\{[^}]*-webkit-app-region:\s*no-drag/)
+    expect(stylesCss).toMatch(/\.permission-mode-label[^{]*\{[^}]*-webkit-app-region:\s*no-drag/)
+  })
+
+  it('composer status follows activeReady instead of showing green 就緒 while loading', async () => {
+    const api = createApiMock()
+    let resolveLoad: ((value: { sessionId: string }) => void) | undefined
+    api.loadSession = vi.fn(() => new Promise<{ sessionId: string }>((resolve) => { resolveLoad = resolve }))
+    window.grokApi = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByText('Fix tests'))
+    const pill = await screen.findByTestId('composer-status')
+    expect(pill.querySelector('.composer-status-pill')?.className ?? '').not.toContain('is-ready')
+    expect(screen.queryByText('就緒')).not.toBeInTheDocument()
+    expect(screen.getByText('載入中')).toBeInTheDocument()
+
+    act(() => { resolveLoad?.({ sessionId: 's1' }) })
+    await waitFor(() => {
+      expect(document.querySelector('.composer-status-pill')?.className ?? '').toContain('is-ready')
+    })
+    expect(screen.getByText('就緒')).toBeInTheDocument()
   })
 
   it('T4 closes the batch-delete modal on confirm and blocks re-entry while deleting', async () => {
@@ -779,6 +829,7 @@ describe('App', () => {
     render(<App />)
 
     await screen.findByText('Fix tests')
+    await user.click(screen.getByTestId('sidebar-organize-toggle'))
     await user.click(screen.getByRole('button', { name: '多選' }))
     await user.click(screen.getByRole('checkbox', { name: '選擇對話 Fix tests' }))
     await user.click(screen.getByRole('checkbox', { name: '選擇對話 Other task' }))
@@ -809,7 +860,8 @@ describe('App', () => {
 
     await screen.findByText('Fix tests')
     expect(screen.queryByText('已釘選')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '釘選 Fix tests' }))
+    await user.click(screen.getByRole('button', { name: '更多動作 Fix tests' }))
+    await user.click(screen.getByRole('menuitem', { name: '釘選 Fix tests' }))
     expect(await screen.findByText('已釘選')).toBeInTheDocument()
     expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ pinnedSessions: ['s1'] }))
   })
@@ -820,13 +872,12 @@ describe('App', () => {
     render(<App />)
 
     await screen.findByText('Fix tests')
-    expect(screen.getByRole('button', { name: '選擇專案開始' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '選資料夾開始' }).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText(/按「選資料夾開始」/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '收合側欄' }))
     expect(document.querySelector('.workspace')).toHaveClass('sidebar-collapsed')
-    // Prefer the float control that sits on the empty home state.
-    const expand = document.querySelector('.sidebar-expand-float') as HTMLButtonElement | null
-    expect(expand).not.toBeNull()
-    await user.click(expand!)
+    expect(document.querySelector('.sidebar-expand-float')).toBeNull()
+    await user.click(screen.getByRole('button', { name: '展開側欄' }))
     expect(document.querySelector('.workspace')).not.toHaveClass('sidebar-collapsed')
   })
 
@@ -1632,6 +1683,7 @@ describe('App', () => {
       const user = userEvent.setup()
       render(<App />)
       expect(await screen.findByText('兩週沒動的')).toBeInTheDocument()
+      await user.click(screen.getByTestId('sidebar-organize-toggle'))
       const before = screen.getByTestId('cleanup-suggest-button').textContent
 
       await user.click(screen.getByTestId('active-only-toggle'))
@@ -1673,6 +1725,7 @@ describe('App', () => {
       await user.click(screen.getByTestId('active-only-toggle'))
       await waitFor(() => expect(screen.queryByText('兩週沒動的')).not.toBeInTheDocument())
 
+      await user.click(screen.getByTestId('sidebar-organize-toggle'))
       await user.click(screen.getByTestId('cleanup-suggest-button'))
       const panel = await screen.findByTestId('cleanup-suggest-panel')
       const stale = within(panel).getByText('兩週沒動的')
@@ -1681,6 +1734,166 @@ describe('App', () => {
 
       const confirm = await screen.findByRole('dialog', { name: '批次刪除確認' })
       expect(confirm).toHaveTextContent('將刪除 1 則對話')
+    })
+  })
+
+  describe('sidebar findability', () => {
+    it('sorts by name and persists the choice', async () => {
+      const api = createApiMock()
+      api.listSessions = vi.fn().mockResolvedValue([
+        { id: 's1', cwd: 'C:\\repo', title: 'Zed last', updatedAt: '2026-08-21T12:00:00Z' },
+        { id: 's2', cwd: 'C:\\repo', title: 'Alpha first', updatedAt: '2026-08-21T11:00:00Z' }
+      ])
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await screen.findByText('Zed last')
+      const sort = screen.getByLabelText('對話排序')
+      await user.selectOptions(sort, 'name')
+      const titles = [...screen.getByTestId('session-list').querySelectorAll('.session-open')].map((node) => node.textContent)
+      expect(titles[0]).toContain('Alpha first')
+      expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ sidebarSort: 'name' }))
+    })
+
+    it('can turn off folder grouping and persists that', async () => {
+      const api = createApiMock()
+      api.listSessions = vi.fn().mockResolvedValue([
+        { id: 's1', cwd: 'C:\\work\\alpha', title: 'Alpha task', updatedAt: '2026-08-21T12:00:00Z' },
+        { id: 's2', cwd: 'C:\\work\\beta', title: 'Beta task', updatedAt: '2026-08-21T11:00:00Z' }
+      ])
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await screen.findByText('Alpha task')
+      expect(screen.getAllByTestId('session-group-title').length).toBe(2)
+      await user.click(screen.getByTestId('group-by-folder-toggle'))
+      await waitFor(() => expect(screen.queryByTestId('session-group-title')).not.toBeInTheDocument())
+      expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ sidebarGroupByFolder: false }))
+      expect(within(screen.getByTestId('session-list')).getByText('C:\\work\\alpha')).toBeInTheDocument()
+    })
+
+    it('shows folder basename plus count, with the full path only as title', async () => {
+      const api = createApiMock()
+      api.listSessions = vi.fn().mockResolvedValue([
+        { id: 's1', cwd: 'C:\\work\\alpha', title: 'One', updatedAt: '2026-08-21T12:00:00Z' },
+        { id: 's2', cwd: 'C:\\work\\alpha', title: 'Two', updatedAt: '2026-08-21T11:00:00Z' }
+      ])
+      window.grokApi = api
+      render(<App />)
+      await screen.findByText('One')
+      const option = screen.getByRole('option', { name: 'alpha（2）' })
+      expect(option).toHaveAttribute('title', 'C:\\work\\alpha')
+      expect(option.textContent).toBe('alpha（2）')
+      expect(option.textContent).not.toContain('C:\\work\\alpha')
+    })
+
+    it('filters to a project when the group header is clicked, and clears on the second click', async () => {
+      const api = createApiMock()
+      api.listSessions = vi.fn().mockResolvedValue([
+        { id: 's1', cwd: 'C:\\work\\alpha', title: 'Alpha task', updatedAt: '2026-08-21T12:00:00Z' },
+        { id: 's2', cwd: 'C:\\work\\beta', title: 'Beta task', updatedAt: '2026-08-21T11:00:00Z' }
+      ])
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await screen.findByText('Alpha task')
+      await user.click(screen.getByRole('button', { name: '篩選「alpha」' }))
+      expect(screen.getByTestId('session-caption-count')).toHaveTextContent('已篩選')
+      expect(screen.queryByText('Beta task')).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: '篩選「alpha」' }))
+      expect(await screen.findByText('Beta task')).toBeInTheDocument()
+    })
+
+    it('lets the sidebar change the active-days window', async () => {
+      const api = createApiMock()
+      const daysAgo = (days: number): string => new Date(Date.now() - days * 86_400_000).toISOString()
+      api.listSessions = vi.fn().mockResolvedValue([
+        { id: 'fresh', cwd: 'C:\\repo', title: '今天在跑的', updatedAt: daysAgo(0.5) },
+        { id: 'week', cwd: 'C:\\repo', title: '一週沒動的', updatedAt: daysAgo(7) }
+      ])
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await screen.findByText('一週沒動的')
+      await user.click(screen.getByTestId('active-only-toggle'))
+      await waitFor(() => expect(screen.queryByText('一週沒動的')).not.toBeInTheDocument())
+      fireEvent.change(screen.getByTestId('sidebar-active-days'), { target: { value: '10' } })
+      expect(await screen.findByText('一週沒動的')).toBeInTheDocument()
+      expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ sidebarActiveDays: 10 }))
+    })
+
+    it('keeps 多選 and 建議清理 inside 整理', async () => {
+      window.grokApi = createApiMock()
+      const user = userEvent.setup()
+      render(<App />)
+      await screen.findByText('Fix tests')
+      expect(screen.queryByRole('button', { name: '多選' })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('cleanup-suggest-button')).not.toBeInTheDocument()
+      await user.click(screen.getByTestId('sidebar-organize-toggle'))
+      expect(screen.getByRole('button', { name: '多選' })).toBeInTheDocument()
+    })
+
+    it('opens row actions from a keyboard-accessible ⋯ menu', async () => {
+      window.grokApi = createApiMock()
+      const user = userEvent.setup()
+      render(<App />)
+      await screen.findByText('Fix tests')
+      expect(screen.queryByRole('menuitem', { name: '釘選 Fix tests' })).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: '更多動作 Fix tests' }))
+      expect(screen.getByRole('menuitem', { name: '釘選 Fix tests' })).toBeInTheDocument()
+      expect(screen.getByRole('menuitem', { name: '重新命名 Fix tests' })).toBeInTheDocument()
+      expect(screen.getByRole('menuitem', { name: '刪除對話 Fix tests' })).toBeInTheDocument()
+    })
+
+    it('shows relative time on rows', async () => {
+      const api = createApiMock()
+      api.listSessions = vi.fn().mockResolvedValue([
+        { id: 's1', cwd: 'C:\\repo', title: 'Fix tests', updatedAt: new Date(Date.now() - 3 * 60_000).toISOString() }
+      ])
+      window.grokApi = api
+      render(<App />)
+      expect(await screen.findByText('3 分鐘前')).toBeInTheDocument()
+    })
+
+    it('reopens one of the last three project folders from the welcome page', async () => {
+      const api = createApiMock()
+      api.listSessions = vi.fn().mockResolvedValue([])
+      api.getSettings = vi.fn().mockResolvedValue({
+        ...createDefaultSettings('C:\\Users\\demo'),
+        recentProjectCwds: ['C:\\work\\alpha', 'C:\\work\\beta', 'C:\\work\\gamma']
+      })
+      api.createSession = vi.fn().mockResolvedValue({ sessionId: 's-reopen' })
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      const welcome = await screen.findByTestId('welcome-recent-projects')
+      expect(welcome).toHaveTextContent('alpha')
+      expect(welcome).toHaveTextContent('beta')
+      expect(welcome).toHaveTextContent('gamma')
+      expect(screen.queryByRole('button', { name: /先不選專案/ })).not.toBeInTheDocument()
+      await user.click(within(welcome).getByRole('button', { name: 'alpha' }))
+      await waitFor(() => expect(api.createSession).toHaveBeenCalledWith('C:\\work\\alpha'))
+      expect(api.chooseDirectory).not.toHaveBeenCalled()
+    })
+
+    it('filter chips can express 全部 / 本專案 / 釘選 / 活躍', async () => {
+      const api = createApiMock()
+      api.listSessions = vi.fn().mockResolvedValue([
+        { id: 's1', cwd: 'C:\\work\\alpha', title: 'Alpha task', updatedAt: new Date().toISOString() },
+        { id: 's2', cwd: 'C:\\work\\beta', title: 'Beta task', updatedAt: new Date().toISOString() }
+      ])
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await screen.findByText('Alpha task')
+      const chips = screen.getByTestId('sidebar-filter-chips')
+      expect(within(chips).getByRole('button', { name: '全部' })).toHaveAttribute('aria-pressed', 'true')
+      await user.click(within(chips).getByRole('button', { name: '本專案' }))
+      expect(screen.getByTestId('session-caption-count')).toHaveTextContent('已篩選')
+      await user.click(within(chips).getByRole('button', { name: '全部' }))
+      expect(await screen.findByText('Beta task')).toBeInTheDocument()
+      await user.click(within(chips).getByRole('button', { name: '活躍' }))
+      expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ sidebarActiveOnly: true }))
     })
   })
 
@@ -1994,5 +2207,183 @@ describe('App', () => {
     expect(await screen.findByRole('dialog', { name: '啟用 YOLO 模式' })).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/交給 Grok 一個任務/)).toHaveValue('')
     expect(api.sendPrompt).not.toHaveBeenCalled()
+  })
+
+  describe('wave 4 workspace chrome', () => {
+    it('keeps session-header from wrapping over the transcript and folds tools at 1100px', () => {
+      expect(stylesCss).toMatch(/\.session-header\s*\{[^}]*flex-wrap:\s*nowrap/)
+      expect(stylesCss).toMatch(/\.session-tools\s*\{[^}]*flex-wrap:\s*nowrap/)
+      expect(stylesCss).toMatch(/@media \(max-width: 1100px\)[\s\S]*\.session-tool-icons\s*\{\s*display:\s*none/)
+      expect(stylesCss).toMatch(/@media \(max-width: 1100px\)[\s\S]*\.session-tools-more\s*\{\s*display:\s*inline-grid/)
+      expect(stylesCss).toMatch(/\.main:has\(\.session-header\)\s*~\s*\.drawer\s*\{\s*top:\s*82px/)
+    })
+
+    it('widens bookmarks to two lines and pads the command palette list', () => {
+      expect(stylesCss).toMatch(/\.prompt-bookmarks-panel[^{]*\{[^}]*width:\s*min\(520px/)
+      expect(stylesCss).toMatch(/-webkit-line-clamp:\s*2/)
+      expect(stylesCss).toMatch(/\.palette-results\s*\{[^}]*padding:\s*8px 8px 32px/)
+    })
+
+    it('copies the session cwd from the header button', async () => {
+      window.grokApi = createApiMock()
+      const user = userEvent.setup()
+      const writeText = vi.fn().mockResolvedValue(undefined)
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+      render(<App />)
+      await user.click(await screen.findByText('Fix tests'))
+      fireEvent.click(await screen.findByTestId('copy-cwd'))
+      expect(writeText).toHaveBeenCalledWith('C:\\repo')
+      expect(await screen.findByText('已複製路徑')).toBeInTheDocument()
+    })
+
+    it('keeps Stop as the primary running-rail action and defaults the composer to 3 rows', async () => {
+      const api = createApiMock()
+      let onEvent: ((event: Parameters<Parameters<GrokBridgeApi['onEvent']>[0]>[0]) => void) | undefined
+      api.onEvent = vi.fn((callback) => { onEvent = callback; return () => {} })
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await user.click(await screen.findByText('Fix tests'))
+      const composer = screen.getByPlaceholderText(/交給 Grok 一個任務/)
+      expect(composer).toHaveAttribute('rows', '3')
+      expect(screen.getByTestId('session-tools-more')).toHaveAttribute('aria-label', '更多工具')
+      act(() => { onEvent?.({ id: 'turn-run', sessionId: 's1', kind: 'turn', status: 'running' }) })
+      const rail = await screen.findByTestId('command-rail')
+      const stop = within(rail).getByTestId('stop-button')
+      expect(stop.compareDocumentPosition(within(rail).getByTestId('interject-button')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+      expect(stop).toHaveTextContent('停止')
+    })
+  })
+
+  describe('wave 5 readable Chinese', () => {
+    it('shows Chinese eyebrows, connection status, transcript end, and attach tooltip', async () => {
+      const api = createApiMock()
+      api.getStatus = vi.fn().mockResolvedValue({ executable: 'C:\\Users\\demo\\.grok\\bin\\grok.exe', found: true, version: '1.0.3', connected: true })
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      expect((await screen.findAllByText('銀河座艙')).length).toBeGreaterThan(0)
+      expect(screen.getByRole('button', { name: /Grok 1\.0\.3 · 已連線/ })).toBeInTheDocument()
+      await user.click(screen.getByText('Fix tests'))
+      expect(screen.getByText('目前對話')).toBeInTheDocument()
+      expect(screen.getByText('以上是目前載入的內容')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '加入檔案' })).toHaveAttribute('title', '加入檔案或資料夾，也可直接拖進來')
+    })
+
+    it('shows Chinese shortcut names in settings and grouped palette plus help overlay extras', async () => {
+      window.grokApi = createApiMock()
+      const user = userEvent.setup()
+      render(<App />)
+      await user.click(await screen.findByText('Fix tests'))
+      await screen.findByPlaceholderText(/交給 Grok 一個任務/)
+      await user.click(screen.getByRole('button', { name: '設定' }))
+      const shortcutRow = await screen.findByTestId('shortcut-row-searchTranscript')
+      expect(within(shortcutRow).getByText('搜尋目前對話')).toBeInTheDocument()
+      expect(within(shortcutRow).getByText('searchTranscript')).toBeInTheDocument()
+      await user.keyboard('{Escape}')
+
+      await user.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
+      expect(await screen.findByTestId('palette-group-screen')).toHaveTextContent('畫面動作')
+      expect(screen.getByTestId('palette-group-slash')).toHaveTextContent('斜線指令')
+      await user.keyboard('{Escape}')
+
+      await user.keyboard('?')
+      const help = await screen.findByRole('dialog', { name: '快捷鍵一覽' })
+      expect(within(help).getByText('快捷鍵')).toBeInTheDocument()
+      expect(within(help).getByText('開關預覽')).toBeInTheDocument()
+      expect(within(help).getByText('在此資料夾開新對話')).toBeInTheDocument()
+      expect(within(help).getByText('工具權限：先問我／全部自動過')).toBeInTheDocument()
+    })
+
+    it('uses short Chinese feature groups and a human delete confirm without CLI copy', async () => {
+      window.grokApi = createApiMock()
+      const user = userEvent.setup()
+      render(<App />)
+      await user.click(await screen.findByRole('button', { name: '功能矩陣' }))
+      const drawer = (await screen.findByRole('heading', { name: '能做' })).closest('.drawer') as HTMLElement
+      expect(within(drawer).getByText('功能一覽')).toBeInTheDocument()
+      expect(within(drawer).getByRole('heading', { name: '還不能做' })).toBeInTheDocument()
+      expect(drawer.textContent ?? '').not.toMatch(/CAPABILITY ROUTER/)
+
+      await user.click(screen.getByText('Fix tests'))
+      await user.click(screen.getByRole('button', { name: '更多動作 Fix tests' }))
+      await user.click(screen.getByRole('menuitem', { name: '刪除對話 Fix tests' }))
+      const confirm = screen.getByRole('dialog', { name: '刪除對話確認' })
+      expect(within(confirm).getByText('無法復原')).toBeInTheDocument()
+      expect(confirm.textContent ?? '').not.toMatch(/grok sessions delete/)
+    })
+
+    it('keeps 切換帳號 readable in the light theme at 1200px', () => {
+      expect(stylesCss).toMatch(/@media \(max-width: 1200px\)[\s\S]*\.app\[data-theme='light'\] \.account-pill[\s\S]*font-size:\s*10px/)
+    })
+  })
+
+  describe('wave 6 fewer clicks', () => {
+    it('auto-connects in the background when CLI is found and not connected', async () => {
+      const api = createApiMock()
+      window.grokApi = api
+      render(<App />)
+      await waitFor(() => expect(api.connect).toHaveBeenCalled())
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: /Grok 1\.0\.3 · 已連線/ })).toBeInTheDocument()
+    })
+
+    it('shows a closable notice instead of a modal when startup connect fails', async () => {
+      const api = createApiMock()
+      api.connect = vi.fn().mockRejectedValue(new Error('ACP 啟動失敗'))
+      window.grokApi = api
+      const user = userEvent.setup()
+      const writeText = vi.fn().mockResolvedValue(undefined)
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+      render(<App />)
+      const notice = await screen.findByTestId('app-notice')
+      expect(notice).toHaveTextContent('ACP 啟動失敗')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      await user.click(screen.getByTestId('notice-copy'))
+      expect(writeText).toHaveBeenCalledWith('ACP 啟動失敗')
+      await user.click(screen.getByTestId('notice-close'))
+      expect(screen.queryByTestId('app-notice')).not.toBeInTheDocument()
+    })
+
+    it('lets notice action buttons receive pointer events', () => {
+      expect(stylesCss).toMatch(/\.notice button[\s\S]*pointer-events:\s*auto/)
+    })
+
+    it('opens the remote section from the settings button', async () => {
+      window.grokApi = createApiMock()
+      const user = userEvent.setup()
+      render(<App />)
+      await user.click(await screen.findByRole('button', { name: '設定' }))
+      await user.click(await screen.findByTestId('settings-open-remote'))
+      expect(await screen.findByTestId('remote-panel')).toBeInTheDocument()
+      expect(screen.queryByTestId('settings-drawer')).not.toBeInTheDocument()
+    })
+
+    it('reorders last-used prompt templates to the front', async () => {
+      const api = createApiMock()
+      window.grokApi = api
+      const user = userEvent.setup()
+      render(<App />)
+      await user.click(await screen.findByText('Fix tests'))
+      await screen.findByPlaceholderText(/交給 Grok 一個任務/)
+      const row = await screen.findByTestId('prompt-templates')
+      const plan = within(row).getByRole('button', { name: '先做計畫' })
+      await waitFor(() => expect(plan).not.toBeDisabled())
+      expect(within(row).getAllByRole('button')[0]).toHaveTextContent('程式審查')
+      await user.click(plan)
+      await waitFor(() => {
+        expect(within(screen.getByTestId('prompt-templates')).getAllByRole('button')[0]).toHaveTextContent('先做計畫')
+      })
+      expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ recentPromptTemplates: ['plan'] }))
+    })
+
+    it('keeps a compact Agents Team toggle available', async () => {
+      window.grokApi = createApiMock()
+      render(<App />)
+      const toggle = await screen.findByTestId('agents-team-toggle')
+      expect(toggle).toBeInTheDocument()
+      expect(toggle.className).toMatch(/compact/)
+      expect(stylesCss).toMatch(/\.team-toggle[^{]*\{[^}]*height:\s*24px/)
+    })
   })
 })

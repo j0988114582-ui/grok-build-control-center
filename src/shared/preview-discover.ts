@@ -5,11 +5,21 @@
 
 import {
   PREVIEW_MAX_ITEMS_PER_SESSION,
+  PREVIEW_MAX_RECENT_SESSIONS,
+  PREVIEW_RECENT_PER_SESSION,
   type PreviewItem,
   type PreviewKind,
+  type PreviewRecentEntry,
   type PreviewSource
 } from './preview-types'
-import { basenameOf, extensionOf, isAbsoluteLocalPath, kindFromPath, normalizePreviewPathKey } from './preview-path-policy'
+import {
+  basenameOf,
+  extensionOf,
+  isAbsoluteLocalPath,
+  kindFromPath,
+  normalizePreviewPathKey,
+  rejectUnsafePreviewPath
+} from './preview-path-policy'
 
 export type DiscoverOptions = {
   sessionId: string
@@ -196,6 +206,137 @@ export function discoverFilePaths(
   }
 
   return items
+}
+
+export type LocalPathTextPart = { type: 'text' | 'path'; value: string }
+
+function cleanPathMatch(raw: string): string {
+  return raw.replace(/[),.;:]+$/, '').replace(/^["'`([{]+/, '').replace(/["'`)\]}]+$/, '')
+}
+
+/**
+ * Split markdown/plaintext into text + absolute local previewable path chips.
+ * Unsafe paths (UNC, `..`, ADS, device names) stay plain text.
+ */
+export function splitTextWithLocalPaths(text: string): LocalPathTextPart[] {
+  if (!text) return [{ type: 'text', value: text }]
+  const found: Array<{ start: number; end: number; value: string }> = []
+  const consider = (raw: string, index: number): void => {
+    const cleaned = cleanPathMatch(raw)
+    if (!cleaned || !isAbsoluteLocalPath(cleaned)) return
+    if (rejectUnsafePreviewPath(cleaned)) return
+    // `file.png:Zone.Identifier` — do not chip the stem of an ADS path.
+    if (text[index + cleaned.length] === ':') return
+    found.push({ start: index, end: index + cleaned.length, value: cleaned })
+  }
+
+  WIN_PATH_RE.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = WIN_PATH_RE.exec(text)) !== null) consider(match[1] ?? '', match.index)
+
+  POSIX_PATH_RE.lastIndex = 0
+  while ((match = POSIX_PATH_RE.exec(text)) !== null) consider(match[1] ?? '', match.index)
+
+  found.sort((a, b) => a.start - b.start)
+  const kept: typeof found = []
+  let lastEnd = 0
+  for (const row of found) {
+    if (row.start < lastEnd) continue
+    kept.push(row)
+    lastEnd = row.end
+  }
+  if (!kept.length) return [{ type: 'text', value: text }]
+
+  const parts: LocalPathTextPart[] = []
+  let cursor = 0
+  for (const row of kept) {
+    if (row.start > cursor) parts.push({ type: 'text', value: text.slice(cursor, row.start) })
+    parts.push({ type: 'path', value: row.value })
+    cursor = row.end
+  }
+  if (cursor < text.length) parts.push({ type: 'text', value: text.slice(cursor) })
+  return parts
+}
+
+function recentDedupeKey(entry: PreviewRecentEntry): string {
+  if (entry.path) return `${entry.kind}:${normalizePreviewPathKey(entry.path)}`
+  return `${entry.kind}:${entry.label}:${entry.language ?? ''}`
+}
+
+export function previewItemToRecent(item: PreviewItem): PreviewRecentEntry {
+  if (item.source.type === 'file') {
+    return { path: item.source.path, kind: item.kind, label: item.label, mtimeMs: item.mtimeMs }
+  }
+  if (item.source.type === 'remote-url') {
+    return { path: item.source.url, kind: 'remote-image', label: item.label }
+  }
+  return {
+    kind: 'code',
+    label: item.label,
+    language: item.source.language,
+    contentPreview: item.source.content.slice(0, 2000)
+  }
+}
+
+export function recentToPreviewItem(
+  sessionId: string,
+  entry: PreviewRecentEntry,
+  discoveredAt: number
+): PreviewItem | null {
+  if (entry.kind === 'remote-image' && entry.path) {
+    const source: PreviewSource = { type: 'remote-url', url: entry.path }
+    return {
+      id: itemId('remote-image', source),
+      kind: 'remote-image',
+      source,
+      label: entry.label,
+      discoveredAt,
+      sessionId
+    }
+  }
+  if (entry.path && (entry.kind === 'image' || entry.kind === 'video' || entry.kind === 'html' || entry.kind === 'code')) {
+    const source: PreviewSource = { type: 'file', path: entry.path }
+    return {
+      id: itemId(entry.kind, source),
+      kind: entry.kind,
+      source,
+      label: entry.label,
+      discoveredAt,
+      sessionId,
+      mtimeMs: entry.mtimeMs
+    }
+  }
+  if (entry.contentPreview) {
+    const hash = simpleHash(entry.contentPreview)
+    const source: PreviewSource = { type: 'inline-code', language: entry.language, content: entry.contentPreview, hash }
+    return {
+      id: itemId('code', source),
+      kind: 'code',
+      source,
+      label: entry.label,
+      discoveredAt,
+      sessionId
+    }
+  }
+  return null
+}
+
+export function rememberPreviewRecent(
+  current: Record<string, PreviewRecentEntry[]>,
+  sessionId: string,
+  item: PreviewItem
+): Record<string, PreviewRecentEntry[]> {
+  if (!sessionId) return current
+  const entry = previewItemToRecent(item)
+  const key = recentDedupeKey(entry)
+  const prev = current[sessionId] ?? []
+  if (prev[0] && recentDedupeKey(prev[0]) === key) return current
+  const nextForSession = [entry, ...prev.filter((row) => recentDedupeKey(row) !== key)].slice(0, PREVIEW_RECENT_PER_SESSION)
+  const next: Record<string, PreviewRecentEntry[]> = { ...current, [sessionId]: nextForSession }
+  const ids = Object.keys(next)
+  if (ids.length <= PREVIEW_MAX_RECENT_SESSIONS) return next
+  const keep = ids.slice(-PREVIEW_MAX_RECENT_SESSIONS)
+  return Object.fromEntries(keep.map((id) => [id, next[id] ?? []]))
 }
 
 /**

@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifySessions,
+  countSessionsByCwd,
   filterSessionsByActiveWindow,
   filterSessionsByCwd,
+  filterSessionsByPinned,
+  folderFilterOptionLabel,
   isEmptySession,
   listSessionCwds,
+  nextFolderFilter,
   SESSION_ACTIVE_DAYS,
   SESSION_KEEP_PER_CWD,
+  sessionListChipPressed,
   suggestedCleanupSessions
 } from '../src/shared/session-hygiene'
 import type { SessionSummary } from '../src/shared/types'
@@ -94,6 +99,24 @@ describe('session-hygiene (P-CLEAN / P-FOLDER)', () => {
     expect(listSessionCwds(sessions)).toEqual(['C:\\alpha\\proj', 'C:\\beta\\proj'])
     expect(filterSessionsByCwd(sessions, 'C:\\alpha\\proj').map((item) => item.id)).toEqual(['a', 'c'])
     expect(filterSessionsByCwd(sessions, 'all')).toHaveLength(3)
+    expect(folderFilterOptionLabel('C:\\alpha\\proj', 2)).toBe('proj（2）')
+    expect(countSessionsByCwd(sessions).get('C:\\alpha\\proj')).toBe(2)
+    expect(nextFolderFilter('all', 'C:\\alpha\\proj')).toBe('C:\\alpha\\proj')
+    expect(nextFolderFilter('C:\\alpha\\proj', 'C:\\alpha\\proj')).toBe('all')
+  })
+
+  it('pin chip keeps only pinned ids', () => {
+    const sessions = [s({ id: 'a' }), s({ id: 'b' }), s({ id: 'c' })]
+    expect(filterSessionsByPinned(sessions, ['c', 'a'], true).map((item) => item.id)).toEqual(['a', 'c'])
+    expect(filterSessionsByPinned(sessions, ['c'], false)).toHaveLength(3)
+  })
+
+  it('filter chips describe all / project / pinned / active', () => {
+    expect(sessionListChipPressed('all', { folderFilter: 'all', pinnedOnly: false, activeOnly: false })).toBe(true)
+    expect(sessionListChipPressed('project', { folderFilter: 'C:\\repo', pinnedOnly: false, activeOnly: false })).toBe(true)
+    expect(sessionListChipPressed('pinned', { folderFilter: 'all', pinnedOnly: true, activeOnly: false })).toBe(true)
+    expect(sessionListChipPressed('active', { folderFilter: 'all', pinnedOnly: false, activeOnly: true })).toBe(true)
+    expect(sessionListChipPressed('all', { folderFilter: 'all', pinnedOnly: false, activeOnly: true })).toBe(false)
   })
 })
 

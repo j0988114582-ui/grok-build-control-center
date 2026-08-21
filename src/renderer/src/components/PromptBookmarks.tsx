@@ -95,7 +95,7 @@ export function PromptBookmarks({
             data-testid="prompt-bookmark-item"
             onMouseEnter={() => setHighlighted(index)}
             onClick={() => pick(bookmark)}
-          ><b>#{bookmark.ordinal}</b><span>{bookmark.label}</span></button>)}
+          ><b>#{bookmark.ordinal}</b><span className="prompt-bookmark-summary">{bookmark.label}</span></button>)}
         </div>}
     </div>}
   </div>

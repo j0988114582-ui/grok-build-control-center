@@ -1,4 +1,5 @@
-import type { AppSettings, PreviewRecentEntry, PreviewSettings } from './types'
+import type { AppSettings, PreviewRecentEntry, PreviewSettings, SidebarSortMode } from './types'
+import { findPromptTemplate, RECENT_PROMPT_TEMPLATES_MAX } from './prompt-templates'
 import { DEFAULT_SHORTCUTS, normalizeAccelerator } from './shortcuts'
 import {
   DEFAULT_PREVIEW_SETTINGS,
@@ -6,6 +7,7 @@ import {
   PREVIEW_DEFAULT_MAX_VIDEO_MB,
   PREVIEW_DEFAULT_WIDTH,
   PREVIEW_MAX_RECENT_SESSIONS,
+  PREVIEW_RECENT_PER_SESSION,
   PREVIEW_MAX_WIDTH,
   PREVIEW_MIN_WIDTH
 } from './preview-types'
@@ -14,6 +16,9 @@ import {
 export const SIDEBAR_ACTIVE_DAYS_DEFAULT = 4
 export const SIDEBAR_ACTIVE_DAYS_MIN = 1
 export const SIDEBAR_ACTIVE_DAYS_MAX = 30
+export const RECENT_PROJECT_CWDS_MAX = 3
+export const SIDEBAR_SORT_DEFAULT: SidebarSortMode = 'updated'
+const SIDEBAR_SORT_MODES = new Set<SidebarSortMode>(['updated', 'opened', 'name', 'running'])
 
 const windowsJoin = (...parts: string[]): string => parts.map((part, index) => index === 0 ? part.replace(/[\\/]+$/, '') : part.replace(/^[\\/]+|[\\/]+$/g, '')).join('\\')
 
@@ -26,13 +31,18 @@ export const createDefaultSettings = (homeDir: string): AppSettings => ({
   drafts: {},
   pinnedSessions: [],
   recentCommands: [],
+  recentPromptTemplates: [],
   fontSize: 15,
   lineHeight: 1.65,
   contentWidth: 920,
   shortcuts: DEFAULT_SHORTCUTS.map((binding) => ({ ...binding })),
   preview: { ...DEFAULT_PREVIEW_SETTINGS, recentBySession: {} },
   sidebarActiveOnly: false,
-  sidebarActiveDays: SIDEBAR_ACTIVE_DAYS_DEFAULT
+  sidebarActiveDays: SIDEBAR_ACTIVE_DAYS_DEFAULT,
+  sidebarGroupByFolder: true,
+  sidebarSort: SIDEBAR_SORT_DEFAULT,
+  recentProjectCwds: [],
+  sessionLastOpenedAt: {}
 })
 
 const clamp = (value: unknown, min: number, max: number, fallback: number): number =>
@@ -89,10 +99,53 @@ const normalizeRecentCommands = (value: unknown): string[] => {
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()))].slice(0, 8)
 }
 
+const normalizeRecentPromptTemplates = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const id = item.trim()
+    if (!id || seen.has(id) || !findPromptTemplate(id)) continue
+    seen.add(id)
+    result.push(id)
+    if (result.length >= RECENT_PROMPT_TEMPLATES_MAX) break
+  }
+  return result
+}
+
 const normalizePinnedSessions = (value: unknown): string[] => {
   if (!Array.isArray(value)) return []
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()))].slice(0, 200)
 }
+
+const normalizeCwdKey = (value: string): string => value.replace(/[\\/]+$/, '').trim()
+
+export const normalizeRecentProjectCwds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const cwd = normalizeCwdKey(item).slice(0, 1000)
+    if (!cwd || seen.has(cwd.toLowerCase())) continue
+    seen.add(cwd.toLowerCase())
+    result.push(cwd)
+    if (result.length >= RECENT_PROJECT_CWDS_MAX) break
+  }
+  return result
+}
+
+const normalizeSessionLastOpenedAt = (value: unknown): Record<string, number> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value).flatMap(([sessionId, stamp]) => {
+    if (!sessionId || typeof stamp !== 'number' || !Number.isFinite(stamp) || stamp <= 0) return []
+    return [[sessionId, stamp]]
+  }).slice(0, 500))
+}
+
+const normalizeSidebarSort = (value: unknown): SidebarSortMode =>
+  typeof value === 'string' && SIDEBAR_SORT_MODES.has(value as SidebarSortMode) ? value as SidebarSortMode : SIDEBAR_SORT_DEFAULT
 
 const PREVIEW_KINDS = new Set(['image', 'video', 'html', 'code', 'remote-image'])
 
@@ -115,7 +168,7 @@ const normalizePreviewRecent = (value: unknown): Record<string, PreviewRecentEnt
           language: typeof row.language === 'string' ? row.language.slice(0, 40) : undefined,
           contentPreview: typeof row.contentPreview === 'string' ? row.contentPreview.slice(0, 2000) : undefined
         }]
-      }).slice(0, 50)
+      }).slice(0, PREVIEW_RECENT_PER_SESSION)
       return items.length ? [[sessionId, items] as const] : []
     })
     // Keep most recently listed sessions (object key order is insertion order)
@@ -156,6 +209,7 @@ export function normalizeSettings(value: Partial<AppSettings> | undefined, homeD
     drafts: normalizeDrafts(value?.drafts),
     pinnedSessions: normalizePinnedSessions(value?.pinnedSessions),
     recentCommands: normalizeRecentCommands(value?.recentCommands),
+    recentPromptTemplates: normalizeRecentPromptTemplates(value?.recentPromptTemplates),
     fontSize: clamp(value?.fontSize, 12, 22, defaults.fontSize),
     lineHeight: clamp(value?.lineHeight, 1.2, 2.1, defaults.lineHeight),
     contentWidth: clamp(value?.contentWidth, 640, 1400, defaults.contentWidth),
@@ -163,6 +217,10 @@ export function normalizeSettings(value: Partial<AppSettings> | undefined, homeD
     preview: normalizePreview(value?.preview),
     sidebarActiveOnly: typeof value?.sidebarActiveOnly === 'boolean' ? value.sidebarActiveOnly : defaults.sidebarActiveOnly,
     // Whole days only — a stored 4.5 would make the caption read "活躍 4.5 天".
-    sidebarActiveDays: Math.round(clamp(value?.sidebarActiveDays, SIDEBAR_ACTIVE_DAYS_MIN, SIDEBAR_ACTIVE_DAYS_MAX, defaults.sidebarActiveDays))
+    sidebarActiveDays: Math.round(clamp(value?.sidebarActiveDays, SIDEBAR_ACTIVE_DAYS_MIN, SIDEBAR_ACTIVE_DAYS_MAX, defaults.sidebarActiveDays)),
+    sidebarGroupByFolder: typeof value?.sidebarGroupByFolder === 'boolean' ? value.sidebarGroupByFolder : defaults.sidebarGroupByFolder,
+    sidebarSort: normalizeSidebarSort(value?.sidebarSort),
+    recentProjectCwds: normalizeRecentProjectCwds(value?.recentProjectCwds),
+    sessionLastOpenedAt: normalizeSessionLastOpenedAt(value?.sessionLastOpenedAt)
   }
 }

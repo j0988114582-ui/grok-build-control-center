@@ -49,6 +49,8 @@ export type PreviewDockProps = {
   onCopyPath: (path: string) => void
   onRevealPath: (path: string) => void
   onOpenExternalPath: (path: string) => void
+  /** revealOnly errors: allow the parent folder then retry register. */
+  onAllowFolderAndRetry?: (filePath: string) => void
   reducedMotion?: boolean
 }
 
@@ -57,8 +59,7 @@ const TAB_KINDS: Array<{ id: 'auto' | PreviewKind; label: string }> = [
   { id: 'image', label: '圖片' },
   { id: 'video', label: '影片' },
   { id: 'html', label: 'HTML' },
-  { id: 'code', label: '程式碼' },
-  { id: 'remote-image', label: '遠端圖' }
+  { id: 'code', label: '程式碼' }
 ]
 
 function kindIcon(kind: PreviewKind): React.ReactNode {
@@ -72,7 +73,7 @@ export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
   const {
     open, width, items, activeId, load, showHtmlScriptAdvanced, htmlScriptsAllowed,
     onToggleOpen, onWidthChange, onSelectItem, onCloseItem, onRefresh, onRescan, onOpenFile,
-    onToggleHtmlScripts, onCopyPath, onRevealPath, onOpenExternalPath
+    onToggleHtmlScripts, onCopyPath, onRevealPath, onOpenExternalPath, onAllowFolderAndRetry
   } = props
 
   const [tab, setTab] = useState<'auto' | PreviewKind>('auto')
@@ -82,6 +83,7 @@ export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
   const active = items.find((item) => item.id === activeId) ?? null
   const filtered = useMemo(() => {
     if (tab === 'auto') return items
+    if (tab === 'image') return items.filter((item) => item.kind === 'image' || item.kind === 'remote-image')
     return items.filter((item) => item.kind === tab)
   }, [items, tab])
 
@@ -163,14 +165,16 @@ export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
   >
     <div className="preview-resize" data-testid="preview-resize" onPointerDown={onResizePointerDown} role="separator" aria-orientation="vertical" aria-label="調整預覽台寬度" />
     <header className="preview-dock-head">
-      <div>
-        <span className="eyebrow">PREVIEW DOCK</span>
-        <h2>預覽</h2>
-      </div>
+      <h2>預覽</h2>
       <div className="preview-dock-actions">
         <button type="button" className="icon-button" aria-label="開啟檔案" title="開啟檔案…" onClick={onOpenFile}><Eye size={15} /></button>
-        <button type="button" className="icon-button" aria-label="重新掃描對話" title="重新掃描目前對話" onClick={onRescan}><RefreshCw size={15} /></button>
-        <button type="button" className="icon-button" aria-label="重新整理預覽" title="重新整理" onClick={onRefresh}><RefreshCw size={15} /></button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="重新整理"
+          title="重新整理"
+          onClick={() => { onRescan(); onRefresh() }}
+        ><RefreshCw size={15} /></button>
         {pathForActions && active?.source.type === 'file' && <>
           <button type="button" className="icon-button" aria-label="複製路徑" onClick={() => onCopyPath(pathForActions)}><Copy size={15} /></button>
           <button type="button" className="icon-button" aria-label="在檔案總管開啟" onClick={() => onRevealPath(pathForActions)}><FolderOpen size={15} /></button>
@@ -233,10 +237,13 @@ export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
         >
           <span className="preview-list-icon">{kindIcon(item.kind)}</span>
           <span className="preview-list-meta">
-            <strong>{item.label}</strong>
-            <em>{item.shortPath ?? (item.source.type === 'file' ? item.source.path : item.kind)}</em>
+            <strong>
+              {item.label}
+              {item.kind === 'remote-image' && <small className="preview-remote-tag">遠端</small>}
+            </strong>
+            <em>{item.shortPath ?? (item.source.type === 'file' ? item.source.path : item.kind === 'remote-image' ? '遠端圖片' : item.kind)}</em>
           </span>
-          <span className={`preview-kind-badge kind-${item.kind}`}>{item.kind}</span>
+          <span className={`preview-kind-badge kind-${item.kind}`}>{item.kind === 'remote-image' ? '遠端' : item.kind}</span>
         </button>
       ))}
     </div>
@@ -259,6 +266,13 @@ export function PreviewDock(props: PreviewDockProps): React.JSX.Element {
         <div className="preview-error" role="alert" data-testid="preview-error">
           <p>{load.message}</p>
           <div className="preview-error-actions">
+            {load.revealOnly && pathForActions && active?.source.type === 'file' && onAllowFolderAndRetry && (
+              <button
+                type="button"
+                data-testid="preview-allow-folder"
+                onClick={() => onAllowFolderAndRetry(pathForActions)}
+              >允許這個資料夾並重試</button>
+            )}
             <button type="button" onClick={onRefresh}>重試</button>
             {pathForActions && active?.source.type === 'file' && (
               <button type="button" onClick={() => onRevealPath(pathForActions)}>在檔案總管開啟</button>

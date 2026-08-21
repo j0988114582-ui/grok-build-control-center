@@ -8,7 +8,7 @@ import { sessionDisplayTitle } from './session-groups'
 import { fitTextareaHeight, teamComposerMaxPx, TEAM_COMPOSER_MIN_PX } from '../../../shared/composer-autogrow'
 
 import { isTranscriptVisibleEvent } from '../../../shared/event-adapter'
-import { PROMPT_TEMPLATES } from '../../../shared/prompt-templates'
+import { orderPromptTemplates, type PromptTemplate } from '../../../shared/prompt-templates'
 
 type Props = {
   session: SessionSummary
@@ -26,6 +26,8 @@ type Props = {
   onInterject: () => void
   onDoNow: () => void
   onStop: () => void
+  templates?: PromptTemplate[]
+  onUseTemplate?: (id: string) => void
   EventCard: React.ComponentType<{ event: UiSessionEvent; query: string; preview?: unknown }>
 }
 
@@ -44,6 +46,8 @@ export function SessionTeamPane({
   onInterject,
   onDoNow,
   onStop,
+  templates,
+  onUseTemplate,
   EventCard
 }: Props): React.JSX.Element {
   const title = titleOverride || sessionDisplayTitle(session, {})
@@ -84,7 +88,7 @@ export function SessionTeamPane({
     >
       <header className="team-pane-head">
         <div>
-          <span className="eyebrow">{focused ? 'FOCUS' : 'TEAM'}</span>
+          <span className="eyebrow">{focused ? '目前焦點' : '並排對話'}</span>
           <h2 title={session.cwd}>{title}</h2>
           <p>{session.cwd}</p>
         </div>
@@ -108,14 +112,18 @@ export function SessionTeamPane({
       <footer className="team-pane-composer">
         {!running && (
           <div className="template-row team-template-row" data-testid="prompt-templates">
-            {PROMPT_TEMPLATES.map((item) => (
+            {(templates ?? orderPromptTemplates()).map((item) => (
               <button
                 key={item.id}
                 type="button"
                 className="template-chip"
+                data-testid={`prompt-template-${item.id}`}
                 title={item.description}
                 disabled={!ready}
-                onClick={() => onDraftChange(`${draft ?? ''}${draft ? '\n' : ''}${item.body}`)}
+                onClick={() => {
+                  onUseTemplate?.(item.id)
+                  onDraftChange(`${draft ?? ''}${draft ? '\n' : ''}${item.body}`)
+                }}
               >
                 {item.label}
               </button>
@@ -171,14 +179,15 @@ export function AgentsTeamToolbar({
   return (
     <button
       type="button"
-      className={`team-toggle ${enabled ? 'active' : ''}`}
+      className={`team-toggle compact ${enabled ? 'active' : ''}`}
       data-testid="agents-team-toggle"
       title={enabled ? '關閉 Agents Team 並排' : '開啟 Agents Team 並排（最多 3 格）'}
+      aria-label={enabled ? `關閉 Agents Team 並排 ${count}/${max}` : '開啟 Agents Team 並排'}
       aria-pressed={enabled}
       onClick={onToggle}
     >
       <Users size={14} />
-      Agents Team{enabled ? ` · ${count}/${max}` : ''}
+      <span>Team{enabled ? ` ${count}/${max}` : ''}</span>
     </button>
   )
 }

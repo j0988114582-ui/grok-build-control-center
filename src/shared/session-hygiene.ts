@@ -150,3 +150,49 @@ export function cwdDisplayName(cwd: string): string {
   const normalized = cwd.replace(/[\\/]+$/, '')
   return normalized.split(/[\\/]/).pop() || normalized
 }
+
+export function normalizeSessionCwd(cwd: string): string {
+  return cwd.replace(/[\\/]+$/, '')
+}
+
+/** Visible folder-filter text: basename + count. Full path belongs on `title`. */
+export function folderFilterOptionLabel(cwd: string, count: number): string {
+  return `${cwdDisplayName(cwd)}（${count}）`
+}
+
+/** Click the same project again to clear the folder filter. */
+export function nextFolderFilter(current: string | 'all', cwd: string): string | 'all' {
+  if (current === 'all' || !current) return normalizeSessionCwd(cwd)
+  return normalizeSessionCwd(current) === normalizeSessionCwd(cwd) ? 'all' : normalizeSessionCwd(cwd)
+}
+
+export function countSessionsByCwd(sessions: readonly SessionSummary[]): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const session of sessions) {
+    const cwd = normalizeSessionCwd(session.cwd)
+    map.set(cwd, (map.get(cwd) ?? 0) + 1)
+  }
+  return map
+}
+
+export type SessionListChipId = 'all' | 'project' | 'pinned' | 'active'
+
+export function sessionListChipPressed(
+  chip: SessionListChipId,
+  state: { folderFilter: string | 'all'; pinnedOnly: boolean; activeOnly: boolean }
+): boolean {
+  if (chip === 'all') return (state.folderFilter === 'all' || !state.folderFilter) && !state.pinnedOnly && !state.activeOnly
+  if (chip === 'project') return Boolean(state.folderFilter) && state.folderFilter !== 'all'
+  if (chip === 'pinned') return state.pinnedOnly
+  return state.activeOnly
+}
+
+export function filterSessionsByPinned(
+  sessions: readonly SessionSummary[],
+  pinnedIds: readonly string[],
+  pinnedOnly: boolean
+): SessionSummary[] {
+  if (!pinnedOnly) return [...sessions]
+  const set = new Set(pinnedIds)
+  return sessions.filter((session) => set.has(session.id))
+}

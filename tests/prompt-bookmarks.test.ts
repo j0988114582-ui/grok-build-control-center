@@ -27,7 +27,7 @@ describe('prompt bookmarks (P-BOOKMARK)', () => {
     const events = [userMessage('a', 'x'.repeat(200))]
     const label = collectPromptBookmarks(events)[0].label
     expect(label.endsWith('…')).toBe(true)
-    expect(label.length).toBeLessThanOrEqual(53)
+    expect(label.length).toBeLessThanOrEqual(81)
   })
 
   it('skips whitespace-only prompts rather than listing blank rows', () => {

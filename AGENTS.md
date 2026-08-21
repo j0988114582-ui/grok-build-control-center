@@ -1,6 +1,8 @@
 # Grok Build GUI — agent notes
 
-狀態（2026-08-18，package.json **0.14.0**，0.14 品質收斂完成、已發布 GitHub Release v0.14.0）：現役目錄就是這裡。本機 CLI 實測 **grok 1.0.4**。0.14.0 測試安裝檔仍未簽章、非正式發行。Release：https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.14.0
+狀態（2026-08-21，package.json **0.14.1**，UX 便利性波次）：現役目錄就是這裡。本機 CLI 實測 **grok 1.0.5**。0.14.1 測試安裝檔仍未簽章、非正式發行。Release：https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.14.1
+
+**2026-08-21 本場：** 6 波 UX（權限兩顆鈕、就緒誠實、側欄排序、預覽允許資料夾、中文文案、啟動背景連線）。獨立審查 Approved。單元測試 579/579、lint、typecheck、打包；真 GUI 稽核 9/9、打包後抽查 8/8。已知：工作區外檔仍需按一次允許；未花額度跑完整產圖。不要做歡迎頁「先不選專案」、不在專案底下、Rewind UI、子代理取消。
 
 2026-08-18 收尾：`main` 已 push 到 GitHub（功能 `d06adea` → UI 修復 `83c6ee4` → 文件 `8e35f13` → 測試逾時 `6a0681b`），CI 兩個工作流全綠；v0.14.0 Release 附 `Grok-Build-Control-Center-Setup-0.14.0.exe`＋`SHA256SUMS.txt`＋`sbom.cdx.json`。發行前抓到並修掉兩項 CI 問題（側欄「N 天內」對比度、hydration 收尾誤關剛開始的回合）與一項 Windows 跑者測試逾時。
 

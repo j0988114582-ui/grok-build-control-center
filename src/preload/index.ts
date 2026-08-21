@@ -45,6 +45,7 @@ const api: GrokBridgeApi = {
   notify: (payload) => ipcRenderer.invoke('app:notify', payload),
   previewRegister: (filePath) => ipcRenderer.invoke('preview:register', filePath),
   previewReadText: (filePath) => ipcRenderer.invoke('preview:read-text', filePath),
+  previewAllowFolder: (filePath) => ipcRenderer.invoke('preview:allow-folder', filePath),
   previewChooseFile: () => ipcRenderer.invoke('preview:choose-file'),
   revealPath: (filePath) => ipcRenderer.invoke('shell:reveal-path', filePath),
   openPath: (filePath) => ipcRenderer.invoke('shell:open-path', filePath),

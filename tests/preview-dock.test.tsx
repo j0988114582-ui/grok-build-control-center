@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PreviewDock, type PreviewLoadState } from '../src/renderer/src/components/PreviewDock/PreviewDock'
 import { HtmlView } from '../src/renderer/src/components/PreviewDock/HtmlView'
+import { LocalPathChips } from '../src/renderer/src/components/PreviewDock/LocalPathText'
 import type { PreviewItem } from '../src/shared/preview-types'
 import { MarkdownRemoteChipProbe } from './preview-markdown-probe'
 
@@ -145,5 +146,81 @@ describe('PreviewDock', () => {
     render(<MarkdownRemoteChipProbe />)
     expect(screen.getByTestId('md-remote-image-chip')).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it('title is 預覽 without PREVIEW DOCK wrap, and uses one 重新整理 control', () => {
+    render(<DockHarness load={{ status: 'idle' }} />)
+    const dock = screen.getByTestId('preview-dock')
+    expect(dock).toHaveTextContent('預覽')
+    expect(dock.textContent ?? '').not.toMatch(/PREVIEW DOCK/)
+    expect(screen.getByRole('button', { name: '重新整理' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重新掃描對話' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重新整理預覽' })).not.toBeInTheDocument()
+  })
+
+  it('圖片 tab includes remote images with 遠端 label', async () => {
+    const user = userEvent.setup()
+    const items = [
+      baseItem(),
+      baseItem({
+        id: 'remote:https://cdn.example.com/a.jpg',
+        kind: 'remote-image',
+        source: { type: 'remote-url', url: 'https://cdn.example.com/a.jpg' },
+        label: 'photo.jpg'
+      })
+    ]
+    render(<DockHarness load={{ status: 'idle' }} items={items} />)
+    expect(screen.queryByRole('tab', { name: '遠端圖' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: '圖片' }))
+    const list = screen.getByTestId('preview-list')
+    expect(list).toHaveTextContent('a.png')
+    expect(list).toHaveTextContent('photo.jpg')
+    expect(list).toHaveTextContent('遠端')
+  })
+
+  it('shows allow-folder retry on revealOnly errors', async () => {
+    const user = userEvent.setup()
+    const onAllow = vi.fn()
+    render(
+      <PreviewDock
+        open
+        width={360}
+        items={[baseItem()]}
+        activeId={'file:c:\\repo\\a.png'}
+        load={{ status: 'error', message: '路徑在允許的工作區外，僅能在檔案總管開啟', revealOnly: true }}
+        showHtmlScriptAdvanced
+        htmlScriptsAllowed={false}
+        onToggleOpen={() => undefined}
+        onWidthChange={() => undefined}
+        onSelectItem={() => undefined}
+        onRefresh={() => undefined}
+        onRescan={() => undefined}
+        onOpenFile={() => undefined}
+        onToggleHtmlScripts={() => undefined}
+        onCopyPath={() => undefined}
+        onRevealPath={() => undefined}
+        onOpenExternalPath={() => undefined}
+        onAllowFolderAndRetry={onAllow}
+      />
+    )
+    await user.click(screen.getByRole('button', { name: '允許這個資料夾並重試' }))
+    expect(onAllow).toHaveBeenCalledWith('C:\\repo\\a.png')
+  })
+
+  it('does not show allow-folder on generic errors', () => {
+    render(<DockHarness load={{ status: 'error', message: '找不到檔案，可能已被移動或刪除' }} />)
+    expect(screen.queryByRole('button', { name: '允許這個資料夾並重試' })).not.toBeInTheDocument()
+  })
+
+  it('turns absolute local paths into preview chips and ignores UNC', async () => {
+    const user = userEvent.setup()
+    const onPreview = vi.fn()
+    const { rerender } = render(
+      <p><LocalPathChips text={'Wrote C:\\repo\\out\\shot.png ok'} onPreviewPath={onPreview} /></p>
+    )
+    await user.click(screen.getByTestId('md-local-path-chip'))
+    expect(onPreview).toHaveBeenCalledWith('C:\\repo\\out\\shot.png')
+    rerender(<p><LocalPathChips text={'see \\\\server\\share\\a.png'} onPreviewPath={onPreview} /></p>)
+    expect(screen.queryByTestId('md-local-path-chip')).not.toBeInTheDocument()
   })
 })

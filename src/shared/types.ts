@@ -175,6 +175,8 @@ export type AppSettings = {
   /** Session ids pinned to the global top sidebar group (local preference only). */
   pinnedSessions: string[]
   recentCommands: string[]
+  /** Most-recently used prompt template ids, shown first in the composer. */
+  recentPromptTemplates: string[]
   fontSize: number
   lineHeight: number
   contentWidth: number
@@ -190,7 +192,17 @@ export type AppSettings = {
   sidebarActiveOnly: boolean
   /** Active window for the sidebar filter, in days (1–30). */
   sidebarActiveDays: number
+  /** When false, the sidebar is a single timeline instead of per-folder groups. */
+  sidebarGroupByFolder: boolean
+  /** Sidebar list order (local preference). */
+  sidebarSort: SidebarSortMode
+  /** Last few project folders for one-click reopen (not a no-project start). */
+  recentProjectCwds: string[]
+  /** Local wall times for "最近開啟" sort; not a CLI field. */
+  sessionLastOpenedAt: Record<string, number>
 }
+
+export type SidebarSortMode = 'updated' | 'opened' | 'name' | 'running'
 
 export type ShortcutBinding = {
   command: string

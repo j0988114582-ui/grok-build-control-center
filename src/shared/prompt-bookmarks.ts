@@ -8,7 +8,8 @@ import type { UiSessionEvent } from './types'
 
 export type PromptBookmark = { id: string; ordinal: number; label: string }
 
-export const PROMPT_BOOKMARK_LABEL_MAX = 52
+/** Two-line summary: ~40 chars per line. */
+export const PROMPT_BOOKMARK_LABEL_MAX = 80
 
 export function collectPromptBookmarks(events: UiSessionEvent[]): PromptBookmark[] {
   const out: PromptBookmark[] = []

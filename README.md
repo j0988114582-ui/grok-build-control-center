@@ -28,13 +28,13 @@ Grok Build Control Center 把 Grok Build 的結構化 ACP 介面變成一般人�
    ```
 4. 結果需與 `SHA256SUMS.txt` 完全一致，再執行安裝程式。
 5. 打開程式。若尚未安裝 Grok CLI，按 **安裝 Grok CLI**，確認官方來源後再同意。
-6. 在瀏覽器完成 Grok 官方登入，回到程式按 **選擇專案開始**。
+6. 在瀏覽器完成 Grok 官方登入，回到程式按 **選資料夾開始**。
 
 目前所有版本皆為社群測試版，尚未程式碼簽章，Windows SmartScreen 可能顯示警告。簽章方案（SignPath Foundation 開源憑證）已選定、發行自動化已就緒，等待憑證核准；進度與驗證方式見 [docs/signing-trust-chain.md](docs/signing-trust-chain.md)。在此之前請務必以 `SHA256SUMS.txt` 核對下載檔案。程式碼簽章列為公開 Roadmap 項目，不會謊稱已完成。
 
 ## 第一個任務
 
-1. 按 **選擇專案開始**。
+1. 按 **選資料夾開始**。
 2. 選擇要讓 Grok 處理的資料夾。
 3. 在下方輸入框用白話輸入任務，按 Enter 送出。
 4. Grok 請求權限時，先讀清楚要做什麼，再從提供的選項中選擇。
@@ -43,8 +43,11 @@ Grok Build Control Center 把 Grok Build 的結構化 ACP 介面變成一般人�
 
 貼上剪貼簿圖片時：若本機 Grok ACP 未宣告內嵌圖片支援，程式會把圖存到 Windows 暫存目錄並把**絕對路徑**插入草稿（不會自動加提示句）。
 
-## 目前版本內容（v0.14.0）
+## 目前版本內容（v0.14.1）
 
+- **工具權限看得懂、點得到**：頂欄改成「先問我／全部自動過」兩顆鈕，並說明改檔或跑指令前會先問你；全部自動過仍要確認。側欄可依最近更新／開啟／名稱／執行中排序，也可關掉資料夾分組。
+- **預覽跨專案**：側欄已有的專案資料夾可預覽；若檔在工作區外，可按「允許這個資料夾並重試」。對話裡的本機路徑可點開預覽。
+- **畫面中文**：歡迎頁與側欄一律「選資料夾開始」；搜尋對話、銀河座艙、已連線、深想／一般／快速。未就緒不再顯示假的綠點「就緒」。
 - **切換對話不再重播整段歷史**：同一連線裡已打開過的 Session 切走再切回時沿用快取，Context 用量立即還原，不再堆一排「Grok 正在工作」或跳出「跳到最新 N」；舊載入失敗不能蓋掉較新的成功載入，remote 焦點、斷線重連與延遲到達的過期載入訊號也走同一套防護。
 - **專案列＋／影音路徑晶片**：側欄每個專案群組標題旁有「＋」，直接在那個資料夾開新對話；檔案總管拖入影片／音訊會變成路徑晶片（跟圖片一樣）。不做「不在專案底下工作」——Grok ACP 一定要工作目錄。
 - **規劃／權限收口**：Esc、停止回合或回合結束會清掉規劃核准窗；權限回覆失敗不再關窗；`/always-approve` 改走 YOLO 確認，不會當普通指令送進 CLI。
@@ -128,7 +131,7 @@ GitHub Actions 會在 Pull Request 自動執行測試、lint、typecheck、build
 
 Grok Build Control Center turns Grok Build's structured ACP interface into a readable Windows app. Choose a project folder, describe a task in plain language, and review permissions inside the app.
 
-Version 0.14.0 hardens session switching: switching away and back no longer replays the whole history, restores Context instantly from cache, and fences stale desktop/remote loads so a late failure cannot wipe a newer transcript. It also adds a per-project "+" to start a session in that folder, video/audio drag-in as path chips, fail-closed plan-approval and permission fixes, and an honest feature matrix. Verified against Grok Build CLI 1.0.4. Earlier additions — plan-mode approval, the active-conversation sidebar filter, and the read-only subagent roster — remain.
+Version 0.14.1 is a convenience and honesty pass on top of 0.14.0: clickable Ask-first / Always-approve permission chips, sidebar sort, preview of listed project folders plus an explicit Allow-this-folder control, and remaining user-facing English converted to Traditional Chinese. Session-switch cache, per-project "+", video/audio path chips, and fail-closed plan/permission behaviour from 0.14.0 remain. Verified against Grok Build CLI 1.0.5. Unsigned community test build.
 
 This project is not affiliated with or endorsed by xAI. Grok and Grok Build are trademarks of their respective owner.
 

@@ -171,14 +171,15 @@ export function BackgroundTasksPanel({
     <aside className="drawer bgtasks-drawer" data-testid="background-tasks-panel" aria-label="背景任務／Loop 面板">
       <div className="drawer-head">
         <div>
-          <span className="eyebrow">BACKGROUND ACTIVITY</span>
+          <span className="eyebrow">背景任務</span>
           <h2>背景任務／Loop</h2>
         </div>
         <button type="button" className="icon-button" aria-label="關閉背景任務面板" onClick={onClose}><X /></button>
       </div>
       <p className="drawer-intro">
-        彙整這個對話裡的排程、子代理與背景指令（來自 tool_call 與 subagent／task 通知，不是新的 ACP 呼叫）。
-        目前只有排程迴圈能以 scheduler_delete 指示停止（session/cancel 停不掉已分離的排程）；子代理與一般背景任務沒有可靠的個別終止方式，因此不提供假的停止按鈕。
+        這裡看這個對話的排程，以及派出去的子任務。
+        沒在跑的時候會是空的，這是正常的。
+        只有排程可以請它停；子任務目前沒有可靠的單獨停止方式。
       </p>
 
       <section className="bgtasks-usage" data-testid="bgtasks-usage" aria-label="Context 與回合用量">

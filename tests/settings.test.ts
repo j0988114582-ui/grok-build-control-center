@@ -17,6 +17,7 @@ describe('settings', () => {
       drafts: {},
       pinnedSessions: [],
       recentCommands: [],
+      recentPromptTemplates: [],
       preview: expect.objectContaining({ open: false, autoPreviewLatestMedia: false, showHtmlScriptAdvanced: false })
     })
   })
@@ -117,9 +118,38 @@ describe('settings', () => {
   it('defaults the sidebar active-only filter to off with a 4-day window', () => {
     expect(createDefaultSettings('C:\\Users\\demo')).toMatchObject({
       sidebarActiveOnly: false,
-      sidebarActiveDays: SIDEBAR_ACTIVE_DAYS_DEFAULT
+      sidebarActiveDays: SIDEBAR_ACTIVE_DAYS_DEFAULT,
+      sidebarGroupByFolder: true,
+      sidebarSort: 'updated',
+      recentProjectCwds: [],
+      sessionLastOpenedAt: {}
     })
     expect(SIDEBAR_ACTIVE_DAYS_DEFAULT).toBe(4)
+  })
+
+  it('persists ungroup-by-folder and recent project cwds', () => {
+    const normalized = normalizeSettings({
+      sidebarGroupByFolder: false,
+      sidebarSort: 'name',
+      recentProjectCwds: ['C:\\alpha\\', 'C:\\beta', 'C:\\alpha', 'C:\\gamma', 'C:\\delta'],
+      sessionLastOpenedAt: { s1: 9, bad: 'nope' }
+    } as never, 'C:\\Users\\demo')
+    expect(normalized.sidebarGroupByFolder).toBe(false)
+    expect(normalized.sidebarSort).toBe('name')
+    expect(normalized.recentProjectCwds).toEqual(['C:\\alpha', 'C:\\beta', 'C:\\gamma'])
+    expect(normalized.sessionLastOpenedAt).toEqual({ s1: 9 })
+    expect(normalizeSettings({ sidebarSort: 'nope', sidebarGroupByFolder: 'yes' } as never, 'C:\\Users\\demo')).toMatchObject({
+      sidebarSort: 'updated',
+      sidebarGroupByFolder: true
+    })
+  })
+
+  it('keeps last-used prompt templates unique and known', () => {
+    const normalized = normalizeSettings({
+      recentPromptTemplates: ['plan', 'plan', 'missing', 'fix', '', 7]
+    } as never, 'C:\\Users\\demo')
+    expect(normalized.recentPromptTemplates).toEqual(['plan', 'fix'])
+    expect(normalizeSettings({} as never, 'C:\\Users\\demo').recentPromptTemplates).toEqual([])
   })
 
   it('clamps the sidebar active window to 1-30 whole days', () => {

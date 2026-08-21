@@ -2,12 +2,12 @@
 
 ## 第一次安裝
 
-1. 執行 `Grok-Build-Control-Center-Setup-0.3.2.exe`。
+1. 執行 `Grok-Build-Control-Center-Setup-0.14.1.exe`。
 2. 從開始選單開啟 **Grok Build Control Center**。
 3. 如果畫面顯示找不到 CLI，按 **安裝 Grok CLI**。
 4. 確認畫面顯示的官方來源是 `https://x.ai/cli/install.ps1`，再按 **確認安裝 Grok CLI**。
 5. 安裝成功後按 **開啟瀏覽器並重新登入**，在 x.ai 頁面完成登入。
-6. 回到程式，按 **選擇專案開始**，挑選想讓 Grok 協助的資料夾。
+6. 回到程式，按 **選資料夾開始**，挑選想讓 Grok 協助的資料夾。
 
 不需要自行安裝 Node.js，也不需要學 PowerShell。Windows Terminal 只在使用進階 TUI 功能時才需要，不影響 GUI 的聊天、改檔與測試功能。
 

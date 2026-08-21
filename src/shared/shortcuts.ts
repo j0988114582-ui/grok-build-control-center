@@ -13,6 +13,30 @@ export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
   { command: 'newline', accelerator: 'Shift+Enter', scope: 'composer' }
 ]
 
+/** Visible settings labels; command ids stay English for persistence. */
+export const SHORTCUT_COMMAND_LABELS: Record<string, string> = {
+  searchTranscript: '搜尋目前對話',
+  commandPalette: '開啟命令面板',
+  newSession: '建立新對話',
+  searchSessions: '搜尋本機對話',
+  toggleSidebar: '切換側欄',
+  togglePreview: '開關預覽',
+  cancelTurn: '取消執行',
+  jumpToLatest: '跳到最新訊息',
+  sendPrompt: '傳送訊息',
+  newline: '換行'
+}
+
+export const SHORTCUT_SCOPE_LABELS: Record<ShortcutBinding['scope'], string> = {
+  global: '全域',
+  composer: '輸入框',
+  transcript: '對話'
+}
+
+export function shortcutCommandLabel(command: string): string {
+  return SHORTCUT_COMMAND_LABELS[command] ?? command
+}
+
 const order = ['Ctrl', 'Alt', 'Shift', 'Meta']
 export function normalizeAccelerator(value: string): string {
   const parts = value.split('+').map((part) => part.trim()).filter(Boolean)

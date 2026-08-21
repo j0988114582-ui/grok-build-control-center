@@ -27,7 +27,7 @@ describe('ModelPicker', () => {
     await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
 
     expect(screen.getByText('Previous frontier model')).toBeInTheDocument()
-    expect(screen.getByText('500k context')).toBeInTheDocument()
+    expect(screen.getByText('500k 上下文')).toBeInTheDocument()
     expect(onModelChange).toHaveBeenCalledWith('grok-4.5')
   })
 
@@ -43,9 +43,27 @@ describe('ModelPicker', () => {
     }
     render(<ModelPicker models={effortModels} onModelChange={vi.fn()} onEffortChange={onEffortChange} />)
 
-    await user.click(screen.getByRole('radio', { name: 'Low' }))
+    await user.click(screen.getByRole('radio', { name: '快速' }))
 
     expect(screen.getByRole('radiogroup', { name: '推理強度' })).toBeInTheDocument()
     expect(onEffortChange).toHaveBeenCalledWith('low')
+  })
+
+  it('localizes high/medium/low effort and leaves unknown values as-is', () => {
+    const effortModels: ModelState = {
+      ...models,
+      availableModels: [{ ...models.availableModels[0], reasoningEfforts: [
+        { id: 'low', value: 'low', label: 'Low' },
+        { id: 'medium', value: 'medium', label: 'Medium' },
+        { id: 'high', value: 'high', label: 'High', default: true },
+        { id: 'xhigh', value: 'xhigh', label: 'Extra High' }
+      ] }]
+    }
+    render(<ModelPicker models={effortModels} onModelChange={vi.fn()} onEffortChange={vi.fn()} />)
+
+    expect(screen.getByRole('radio', { name: '快速' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '一般' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '深想' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Extra High' })).toBeInTheDocument()
   })
 })

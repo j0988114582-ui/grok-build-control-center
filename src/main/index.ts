@@ -42,7 +42,7 @@ import {
   PreviewMediaAllowlist,
   registerGrokPreviewSchemePrivileged
 } from './preview-protocol'
-import { PreviewRootTracker, previewReadText, previewRegister } from './preview-service'
+import { allowPreviewFolder, PreviewRootTracker, previewReadText, previewRegister } from './preview-service'
 import { isAbsoluteLocalPath, rejectUnsafePreviewPath } from '../shared/preview-path-policy'
 
 // P-SEC-6: privileged scheme must be registered before app.whenReady().
@@ -116,7 +116,11 @@ const previewAllowlist = new PreviewMediaAllowlist()
 
 const remoteController = new RemoteController({
   getPermissionMode: () => agentPermissionMode,
-  listSessions: () => listLocalSessions(grokHome()),
+  listSessions: async () => {
+    const sessions = await listLocalSessions(grokHome())
+    previewRoots.registerListedSessionCwds(sessions)
+    return sessions
+  },
   isSessionReady: (sessionId) => sessionReadyGate.isReady(sessionId),
   // Phone deps share the same lifecycle pool as desktop IPC so an exclusive op
   // (install / account switch) blocks both surfaces symmetrically.
@@ -386,7 +390,11 @@ function registerIpc(): void {
     return capabilities
   }))
   ipcMain.handle('grok:connect', async () => lifecycleOperation.runShared('Grok 連線', async () => (await connectAcp()).start()))
-  ipcMain.handle('grok:sessions', () => listLocalSessions(grokHome()))
+  ipcMain.handle('grok:sessions', async () => {
+    const sessions = await listLocalSessions(grokHome())
+    previewRoots.registerListedSessionCwds(sessions)
+    return sessions
+  })
   ipcMain.handle('grok:usage', (_event, sessionId: string) => {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) return null
     return readSessionUsage(grokHome(), sessionId)
@@ -406,6 +414,7 @@ function registerIpc(): void {
       // Deleted on disk — the ready gate and remote focus/tail must not keep a ghost.
       sessionReadyGate.clear(sessionId)
       remoteController.onSessionDeleted(sessionId)
+      previewRoots.removeSession(sessionId)
       return true
     })
   })
@@ -592,6 +601,7 @@ function registerIpc(): void {
   }
   ipcMain.handle('preview:register', (_event, filePath: unknown) => previewRegister(filePath, previewRoots, previewAllowlist, previewLimits()))
   ipcMain.handle('preview:read-text', (_event, filePath: unknown) => previewReadText(filePath, previewRoots, previewLimits()))
+  ipcMain.handle('preview:allow-folder', (_event, filePath: unknown) => allowPreviewFolder(filePath, previewRoots))
   ipcMain.handle('preview:choose-file', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openFile'],

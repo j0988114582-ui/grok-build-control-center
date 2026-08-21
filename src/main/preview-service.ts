@@ -18,6 +18,7 @@ import {
   PREVIEW_CODE_READ_MAX_BYTES,
   PREVIEW_DEFAULT_MAX_IMAGE_MB,
   PREVIEW_DEFAULT_MAX_VIDEO_MB,
+  type PreviewAllowFolderResult,
   type PreviewKind,
   type PreviewReadTextResult,
   type PreviewRegisterResult,
@@ -46,6 +47,13 @@ export class PreviewRootTracker {
     // Also allow sibling access within the same parent (dialog folder scope).
     const parent = path.dirname(filePath)
     if (parent && parent !== filePath) this.dialogPaths.add(normalizePreviewPathKey(parent))
+  }
+
+  /** Register every listed session cwd so sidebar projects are previewable without load. */
+  registerListedSessionCwds(sessions: readonly { id: string; cwd: string }[]): void {
+    for (const session of sessions) {
+      this.setSessionCwd(session.id, session.cwd)
+    }
   }
 
   pasteRoot(): string {
@@ -88,6 +96,23 @@ function maxBytesFor(
   if (kind === 'image') return Math.max(1, limits.maxImageMb ?? PREVIEW_DEFAULT_MAX_IMAGE_MB) * 1024 * 1024
   if (kind === 'video') return Math.max(1, limits.maxVideoMb ?? PREVIEW_DEFAULT_MAX_VIDEO_MB) * 1024 * 1024
   return PREVIEW_CODE_READ_MAX_BYTES
+}
+
+/**
+ * User-explicit "allow this folder": register the file and its parent via addDialogPath.
+ * Still rejects UNC / device / `..` / ADS — those never become roots.
+ */
+export function allowPreviewFolder(
+  filePath: unknown,
+  roots: PreviewRootTracker
+): PreviewAllowFolderResult {
+  const unsafe = rejectUnsafePreviewPath(filePath)
+  if (unsafe) return { ok: false, reason: unsafe }
+  const raw = String(filePath).trim()
+  const parent = path.dirname(raw)
+  if (!parent || parent === raw) return { ok: false, reason: '無法允許這個資料夾' }
+  roots.addDialogPath(raw)
+  return { ok: true, root: parent }
 }
 
 export async function previewStat(

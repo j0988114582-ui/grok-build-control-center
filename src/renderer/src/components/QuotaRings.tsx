@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import {
   formatBillingReset,
   productUsagePercent,
@@ -40,6 +40,7 @@ function ReactorRing({ label, percent, missingTitle }: { label: string; percent?
 }
 
 export function QuotaRings({ billing, unavailable = false, now }: QuotaRingsProps): React.JSX.Element | null {
+  const [open, setOpen] = useState(false)
   if (!billing) return unavailable ? <div className="quota-unavailable">額度資料暫不可用</div> : null
   const usageFor = (product: string): number | undefined => productUsagePercent(billing, product)
   const fixedProducts = [
@@ -54,15 +55,37 @@ export function QuotaRings({ billing, unavailable = false, now }: QuotaRingsProp
   const periodStart = billing.billingPeriodStart ?? billing.currentPeriod?.start
   const periodEnd = billing.billingPeriodEnd ?? billing.currentPeriod?.end
   const showUnifiedNotice = shouldShowUnifiedBillingNotice(billing)
+  const toggleOpen = (): void => setOpen((current) => !current)
 
-  return <div className="quota-reactor" data-testid="quota-reactor" data-billing-zone="subscription" tabIndex={0}>
+  return <div
+    className="quota-reactor"
+    data-testid="quota-reactor"
+    data-billing-zone="subscription"
+    data-open={open ? 'true' : undefined}
+    role="button"
+    tabIndex={0}
+    aria-expanded={open}
+    aria-controls="quota-popover"
+    aria-label="訂閱週額度說明"
+    onClick={toggleOpen}
+    onKeyDown={(event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        toggleOpen()
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setOpen(false)
+      }
+    }}
+  >
     <div className="quota-reactor-main" data-testid="quota-summary" aria-label="訂閱週額度摘要">
       <ReactorRing label="總額度" percent={billing.creditUsagePercent} />
       {visibleProducts.map((item) => <ReactorRing key={item.product} label={item.label} percent={item.percent} />)}
       <time>{formatBillingReset(periodEnd, now)}</time>
     </div>
-    <section className="quota-popover" aria-label="週額度明細">
-      <header><strong>訂閱週額度</strong><span>WEEKLY</span></header>
+    <section id="quota-popover" className="quota-popover" aria-label="週額度明細" onClick={(event) => event.stopPropagation()}>
+      <header><strong>訂閱週額度</strong><span>每週</span></header>
       {showUnifiedNotice && <p className="quota-unified-notice" data-testid="unified-billing-notice">{UNIFIED_BILLING_NOTICE}</p>}
       {visibleProducts.length > 0 && <div className="quota-products">{visibleProducts.map((fixed) => (
         <div key={fixed.product}>

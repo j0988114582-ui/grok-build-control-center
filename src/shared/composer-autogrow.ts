@@ -1,10 +1,13 @@
 /** P-COMP: auto-grow caps for main and Team composers. */
 
 export const MAIN_COMPOSER_MIN_PX = 88
+/** Default composer box: about 3 rows. Long drafts scroll inside instead of covering the transcript. */
+export const MAIN_COMPOSER_DEFAULT_PX = 88
+/** One-line height when the user collapses the composer to read the conversation. */
+export const MAIN_COMPOSER_COLLAPSED_PX = 44
 /**
- * Fallback ceiling used only when the live transcript height is unknown. The real cap is
- * `availableComposerMaxPx`, which lets the composer grow until the transcript hits its
- * floor — i.e. a long draft may cover the whole conversation, by design.
+ * Fallback ceiling used only when live geometry is unknown. The main composer itself
+ * stays at `MAIN_COMPOSER_DEFAULT_PX` (~3 rows) and scrolls internally.
  */
 export const MAIN_COMPOSER_MAX_VH = 0.9
 export const TEAM_COMPOSER_MIN_PX = 52
@@ -17,12 +20,7 @@ export function mainComposerMaxPx(viewportHeight: number): number {
   return Math.max(MAIN_COMPOSER_MIN_PX, Math.floor(viewportHeight * MAIN_COMPOSER_MAX_VH))
 }
 
-/**
- * The composer may grow into the transcript's space until the transcript hits
- * `TRANSCRIPT_MIN_PX`. Derived from live geometry rather than a viewport ratio because the
- * chrome above the transcript (session header, status row, template chips, path chips)
- * changes height as those elements come and go.
- */
+/** Safety helper: never let a live cap eat the transcript below `TRANSCRIPT_MIN_PX`. */
 export function availableComposerMaxPx(composerHeight: number, transcriptHeight: number): number {
   if (!Number.isFinite(composerHeight) || !Number.isFinite(transcriptHeight)) return MAIN_COMPOSER_MIN_PX
   return Math.max(MAIN_COMPOSER_MIN_PX, Math.floor(composerHeight + transcriptHeight - TRANSCRIPT_MIN_PX))
@@ -51,34 +49,28 @@ export function fitTextareaHeight(
 }
 
 /**
- * Fit the whole main `.composer` box (textarea + command rail) up to 50vh.
- * Measures textarea content then expands the container.
+ * Fit the main `.composer` box to a fixed ~3-row cap (or the collapsed one-line cap).
+ * Long drafts scroll inside the textarea instead of stealing transcript space.
  */
 export function fitMainComposer(
   composer: HTMLElement,
   textarea: HTMLTextAreaElement,
   viewportHeight: number,
-  /** Live cap from `availableComposerMaxPx`; falls back to the viewport ratio when absent. */
+  /** Explicit cap (default ~3 rows, or collapsed height). */
   maxPxOverride?: number
 ): number {
+  const fallback = Math.min(MAIN_COMPOSER_DEFAULT_PX, mainComposerMaxPx(viewportHeight))
   const maxPx = maxPxOverride !== undefined && Number.isFinite(maxPxOverride)
-    ? Math.max(MAIN_COMPOSER_MIN_PX, Math.floor(maxPxOverride))
-    : mainComposerMaxPx(viewportHeight)
-  const minPx = MAIN_COMPOSER_MIN_PX
+    ? Math.max(MAIN_COMPOSER_COLLAPSED_PX, Math.floor(maxPxOverride))
+    : fallback
+  const next = Math.min(MAIN_COMPOSER_DEFAULT_PX, maxPx)
   textarea.style.height = '0px'
   const textContent = textarea.scrollHeight
-  const rail = composer.querySelector('.composer-actions, .send-button') as HTMLElement | null
-  const railH = rail ? rail.getBoundingClientRect().height : 0
-  // padding inside composer (~top/bottom of textarea area)
-  const chrome = 8
-  const desired = Math.max(minPx, textContent + Math.max(0, railH - 36) + chrome)
-  const next = Math.min(maxPx, desired)
   composer.style.height = `${next}px`
-  composer.style.maxHeight = `${maxPx}px`
-  // textarea fills remaining space inside the grid row
-  const innerMax = Math.max(40, next - 8)
+  composer.style.maxHeight = `${next}px`
+  const innerMax = Math.max(32, next - 8)
   textarea.style.height = '100%'
   textarea.style.maxHeight = `${innerMax}px`
-  textarea.style.overflowY = desired > maxPx ? 'auto' : 'hidden'
+  textarea.style.overflowY = textContent > innerMax ? 'auto' : 'hidden'
   return next
 }

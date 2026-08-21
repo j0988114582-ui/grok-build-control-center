@@ -2,7 +2,18 @@ import React, { useEffect, useId, useRef, useState } from 'react'
 import { Check, ChevronDown, Orbit } from 'lucide-react'
 import type { ModelState } from '../../../shared/types'
 
-const formatContext = (value?: number): string => value === undefined ? 'Context 未提供' : `${Math.round(value / 1000)}k context`
+const formatContext = (value?: number): string => value === undefined ? '上下文未提供' : `${Math.round(value / 1000)}k 上下文`
+
+const EFFORT_ZH: Record<string, string> = {
+  high: '深想',
+  medium: '一般',
+  low: '快速'
+}
+
+/** high／medium／low → 深想／一般／快速；未知值維持原標籤。 */
+export function localizeEffortLabel(value: string, fallback?: string): string {
+  return EFFORT_ZH[value.trim().toLowerCase()] ?? (fallback && fallback.trim() ? fallback : value)
+}
 
 export function ModelPicker({ models, onModelChange, onEffortChange }: {
   models: ModelState
@@ -63,7 +74,7 @@ export function ModelPicker({ models, onModelChange, onEffortChange }: {
   return <div className="model-picker" ref={rootRef}>
     <button className="model-trigger" aria-label={`模型：${activeModel?.name ?? '未選擇'}`} aria-haspopup="listbox" aria-expanded={open && !empty} aria-controls={listboxId} disabled={empty} onClick={() => { if (!empty) setOpen((value) => !value) }} onKeyDown={keyDown}>
       <Orbit />
-      <span><strong>{activeModel?.name ?? '選擇模型'}</strong><small>{activeModel?.description ?? 'No description'}</small><em>{formatContext(activeModel?.totalContextTokens)}</em></span>
+      <span><strong>{activeModel?.name ?? '選擇模型'}</strong><small>{activeModel?.description ?? '沒有說明'}</small><em>{formatContext(activeModel?.totalContextTokens)}</em></span>
       <ChevronDown />
     </button>
     {open && !empty && <div className="model-listbox" id={listboxId} role="listbox" aria-label="可用模型" aria-activedescendant={`${listboxId}-${highlighted}`}>
@@ -77,13 +88,13 @@ export function ModelPicker({ models, onModelChange, onEffortChange }: {
         onClick={() => selectModel(index)}
       >
         <span className="model-orbit"><i />{model.modelId === selectedId && <Check />}</span>
-        <span><strong>{model.name}</strong><small>{model.description ?? 'No description'}</small><em>{formatContext(model.totalContextTokens)}</em></span>
+        <span><strong>{model.name}</strong><small>{model.description ?? '沒有說明'}</small><em>{formatContext(model.totalContextTokens)}</em></span>
       </button>)}
     </div>}
     {activeModel?.reasoningEfforts.length ? <div className="effort-picker" role="radiogroup" aria-label="推理強度">
       {activeModel.reasoningEfforts.map((effort) => {
         const checked = effort.value === (activeModel.currentReasoningEffort ?? activeModel.reasoningEfforts.find((item) => item.default)?.value)
-        return <button key={effort.id} role="radio" aria-checked={checked} className={checked ? 'active' : ''} title={effort.description} onClick={() => onEffortChange(effort.value)}>{effort.label}</button>
+        return <button key={effort.id} role="radio" aria-checked={checked} className={checked ? 'active' : ''} title={effort.description ?? effort.value} onClick={() => onEffortChange(effort.value)}>{localizeEffortLabel(effort.value, effort.label)}</button>
       })}
     </div> : null}
   </div>

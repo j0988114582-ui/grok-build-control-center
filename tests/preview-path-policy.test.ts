@@ -26,6 +26,12 @@ describe('preview-path-policy', () => {
     expect(rejectUnsafePreviewPath('//server/share/photo.png')).toMatch(/UNC/)
   })
 
+  it('still rejects traversal, UNC, and ADS after preview-root relaxation', () => {
+    expect(rejectUnsafePreviewPath('C:\\projA\\..\\projB\\shot.png')).toMatch(/上層目錄/)
+    expect(rejectUnsafePreviewPath('\\\\nas\\media\\shot.png')).toMatch(/UNC/)
+    expect(rejectUnsafePreviewPath('C:\\projA\\shot.png:hidden')).toMatch(/替代資料流/)
+  })
+
   it('rejects device paths', () => {
     expect(rejectUnsafePreviewPath('\\\\.\\C:\\foo.png')).toMatch(/裝置/)
     expect(rejectUnsafePreviewPath('//./C:/foo.png')).toMatch(/裝置/)

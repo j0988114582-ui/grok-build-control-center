@@ -4,7 +4,9 @@ import {
   discoverFilePaths,
   discoverMarkdownImages,
   discoverPreviewCandidates,
-  isMediaPreviewItem
+  isMediaPreviewItem,
+  rememberPreviewRecent,
+  splitTextWithLocalPaths
 } from '../src/shared/preview-discover'
 
 describe('preview-discover', () => {
@@ -73,6 +75,30 @@ describe('preview-discover', () => {
     const paths = Array.from({ length: 60 }, (_, i) => `C:\\Users\\demo\\project\\f${i}.png`).join('\n')
     const items = discoverPreviewCandidates(paths, { sessionId, cwd, nowMs: 5, maxItems: 50 })
     expect(items.length).toBe(50)
+  })
+
+  it('splits absolute local paths into chips and ignores UNC/ADS/..', () => {
+    const parts = splitTextWithLocalPaths('Wrote C:\\Users\\demo\\project\\out\\diagram.png then done')
+    expect(parts.some((part) => part.type === 'path' && part.value.endsWith('diagram.png'))).toBe(true)
+    expect(splitTextWithLocalPaths('see \\\\server\\share\\photo.png now').every((part) => part.type === 'text')).toBe(true)
+    expect(splitTextWithLocalPaths('bad C:\\repo\\..\\secrets\\file.png').every((part) => part.type === 'text')).toBe(true)
+    expect(splitTextWithLocalPaths('ads C:\\repo\\file.png:Zone.Identifier').every((part) => part.type === 'text')).toBe(true)
+  })
+
+  it('remembers 10 recent previews per session without a parallel store', () => {
+    let recent: Record<string, import('../src/shared/preview-types').PreviewRecentEntry[]> = {}
+    for (let i = 0; i < 12; i += 1) {
+      recent = rememberPreviewRecent(recent, sessionId, {
+        id: `file:c:\\users\\demo\\project\\f${i}.png`,
+        kind: 'image',
+        source: { type: 'file', path: `C:\\Users\\demo\\project\\f${i}.png` },
+        label: `f${i}.png`,
+        discoveredAt: i,
+        sessionId
+      })
+    }
+    expect(recent[sessionId]).toHaveLength(10)
+    expect(recent[sessionId]?.[0]?.label).toBe('f11.png')
   })
 
   it('marks media kinds for auto-preview filter', () => {

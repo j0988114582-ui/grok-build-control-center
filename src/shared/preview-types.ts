@@ -48,6 +48,11 @@ export const PREVIEW_CODE_READ_MAX_BYTES = 400 * 1024
 export const PREVIEW_CODE_HIGHLIGHT_MAX_BYTES = 200 * 1024
 export const PREVIEW_MAX_ITEMS_PER_SESSION = 50
 export const PREVIEW_MAX_RECENT_SESSIONS = 20
+/** Newest previewed files kept per session (settings.preview.recentBySession). */
+export const PREVIEW_RECENT_PER_SESSION = 10
+export type PreviewAllowFolderResult =
+  | { ok: true; root: string }
+  | { ok: false; reason: string }
 export const PREVIEW_MIN_WIDTH = 260
 export const PREVIEW_MAX_WIDTH = 480
 export const PREVIEW_DEFAULT_WIDTH = 360

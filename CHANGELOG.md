@@ -8,6 +8,43 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 
 （尚無內容）
 
+## [0.14.1] - 2026-08-21
+
+> 未簽章社群測試版。安裝檔 `Grok-Build-Control-Center-Setup-0.14.1.exe`。Windows SmartScreen 可能警告；請用 Release 內 `SHA256SUMS.txt` 核對。這**不是**已簽章的正式發行。
+
+### Added
+
+- **工具權限改成兩顆鈕**：頂欄「先問我／全部自動過」，附一行說明；「全部自動過」仍走 YOLO 確認盒。控制項標成不可拖視窗（`-webkit-app-region: no-drag`）。
+- **側欄排序與整理**：最近更新／最近開啟／名稱／執行中優先；可關掉「依資料夾分組」改成時間軸；全部／本專案／釘選／活躍晶片；多選與建議清理收進「整理」；對話列動作改「⋯」選單。
+- **預覽允許資料夾**：側欄已列出的專案 cwd 會登記為預覽根。路徑在工作區外時可按「允許這個資料夾並重試」（仍拒絕 UNC、`..`、ADS、裝置路徑）。對話裡的本機絕對路徑可點進預覽。
+- **最近專案**：記住最後三個資料夾，歡迎頁可一鍵再開（仍要有專案資料夾，沒有「先不選專案」）。
+
+### Changed
+
+- 歡迎頁／側欄／步驟一律「選資料夾開始」。搜尋框「搜尋對話」。
+- 可見英文改中文：銀河座艙、已連線／連線、以上是目前載入的內容、深想／一般／快速；設定快捷鍵顯示中文名稱；命令面板分「畫面動作／斜線指令」。
+- composer 狀態與能不能送出同一條件：未就緒顯示「尚未連上」，不再綠點「就緒」卻鎖住輸入框。
+- Context 無資料時寫「尚未載入」。窄窗標題列工具收入「⋯」，避免蓋住第一則訊息。
+- 權限確認盒不再露出 `allow_once` 這類內部代號。
+- CLI 已找到且未連線時，啟動後背景連線；失敗只通知，不擋畫面。
+
+### Fixed
+
+- 頂欄權限下拉位在拖曳區、選同一個項目沒反應，導致「每次詢問」像點不了。
+- 收合側欄展開鈕重複、浮鈕壓到書籤。
+- 預覽標題 PREVIEW DOCK 折行、掃描與重整圖示分不清。
+
+### 已知限制
+
+- 預覽仍只允許已登記的專案根、使用者明確允許的資料夾、貼圖暫存。Grok 把檔寫到這些根以外時，需按一次「允許這個資料夾」。
+- 安裝檔未簽章。
+
+### 驗證
+
+- 單元測試 579／579、lint 0 warning、typecheck、production build。
+- 真 Electron 稽核（`work/ux_wave_verify.mjs`）9／9；打包後 `win-unpacked` 抽查 8／8。
+- 獨立程式審查 Approved（無 Critical／Important）。未做真人滑鼠拖視窗、未花額度跑完整產圖對話。
+
 ## [0.14.0] - 2026-08-17
 
 > 以下內容已打包為 **0.14.0 測試安裝檔**（`outputs/installer/Grok-Build-Control-Center-Setup-0.14.0.exe`）供實機試用。
@@ -371,7 +408,8 @@ The format follows Keep a Changelog principles and the project uses semantic ver
 - Initial public Windows desktop GUI for Grok Build CLI.
 - ACP-native sessions, streaming messages, tool cards, permission confirmation, modes, models, local session indexing, Electron packaging, automated tests, and UI smoke coverage.
 
-[Unreleased]: https://github.com/j0988114582-ui/grok-build-control-center/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/j0988114582-ui/grok-build-control-center/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.14.1
 [0.14.0]: https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.14.0
 [0.4.0]: https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.4.0
 [0.3.2]: https://github.com/j0988114582-ui/grok-build-control-center/releases/tag/v0.3.2

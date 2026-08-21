@@ -137,7 +137,7 @@ export function RemoteControlPanel(props: RemoteControlPanelProps): ReactElement
   }
 
   return (
-    <div className="settings-section remote-panel" data-testid="remote-panel" style={{ borderTop: '1px dashed var(--line)', paddingTop: '15px', marginTop: '16px' }}>
+    <div id="remote-control-section" className="settings-section remote-panel" data-testid="remote-panel" style={{ borderTop: '1px dashed var(--line)', paddingTop: '15px', marginTop: '16px' }}>
       <div className="section-title">
         <h3>手機 QR 遙控</h3>
         <small>單人高風險 · 72h 絕對期限 · 手機須 Quick Tunnel</small>

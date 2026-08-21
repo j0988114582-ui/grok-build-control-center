@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   availableComposerMaxPx,
+  MAIN_COMPOSER_COLLAPSED_PX,
+  MAIN_COMPOSER_DEFAULT_PX,
   MAIN_COMPOSER_MIN_PX,
   mainComposerMaxPx,
   teamComposerMaxPx,
@@ -15,9 +17,14 @@ describe('composer autogrow caps (P-COMP)', () => {
     expect(mainComposerMaxPx(50)).toBe(MAIN_COMPOSER_MIN_PX)
   })
 
-  // v0.11: the real cap is live geometry — a long draft may cover the conversation, but
-  // the transcript never drops below its floor.
-  it('live max lets the composer take all transcript space above TRANSCRIPT_MIN_PX', () => {
+  it('default composer height is about 3 rows and collapsed is one line', () => {
+    expect(MAIN_COMPOSER_DEFAULT_PX).toBe(88)
+    expect(MAIN_COMPOSER_COLLAPSED_PX).toBeLessThan(MAIN_COMPOSER_DEFAULT_PX)
+    expect(MAIN_COMPOSER_COLLAPSED_PX).toBeGreaterThanOrEqual(40)
+  })
+
+  // Safety helper: never let a live cap drop the transcript below its floor.
+  it('live max never drops the transcript below TRANSCRIPT_MIN_PX', () => {
     expect(availableComposerMaxPx(88, 619)).toBe(88 + 619 - TRANSCRIPT_MIN_PX)
     expect(availableComposerMaxPx(470, 330)).toBe(470 + 330 - TRANSCRIPT_MIN_PX)
   })

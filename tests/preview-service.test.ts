@@ -1,11 +1,14 @@
 import { mkdir, writeFile, rm } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PreviewMediaAllowlist } from '../src/main/preview-protocol'
-import { PreviewRootTracker, previewRegister, previewStat } from '../src/main/preview-service'
+import { allowPreviewFolder, PreviewRootTracker, previewRegister, previewStat } from '../src/main/preview-service'
 
 const work = path.join(tmpdir(), `grok-preview-test-${Date.now()}`)
+const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...Buffer.alloc(20)])
 
 afterEach(async () => {
   await rm(work, { recursive: true, force: true })
@@ -66,8 +69,7 @@ describe('preview-service roots + register', () => {
     const dir = path.join(work, 'picked')
     await mkdir(dir, { recursive: true })
     const file = path.join(dir, 'shot.png')
-    // minimal PNG header
-    await writeFile(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...Buffer.alloc(20)]))
+    await writeFile(file, pngBytes)
     roots.addDialogPath(file)
     const allow = new PreviewMediaAllowlist()
     const reg = await previewRegister(file, roots, allow)
@@ -76,5 +78,71 @@ describe('preview-service roots + register', () => {
       expect(reg.kind).toBe('image')
       expect(reg.loadVia === 'base64' || reg.loadVia === 'protocol').toBe(true)
     }
+  })
+
+  it('listed session cwds (sidebar projects A and B) are both previewable', async () => {
+    const roots = new PreviewRootTracker()
+    const projA = path.join(work, 'proj-a')
+    const projB = path.join(work, 'proj-b')
+    await mkdir(projA, { recursive: true })
+    await mkdir(projB, { recursive: true })
+    const pngA = path.join(projA, 'a.png')
+    const pngB = path.join(projB, 'b.png')
+    await writeFile(pngA, pngBytes)
+    await writeFile(pngB, pngBytes)
+    roots.registerListedSessionCwds([
+      { id: 'session-a', cwd: projA },
+      { id: 'session-b', cwd: projB }
+    ])
+    const allow = new PreviewMediaAllowlist()
+    const regA = await previewRegister(pngA, roots, allow)
+    const regB = await previewRegister(pngB, roots, allow)
+    expect(regA.ok).toBe(true)
+    expect(regB.ok).toBe(true)
+  })
+
+  it('allowPreviewFolder adds parent dir then register succeeds; UNC/.. stay rejected', async () => {
+    const roots = new PreviewRootTracker()
+    const listed = path.join(work, 'listed')
+    const unlisted = path.join(work, 'unlisted')
+    await mkdir(listed, { recursive: true })
+    await mkdir(unlisted, { recursive: true })
+    const file = path.join(unlisted, 'shot.png')
+    const sibling = path.join(unlisted, 'other.png')
+    const elsewhere = path.join(work, 'elsewhere', 'nope.png')
+    await mkdir(path.join(work, 'elsewhere'), { recursive: true })
+    await writeFile(file, pngBytes)
+    await writeFile(sibling, pngBytes)
+    await writeFile(elsewhere, pngBytes)
+    roots.setSessionCwd('s1', listed)
+    const allow = new PreviewMediaAllowlist()
+    const first = await previewRegister(file, roots, allow)
+    expect(first.ok).toBe(false)
+    if (!first.ok) expect(first.revealOnly).toBe(true)
+
+    expect(allowPreviewFolder('\\\\server\\share\\a.png', roots).ok).toBe(false)
+    expect(allowPreviewFolder('C:\\repo\\..\\secrets\\file.png', roots).ok).toBe(false)
+    expect(allowPreviewFolder('C:\\repo\\file.png:Zone.Identifier', roots).ok).toBe(false)
+
+    const allowed = allowPreviewFolder(file, roots)
+    expect(allowed.ok).toBe(true)
+    const retry = await previewRegister(file, roots, allow)
+    expect(retry.ok).toBe(true)
+    const sib = await previewRegister(sibling, roots, allow)
+    expect(sib.ok).toBe(true)
+    const blocked = await previewRegister(elsewhere, roots, allow)
+    expect(blocked.ok).toBe(false)
+  })
+
+  it('main listSessions registers each listed session cwd', () => {
+    const indexSrc = readFileSync(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/main/index.ts'),
+      'utf8'
+    )
+    const start = indexSrc.indexOf("ipcMain.handle('grok:sessions'")
+    expect(start).toBeGreaterThan(0)
+    const body = indexSrc.slice(start, start + 400)
+    expect(body).toContain('registerListedSessionCwds')
+    expect(indexSrc).toContain("ipcMain.handle('preview:allow-folder'")
   })
 })

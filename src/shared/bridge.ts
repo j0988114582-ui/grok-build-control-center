@@ -1,7 +1,7 @@
 import type {
   AgentCapabilities, AgentPermissionMode, AppSettings, BillingInfo, CliStatus, ModelState, PermissionRequest, PromptBlock, SessionSummary, SessionUsage, UiSessionEvent
 } from './types'
-import type { PreviewReadTextResult, PreviewRegisterResult } from './preview-types'
+import type { PreviewAllowFolderResult, PreviewReadTextResult, PreviewRegisterResult } from './preview-types'
 import type { PlanApprovalDecision, PlanApprovalRequest } from './plan-approval'
 import type { RunningSubagent } from './subagent-roster'
 
@@ -75,6 +75,8 @@ export interface GrokBridgeApi {
   previewRegister(filePath: string): Promise<PreviewRegisterResult>
   /** Preview Dock: read code/HTML text (utf-8, size-capped). */
   previewReadText(filePath: string): Promise<PreviewReadTextResult>
+  /** Preview Dock: allow the parent folder of a revealOnly path, then caller retries register. */
+  previewAllowFolder(filePath: string): Promise<PreviewAllowFolderResult>
   /** Preview Dock: open-file dialog; selected file is auto-registered as root. */
   previewChooseFile(): Promise<string | null>
   /** Reveal any absolute path in the OS file manager (best-effort; not export-gated). */
